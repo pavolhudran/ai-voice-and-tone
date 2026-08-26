@@ -58,3 +58,48 @@ test('generated knowledge bases are told to carry attribution', () => {
   assert.match(body, /Mailchimp/)
   assert.match(body, /verbatim/i, 'the skill must forbid carrying source prose into the KB')
 })
+
+test('the applier skill states the flow, the gates, and draft logging', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('skills', 'voice-and-tone', 'SKILL.md'))
+  assert.equal(frontmatter.name, 'voice-and-tone')
+  assert.match(body, /CONTEXT\.md/)
+  assert.match(body, /\.drafts\//, 'every draft must be logged for :learn')
+  assert.match(body, /humor/i)
+  assert.match(body, /interpolated/i)
+  assert.match(body, /Precedence/)
+  for (const ref of ['write-flow.md', 'interpolation.md', 'always-on-layers.md']) {
+    assert.ok(existsSync(surfaceFile('skills', 'voice-and-tone', 'references', ref)), `${ref} missing`)
+    assert.ok(body.includes(ref), `SKILL.md never points at ${ref}`)
+  }
+})
+
+test('the interpolation reference states both humor gates verbatim', () => {
+  const text = readFileSync(surfaceFile('skills', 'voice-and-tone', 'references', 'interpolation.md'), 'utf8')
+  assert.match(text, /authored/i)
+  for (const state of ['frustrated', 'anxious-at-risk', 'disappointed-leaving']) {
+    assert.ok(text.includes(state), `${state} must be named in the humor gate`)
+  }
+})
+
+test('the always-on layers cover accessibility and translation readiness', () => {
+  const text = readFileSync(surfaceFile('skills', 'voice-and-tone', 'references', 'always-on-layers.md'), 'utf8')
+  assert.match(text, /directional language/i)
+  assert.match(text, /alt text/i)
+  assert.match(text, /double negatives/i)
+  assert.match(text, /ISO currency/i)
+})
+
+test('write, rewrite, and localize commands all route to the applier', () => {
+  for (const name of ['write.md', 'rewrite.md', 'localize.md']) {
+    const { frontmatter, body } = readFrontmatter(surfaceFile('commands', name))
+    assert.ok(frontmatter.description.length > 10, `${name} needs a description`)
+    assert.match(body, /voice-and-tone/, `${name} must name the skill it invokes`)
+  }
+})
+
+test('the write command lists the fixed context and state vocabularies', () => {
+  const { body } = readFrontmatter(surfaceFile('commands', 'write.md'))
+  for (const token of ['system-error', 'product-ui', 'frustrated', 'confused', 'delighted']) {
+    assert.ok(body.includes(token), `write.md must list ${token}`)
+  }
+})
