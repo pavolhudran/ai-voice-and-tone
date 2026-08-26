@@ -30,6 +30,7 @@ function main (argv) {
       '',
       '  --root <dir>      project root (default: cwd)',
       '  --kb <dir>        knowledge base dir',
+      '  --out <file>      output path override',
       '  --profile <name>  config profile (default: default)',
       '  --source <kind>   measured | estimated (default: measured)',
       '  --set-baseline    freeze these numbers as the drift baseline',

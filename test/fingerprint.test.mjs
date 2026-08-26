@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { buildFingerprint, main } from '../scripts/fingerprint.mjs'
@@ -141,6 +141,7 @@ test('--source rejects an invalid value instead of writing a bogus fingerprint',
     assert.equal(exitCode, 1)
     assert.ok(stderrOutput.startsWith('error: '), 'ASCII, standard die() prefix')
     assert.ok(/^[\x00-\x7F]*$/.test(stderrOutput), 'stderr stays ASCII')
+    assert.equal(existsSync(outPath), false, 'a rejected --source must not leave a fingerprint behind')
   } finally {
     process.exit = originalExit
     process.stderr.write = originalErrorWrite
