@@ -42,8 +42,8 @@ only ever produce `assumed` rules, never `derived`.
 
 ## 1. Scan
 
-Copy the templates from `templates/kb/` into `<KB>/` first, so the scripts have a
-config to read. Rename `gitignore` to `.gitignore`.
+Copy the templates from `<plugin>/templates/kb/` into `<KB>/` first, so the
+scripts have a config to read. Rename `gitignore` to `.gitignore`.
 
 Then ask what shape the project is, or infer it:
 
@@ -123,9 +123,9 @@ the pair as evidence.
 ## 7. Locales
 
 For each locale beyond the primary, create `<KB>/locales/<code>.md` from
-`templates/kb/locales/_template.md`. Read `references/locale-seed.md`: fill the
-typography conventions mechanically - they are not brand opinions and need no
-question - and interview only for the brand decisions.
+`<plugin>/templates/kb/locales/_template.md`. Read `references/locale-seed.md`:
+fill the typography conventions mechanically - they are not brand opinions and
+need no question - and interview only for the brand decisions.
 
 ## 8. Canonize
 

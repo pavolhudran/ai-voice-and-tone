@@ -40,9 +40,13 @@ never the neutral `2` every other dial defaults to.
 **Gate 2 - three states force humor 0**, in authored cells too:
 `frustrated`, `anxious-at-risk`, `disappointed-leaving`.
 
-Both gates are implemented in `scripts/lib/kb.mjs` as pure functions, so they
-cannot be reasoned past. Do not reimplement them from memory - resolve the cell
-through the code path or reproduce it exactly.
+Both gates are implemented in `scripts/lib/kb.mjs` as pure functions
+(`interpolate`, `applyHumorGates`, `resolveCell`), so they cannot be reasoned
+past there. **No CLI script resolves a cell for you** - the plugin ships five,
+and they are scan, fingerprint, validate, compile-context, and diff. Cell
+resolution at write time is yours to do, so do it by reproducing the arithmetic
+and the two gates above exactly, in that order; read `scripts/lib/kb.mjs` if you
+need the tie-breaks, and never work from memory of a previous session.
 
 ## Promotion
 

@@ -79,7 +79,8 @@ voice-critic`) with only:
 - the draft as plain text pasted into the prompt - no frontmatter, no `cell:`,
   `context:`, or `state:` field, and no file path into `<KB>/.drafts/`, since
   that directory is exactly where the answer lives
-- the paths to `<KB>/CONTEXT.md`, `voice.md`, and `tone.md`
+- the paths to `<KB>/CONTEXT.md` and `<KB>/voice.md`, and nothing else from the
+  knowledge base - the tone matrix is turn 2's, for the reason below
 
 Its reply is nothing but the Task 1 guess. Stop there and read it before doing
 anything else.
@@ -88,14 +89,23 @@ anything else.
 call - a new call starts a new fresh-context conversation and loses the turn-1
 guess entirely, which defeats the point) and hand it:
 - the draft's actual cell
-- the paths to `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the relevant
-  `channels/` and `locales/` files
+- the paths to `<KB>/tone.md`, `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the
+  relevant `channels/` and `locales/` files
 
 It replies with the comparison, the findings, and the verdict.
 
 **Never combine these into one message.** A prompt that pastes the stripped
 draft and the actual cell together in the same turn is not a blind guess with
 extra steps - it is not blind at all, no matter what the reply claims.
+
+**Why the tone matrix waits for turn 2.** Turn 1 needs the ten contexts and the
+eight reader states, and the critic already carries both lists as fixed
+constants. What the matrix adds is every authored cell's `**Reader is
+feeling:**`, `**Do:**`, `**Don't:**` and `**Example:**` lines - and when the
+draft came from an authored cell, that `**Example:**` line is typically the
+closest text in the whole knowledge base to the draft. Handing the matrix over
+before the guess is recorded leaks the answer by a slower route than `.drafts/`
+does, and the only thing standing in the way is the critic choosing not to look.
 
 ## After the report
 

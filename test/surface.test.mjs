@@ -4,9 +4,33 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
+import { STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const surfaceFile = (...parts) => path.join(root, ...parts)
+
+/** Every markdown file the plugin ships as logic a model executes. */
+function shippedMarkdown (dir = null, out = []) {
+  if (dir === null) {
+    for (const top of ['skills', 'commands', 'agents']) shippedMarkdown(surfaceFile(top), out)
+    return out
+  }
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, entry.name)
+    if (entry.isDirectory()) shippedMarkdown(abs, out)
+    else if (entry.name.endsWith('.md')) out.push(abs)
+  }
+  return out
+}
+
+/** The slice of a document between two markers, for pinning a procedure step. */
+function between (text, startMarker, endMarker) {
+  const start = text.indexOf(startMarker)
+  assert.ok(start !== -1, `marker "${startMarker}" is missing`)
+  const end = text.indexOf(endMarker, start + startMarker.length)
+  assert.ok(end !== -1, `marker "${endMarker}" is missing after "${startMarker}"`)
+  return text.slice(start, end)
+}
 
 export function readFrontmatter (absPath) {
   const raw = readFileSync(absPath, 'utf8').replace(/\r\n?/g, '\n')
@@ -40,17 +64,61 @@ test('the init command names its skill and its argument shape', () => {
   assert.match(body, /--add/)
 })
 
-test('every script a skill or command invokes actually exists', () => {
-  const surfaces = [
-    surfaceFile('skills', 'voice-discovery', 'SKILL.md'),
-    surfaceFile('commands', 'init.md')
-  ]
+test('every script any shipped skill, command, or agent names actually exists', () => {
+  // Previously scoped to two files, which is how a reference to a script that
+  // was never built (D2) survived in a third. Every shipped markdown file gets
+  // checked now.
+  const surfaces = shippedMarkdown()
+  assert.ok(surfaces.length > 10, `expected the full markdown surface, walked ${surfaces.length} files`)
+  let checked = 0
   for (const file of surfaces) {
-    const body = readFileSync(file, 'utf8')
-    for (const match of body.matchAll(/scripts\/([\w-]+\.mjs)/g)) {
-      assert.ok(existsSync(surfaceFile('scripts', match[1])), `${file} names missing scripts/${match[1]}`)
+    for (const match of readFileSync(file, 'utf8').matchAll(/scripts\/((?:lib\/)?[\w-]+\.mjs)/g)) {
+      checked++
+      assert.ok(
+        existsSync(surfaceFile('scripts', ...match[1].split('/'))),
+        `${path.relative(root, file)} names missing scripts/${match[1]}`
+      )
     }
   }
+  assert.ok(checked > 0, 'no script reference was found at all - the regex stopped matching')
+})
+
+test('no shipped markdown points at templates/kb/ without the plugin prefix', () => {
+  // A bare templates/kb/ resolves against the user's project root, where it
+  // does not exist - and one of these is the literal first action of :init.
+  for (const file of shippedMarkdown()) {
+    const text = readFileSync(file, 'utf8')
+    for (const [index, line] of text.split('\n').entries()) {
+      for (const match of line.matchAll(/templates\/kb\//g)) {
+        const before = line.slice(0, match.index)
+        assert.ok(
+          before.endsWith('<plugin>/'),
+          `${path.relative(root, file)}:${index + 1} names templates/kb/ without the <plugin>/ prefix`
+        )
+      }
+    }
+  }
+})
+
+test('the applier and microcopy agree on which one takes a short UI string', () => {
+  // Both skill descriptions claim error messages and notifications. The routing
+  // used to live only in commands/write.md, so a natural-language trigger drove
+  // the applier straight past microcopy's element budgets.
+  const applier = readFileSync(surfaceFile('skills', 'voice-and-tone', 'SKILL.md'), 'utf8')
+  const micro = readFileSync(surfaceFile('skills', 'microcopy', 'SKILL.md'), 'utf8')
+
+  assert.match(applier, /`microcopy`/, 'the applier must name the skill it hands short work to')
+  assert.match(micro, /`?voice-and-tone`?/, 'microcopy must name the skill it hands long work to')
+
+  const threshold = /roughly (\d+) words/
+  const applierThreshold = threshold.exec(applier)
+  const microThreshold = threshold.exec(micro)
+  assert.ok(applierThreshold, 'the applier must state a numeric handoff threshold')
+  assert.ok(microThreshold, 'microcopy must state a numeric handoff threshold')
+  assert.equal(
+    applierThreshold[1], microThreshold[1],
+    'the two skills must name the same word count, or a piece falls between them'
+  )
 })
 
 test('generated knowledge bases are told to carry attribution', () => {
@@ -144,6 +212,39 @@ test('the review skill mechanizes the critic dispatch as two turns, not one prom
   assert.match(body, /Turn 2/)
   assert.match(body, /SendMessage/)
   assert.match(body, /never combine/i, 'the skill must forbid folding the reveal into the same prompt as the guess')
+})
+
+test('turn 1 of the critic dispatch never hands over tone.md', () => {
+  // tone.md carries every authored cell's Example: line, which for a draft
+  // written from an authored cell is the closest text in the KB to the draft -
+  // the read-back answer by a slower route than .drafts/.
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-review', 'SKILL.md'))
+  const turnOne = between(body, '**Turn 1**', '**Turn 2**')
+  assert.ok(turnOne.includes('CONTEXT.md'), 'turn 1 still hands over the compiled card')
+  assert.ok(turnOne.includes('voice.md'), 'turn 1 still hands over voice.md')
+  assert.ok(!turnOne.includes('tone.md'), 'turn 1 must not name tone.md at all')
+  assert.ok(
+    between(body, '**Turn 2**', '## After the report').includes('tone.md'),
+    'turn 2 is where tone.md is handed over'
+  )
+})
+
+test('the critic carries both fixed vocabularies itself, so turn 1 needs no tone.md', () => {
+  const { body } = readFrontmatter(surfaceFile('agents', 'voice-critic.md'))
+  for (const context of CONTEXTS) {
+    assert.ok(body.includes(context), `voice-critic.md must list the context ${context}`)
+  }
+  for (const state of STATES) {
+    assert.ok(body.includes(state), `voice-critic.md must list the state ${state}`)
+  }
+  const firstTurn = between(body, '**First turn:**', '**Second turn**')
+  assert.ok(firstTurn.includes('CONTEXT.md'), 'the first turn still gets the compiled card')
+  assert.ok(firstTurn.includes('voice.md'), 'the first turn still gets voice.md')
+  assert.ok(!firstTurn.includes('tone.md'), 'the first turn must not name tone.md at all')
+  assert.ok(
+    between(body, '**Second turn**', '## The ten contexts').includes('tone.md'),
+    'the second turn is where tone.md belongs'
+  )
 })
 
 test('microcopy declares itself and defers to the applier for long form', () => {

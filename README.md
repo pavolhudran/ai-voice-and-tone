@@ -7,6 +7,9 @@ or a bare folder of text with no code in it at all.
 Built on Mailchimp's Voice and Tone framework: **voice is constant, tone flexes
 with the reader's emotional state.**
 
+**[Read the illustrated overview](https://pavol.hudran.gitlab.io/ai-voice-and-tone/)** -
+what it does, how the tone model works, and how to start, on one page.
+
 ## The idea
 
 A voice guide the plugin can prove, not just recite.
@@ -26,10 +29,15 @@ otherwise separate:
 /plugin install voice-and-tone
 ```
 
-Requires **Node 18 or newer** for the measurement scripts. Without Node the plugin
-still works: the model estimates the same metrics and marks them `estimated`, and
-an estimated fingerprint may only ever produce `assumed` rules, never `derived`.
-Missing runtime degrades precision, never function.
+**Requires Node 18 or newer.** `/voice-and-tone:init`, `:learn`, `:audit`, and
+`:sync` run the measurement scripts directly and will not complete without it -
+`:init` calls `scan.mjs` at its first step. The writing and review commands -
+`:write`, `:rewrite`, `:localize`, `:review` - read the compiled knowledge base
+and need no runtime once it exists.
+
+A fingerprint the model estimated rather than measured is marked `estimated`,
+and an estimated fingerprint may only ever produce `assumed` rules, never
+`derived`.
 
 Zero npm dependencies. Nothing to install beyond the plugin itself.
 

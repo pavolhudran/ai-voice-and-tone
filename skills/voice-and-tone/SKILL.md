@@ -35,6 +35,21 @@ Do not block. Say so in one line, offer `/voice-and-tone:init` or the 3-question
 quick start, and draft using plugin defaults meanwhile. Label the output as
 drafted without a knowledge base.
 
+## When to hand off
+
+Anything **under roughly 50 words** that is a single UI element - a button or
+link label, an error message, an empty state, a notification or toast, a
+tooltip, a placeholder, a confirmation dialog, a validation message, a loading
+state - belongs to the `microcopy` skill. Say so and hand over before drafting.
+
+That skill carries the element budgets this one does not: a 140-character error
+cap, a 20-character button cap, and the rest of
+`skills/microcopy/references/patterns.md`. Drafting a UI string here means
+drafting it with no budget at all, which is the one thing microcopy exists to
+prevent. The threshold is the same one microcopy uses to hand work back.
+
+Anything over roughly 50 words, or with more than one paragraph, stays here.
+
 ## The flow
 
 Full detail in `references/write-flow.md`.
@@ -77,7 +92,7 @@ evidence entry. The matrix fills itself along the paths actually written.
 
 First write to a new channel produces the **tone cell only**. On the second write
 to the same channel, offer to generate the full playbook from
-`templates/kb/channels/_template.md`.
+`<plugin>/templates/kb/channels/_template.md`.
 
 ## Rewriting
 

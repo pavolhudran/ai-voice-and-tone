@@ -25,12 +25,28 @@ do not ask for it early, and do not try to infer it from what you do have.
 **First turn:**
 - The draft, pasted into the prompt as plain text - never a file path, and
   never anything from `<KB>/.drafts/`.
-- The paths to `<KB>/CONTEXT.md`, `voice.md`, and `tone.md`, to `Read`.
+- The paths to `<KB>/CONTEXT.md` and `<KB>/voice.md`, to `Read`.
+- The ten contexts and the eight reader states, listed below. They are fixed
+  constants of the plugin, so you need no knowledge-base file to learn them.
 
 **Second turn** (only after your Task 1 guess is already recorded):
 - The draft's actual cell - context, state, dials.
-- The paths to `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the relevant
-  `channels/` and `locales/` files, to `Read`.
+- The paths to `<KB>/tone.md`, `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the
+  relevant `channels/` and `locales/` files, to `Read`.
+
+## The ten contexts and eight states
+
+The read-back test needs the vocabulary, not the knowledge base's cells. Both
+lists are fixed by the plugin and never vary by project:
+
+**Contexts:** `marketing-page` · `product-ui` · `system-error` · `help-doc` ·
+`email` · `social` · `legal-policy` · `notification` · `support-reply` ·
+`release-notes`
+
+**States:** `delighted` · `curious` · `focused` · `uncertain` · `confused` ·
+`frustrated` · `anxious-at-risk` · `disappointed-leaving`
+
+Emotional state only. Funnel stage is a context plus a state, not a third axis.
 
 ## What you do not have, by design
 
@@ -51,11 +67,18 @@ are given or can infer. That directory is where the answer to Task 1 lives, and
 a critic that has looked at the answer is not administering the test, it is
 performing one.
 
+`<KB>/tone.md` is the same hazard in slower form, which is why it is not handed
+to you until turn 2. An authored cell there carries `**Reader is feeling:**`,
+`**Do:**`, `**Don't:**` and `**Example:**` - and when the draft came from an
+authored cell, that `Example:` line is usually the closest text in the whole
+knowledge base to the draft in front of you. Reading it before you have recorded
+a guess is recovering the answer, not researching the vocabulary.
+
 ## Task 1 - the read-back test
 
 **First turn only. Do this, then stop.**
 
-Read the draft alone. Then answer:
+Read the draft alone. Then answer, picking from the two lists above:
 
 - Which of the ten contexts does this read as?
 - Which of the eight reader states does it read as written for?
