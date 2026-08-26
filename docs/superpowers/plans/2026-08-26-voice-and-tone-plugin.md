@@ -6733,6 +6733,21 @@ test('no file in the plugin tree carries CRLF endings', () => {
   }
 })
 
+test('no file in the plugin tree carries a literal byte-order mark', () => {
+  // A literal BOM is invisible in a diff and survives review by not being seen.
+  // Three implementers in this build typed one by accident where the source
+  // called for a \uFEFF escape. This guard does not rely on anyone noticing.
+  for (const abs of walkPlugin()) {
+    if (lstatSync(abs).isDirectory()) continue
+    if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
+    const bytes = readFileSync(abs)
+    for (let i = 0; i < bytes.length - 2; i++) {
+      const isBom = bytes[i] === 0xEF && bytes[i + 1] === 0xBB && bytes[i + 2] === 0xBF
+      assert.ok(!isBom, `${path.relative(root, abs)} contains a literal BOM at byte ${i}`)
+    }
+  }
+})
+
 test('every script prints ASCII-only help', () => {
   for (const name of SCRIPTS) {
     const out = execFileSync(process.execPath, [path.join(root, 'scripts', name), '--help'], { encoding: 'utf8' })
@@ -7015,7 +7030,7 @@ documentation. See [LICENSE](LICENSE).
 - [ ] **Step 6: Run the conformance suite**
 
 Run: `node --test test/conformance.test.mjs`
-Expected: PASS, 9 tests
+Expected: PASS, 10 tests
 
 - [ ] **Step 7: Run everything**
 
