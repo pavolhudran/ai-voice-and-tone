@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
@@ -161,4 +161,48 @@ test('microcopy patterns carry concrete length budgets', () => {
     assert.ok(text.includes(element), `patterns.md must cover ${element}`)
   }
   assert.match(text, /\d+\s*(characters|chars|words)/i, 'budgets must be numeric, not vibes')
+})
+
+test('maintenance states the corroboration rule and its one exception', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('skills', 'voice-maintenance', 'SKILL.md'))
+  assert.equal(frontmatter.name, 'voice-maintenance')
+  assert.match(body, /corroboration/i)
+  assert.match(body, /different drafts/i, 'independence must be defined, not assumed')
+  assert.match(body, /lexicon/i)
+  assert.match(body, /proposed diff/i, 'the KB is never silently edited')
+})
+
+test('the five correction classes are all named, including the ignored one', () => {
+  const text = readFileSync(
+    surfaceFile('skills', 'voice-maintenance', 'references', 'correction-classes.md'), 'utf8')
+  for (const cls of ['word swap', 'tone shift', 'structural', 'formatting', 'factual']) {
+    assert.ok(text.toLowerCase().includes(cls), `correction-classes.md must cover "${cls}"`)
+  }
+  assert.match(text, /ignored/i, 'factual edits are ignored, not learned from')
+})
+
+test('the audit report covers coverage, drift, rule health, and inventory', () => {
+  const text = readFileSync(
+    surfaceFile('skills', 'voice-maintenance', 'references', 'audit-report.md'), 'utf8')
+  for (const section of ['Coverage', 'Drift', 'Rule health', 'Inventory']) {
+    assert.ok(text.includes(section), `audit-report.md must have a ${section} section`)
+  }
+  for (const health of ['dead', 'overridden', 'stale', 'disputed']) {
+    assert.ok(text.includes(health), `rule health must classify "${health}"`)
+  }
+})
+
+test('learn, audit, and sync commands route to the maintenance skill', () => {
+  for (const name of ['learn.md', 'audit.md', 'sync.md']) {
+    const { frontmatter, body } = readFrontmatter(surfaceFile('commands', name))
+    assert.ok(frontmatter.description.length > 10, `${name} needs a description`)
+    assert.match(body, /voice-maintenance/, `${name} must name its skill`)
+  }
+  assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
+})
+
+test('every command file the plugin ships is one of the eight in the spec', () => {
+  const expected = ['audit.md', 'init.md', 'learn.md', 'localize.md', 'review.md', 'rewrite.md', 'sync.md', 'write.md']
+  const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
+  assert.deepEqual(actual, expected)
 })
