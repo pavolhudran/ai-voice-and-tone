@@ -39,9 +39,21 @@ function pushCopy (out, value) {
   if (isCopy(text)) out.push(text)
 }
 
+const FRONTMATTER = /^---\n[\s\S]*?\n---\n/
+
+/**
+ * A leading YAML frontmatter block is metadata about a document, never body
+ * text. Counting it as prose inflates every length and rhythm metric derived
+ * from the document - which is why both the corpus extractor here and
+ * scripts/diff.mjs (every `<KB>/.drafts/` file carries an 8-field block) share
+ * this one definition rather than each carrying its own regex.
+ */
+export function stripFrontmatter (raw) {
+  return String(raw).replace(FRONTMATTER, '')
+}
+
 function extractMarkdown (raw) {
-  let body = raw
-    .replace(/^---\n[\s\S]*?\n---\n/, '')          // YAML frontmatter
+  let body = stripFrontmatter(raw)
     .replace(/^```[\s\S]*?^```$/gm, '')             // fenced code
     .replace(/^~~~[\s\S]*?^~~~$/gm, '')
     .replace(/<!--[\s\S]*?-->/g, '')                // HTML comments

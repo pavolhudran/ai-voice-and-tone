@@ -85,6 +85,38 @@ function blockBoundaries (lines) {
   return starts
 }
 
+/**
+ * A heading whose first token is shaped like a rule ID - a letter plus a number
+ * (`V1`, `L03`), or a tone cell (`T-system-error/frustrated`).
+ *
+ * HEADING above *requires* the backtick confidence, so a heading that omits it
+ * is not parsed as a rule at all: the rule is invisible to validate.mjs, to
+ * compile-context.mjs, and to review. Silence is the worst possible answer
+ * there, so findUnparsedRuleHeadings() spots the near-miss and validate.mjs
+ * warns on it.
+ *
+ * The prefix letter is deliberately any capital, not one of ID_PREFIXES: a
+ * heading like `### Q1 · Something` is *both* an unknown prefix and unparsable,
+ * and would otherwise produce no finding at all from either check.
+ *
+ * Equally deliberately, the shape is "letter then digit" rather than "a
+ * capitalized first word". Ordinary section headings - "## Humor gates",
+ * "## State vectors", "## Never say" - would otherwise all match, and a
+ * validator that cries wolf on every template heading is one users learn to
+ * ignore.
+ */
+const RULE_ID_HEADING = /^#{2,4}\s+([A-Z]\d[\w.-]*|T-[a-z][a-z-]*\/[a-z][a-z-]*)(?:\s|$)/
+
+export function findUnparsedRuleHeadings (md) {
+  const out = []
+  maskComments(md).split('\n').forEach((line, index) => {
+    const match = RULE_ID_HEADING.exec(line)
+    if (!match || parseRuleHeading(line)) return
+    out.push({ id: match[1], text: line.trim(), line: index + 1 })
+  })
+  return out
+}
+
 export function parseProseRules (md) {
   const lines = maskComments(md).split('\n')
   const bounds = blockBoundaries(lines)
@@ -330,10 +362,12 @@ export function loadKb (kbRoot) {
 
   const proseSources = { ...files, ...channels, ...locales }
   const rules = []
+  const unparsedHeadings = []
   for (const [name, body] of Object.entries(proseSources)) {
     if (name === 'ledger' || name === 'context') continue
     for (const rule of parseProseRules(body)) rules.push({ ...rule, file: name, kind: 'prose' })
     for (const rule of parseTableRules(body)) rules.push({ ...rule, file: name, kind: 'table' })
+    for (const heading of findUnparsedRuleHeadings(body)) unparsedHeadings.push({ ...heading, file: name })
   }
 
   return {
@@ -343,7 +377,18 @@ export function loadKb (kbRoot) {
     channels,
     locales,
     files,
+    // Whether the three files that make a directory a knowledge base are on
+    // disk at all. loadKb reads a missing file as '', which is indistinguishable
+    // from an empty one - so validate.mjs cannot tell "nothing to say" from
+    // "there is nothing here" without being told. Only loadKb sets this; a
+    // hand-built kb object carries no claim either way.
+    present: {
+      config: existsSync(path.join(kbRoot, 'config.yml')),
+      voice: existsSync(path.join(kbRoot, 'voice.md')),
+      tone: existsSync(path.join(kbRoot, 'tone.md'))
+    },
     rules,
+    unparsedHeadings,
     cells: parseToneCells(files.tone),
     vectors: parseVectors(files.tone),
     evidence: parseEvidence(files.ledger)

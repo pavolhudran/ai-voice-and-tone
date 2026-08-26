@@ -32,11 +32,21 @@ function defaultDials (toneMd) {
   return line ? { ...NEUTRAL_DIALS, ...parseDials(line[1]) } : NEUTRAL_DIALS
 }
 
+/**
+ * A `disputed` rule is never enforced (severity.md), but CONTEXT.md is loaded
+ * at step 1 of every write, long before any review runs. Compiling a disputed
+ * entry into the card puts it in front of the applier as a rule to obey - and
+ * rankRules would float it above a `confirmed` rule if the corpus violates it
+ * more often. The invariant has to hold at draft time, not only at review
+ * time, so the card never carries one.
+ */
+const notDisputed = (rule) => rule.confidence !== 'disputed'
+
 export function compileContext (kb, { corpusStrings = [], generated, profileName = 'default' } = {}) {
   const profile = activeProfile(kb.config, profileName)
-  const voiceRules = kb.rules.filter((r) => r.file === 'voice' && r.id.startsWith('V'))
-  const lexicon = parseTableRules(kb.lexicon || '')
-  const mechanics = parseTableRules(kb.mechanics || '')
+  const voiceRules = kb.rules.filter((r) => r.file === 'voice' && r.id.startsWith('V') && notDisputed(r))
+  const lexicon = parseTableRules(kb.lexicon || '').filter(notDisputed)
+  const mechanics = parseTableRules(kb.mechanics || '').filter(notDisputed)
 
   const topLexicon = rankRules(lexicon, countHits(corpusStrings, lexicon)).slice(0, 8)
   const topMechanics = rankRules(mechanics, countHits(corpusStrings, mechanics)).slice(0, 6)

@@ -3106,8 +3106,10 @@ git commit -m "feat(lib): knowledge-base parser, tone interpolation, humor gates
 
 | Code | Severity | Meaning |
 |---|---|---|
+| `E_NO_KB` | error | `config.yml`, `voice.md`, and `tone.md` are all absent - there is no knowledge base at this path |
 | `E_DUPLICATE_ID` | error | the same rule ID appears twice |
 | `E_UNKNOWN_PREFIX` | error | rule ID uses a prefix outside `V T L M C A X` |
+| `E_NO_CONFIDENCE` | error | rule declares no confidence at all (an empty `Conf` column) |
 | `E_UNKNOWN_CONFIDENCE` | error | confidence outside the four levels |
 | `E_BROKEN_EVIDENCE_REF` | error | rule cites an evidence ID the ledger does not have |
 | `E_UNKNOWN_EVIDENCE_TYPE` | error | ledger entry type outside the five types |
@@ -3120,6 +3122,7 @@ git commit -m "feat(lib): knowledge-base parser, tone interpolation, humor gates
 | `W_ONE_WAY_EVIDENCE` | warning | rule cites evidence that does not list the rule back |
 | `W_ORPHAN_EVIDENCE` | warning | ledger entry claims to have produced a rule that does not exist |
 | `W_MISSING_VECTOR` | warning | a state or context has no vector, so interpolation falls back to neutral |
+| `W_UNPARSED_RULE_HEADING` | warning | a heading reads as a rule ID but omits the backtick confidence, so it is parsed as no rule at all |
 
 - [ ] **Step 1: Write the failing test**
 

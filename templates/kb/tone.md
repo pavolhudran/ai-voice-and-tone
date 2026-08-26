@@ -2,7 +2,7 @@
 
 Tone flexes with the reader's emotional state. Voice does not.
 
-**Default dials:** warmth 3 · humor 1 · directness 3 · detail 2 · urgency 2 · formality 2
+**Default dials:** warmth 3 · humor 0 · directness 3 · detail 2 · urgency 2 · formality 2
 
 Dials are integers 0-4. A cell is `state_vector + context_offset`, clamped to 0-4.
 
@@ -14,6 +14,12 @@ Dials are integers 0-4. A cell is `state_vector + context_offset`, clamped to 0-
    regardless of dial values, in authored cells too.
 
 ## State vectors
+
+The `humor` column here and in the context offsets below is **authored-cell
+reference only**. Gate 1 zeroes humor on every interpolated cell, so no
+arithmetic over these two tables can ever produce a nonzero humor dial. The
+numbers say what humor would be worth in a cell a human has written and
+approved - they are not an input the interpolator reads.
 
 | State | warmth | humor | directness | detail | urgency | formality |
 |---|---|---|---|---|---|---|
@@ -27,6 +33,8 @@ Dials are integers 0-4. A cell is `state_vector + context_offset`, clamped to 0-
 | disappointed-leaving | 3 | 0 | 4 | 2 | 1 | 3 |
 
 ## Context offsets
+
+`humor` is authored-cell reference only here too - see the note above.
 
 | Context | warmth | humor | directness | detail | urgency | formality |
 |---|---|---|---|---|---|---|

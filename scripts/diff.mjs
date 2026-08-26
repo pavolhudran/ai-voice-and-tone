@@ -2,6 +2,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
 import { splitWords, splitSentences } from './lib/text.mjs'
+import { stripFrontmatter } from './lib/extract.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 /** Longest common subsequence over word tokens. O(n*m); drafts are short. */
@@ -48,7 +49,21 @@ function measure (text) {
   }
 }
 
-export function mechanicalDiff (draftText, finalText) {
+/**
+ * Every draft this script is pointed at carries the 8-field YAML frontmatter
+ * block that skills/voice-and-tone/references/write-flow.md mandates, and the
+ * user's edited version is just as likely to have kept it. Frontmatter is
+ * metadata, not prose: diffing it as body text adds its keys and values to the
+ * word count, its colons to the sentence count, and reports the untouched
+ * block's tokens as removals when only one side has it. Those numbers are the
+ * ground truth :learn classifies a correction from - correction-classes.md
+ * reads a length/rhythm shift as a *tone shift*, which is corroboration-gated
+ * at 2 - so a corrupted measurement here proposes real dial changes on real
+ * cells. Strip both sides; a file with no frontmatter is unaffected.
+ */
+export function mechanicalDiff (rawDraft, rawFinal) {
+  const draftText = stripFrontmatter(rawDraft)
+  const finalText = stripFrontmatter(rawFinal)
   const before = measure(draftText)
   const after = measure(finalText)
   const changes = diffTokens(splitWords(draftText), splitWords(finalText))

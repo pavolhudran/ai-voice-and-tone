@@ -262,6 +262,138 @@ test('a state or context with no vector produces W_MISSING_VECTOR, and only that
   }
 })
 
+test('a directory that is not a knowledge base is an error, not a clean bill of health', () => {
+  // loadKb reads every absent file as '', so before E_NO_KB a typo'd --kb
+  // printed "0 rules, 0 errors, 0 warnings" and exited 0, and :sync went on to
+  // compile a card from nothing.
+  const dir = makeTmpProject({ 'unrelated.txt': 'not a knowledge base\n' })
+  try {
+    const report = validateKb(loadKb(path.join(dir, 'nowhere')))
+    assert.ok(codesOf(report).includes('E_NO_KB'), JSON.stringify(report.findings))
+    assert.ok(report.errors > 0, 'E_NO_KB must be an error so the CLI exits 2')
+    const finding = report.findings.find((f) => f.code === 'E_NO_KB')
+    assert.equal(finding.severity, 'error')
+    assert.equal(finding.file, 'config.yml', 'the finding anchors to a real filename, not config.yml.md')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a knowledge base holding only one of the three core files is not E_NO_KB', () => {
+  // The gate is "all three absent". A KB mid-init, with config.yml written and
+  // nothing else yet, is empty but real - reporting E_NO_KB there would be the
+  // mirror of the bug.
+  for (const file of ['config.yml', 'voice.md', 'tone.md']) {
+    const dir = makeTmpProject({ [path.posix.join('kb', file)]: '\n' })
+    try {
+      const report = validateKb(loadKb(path.join(dir, 'kb')))
+      assert.ok(!codesOf(report).includes('E_NO_KB'), `${file} alone still makes a knowledge base`)
+    } finally {
+      cleanup(dir)
+    }
+  }
+})
+
+test('a table rule with an empty Conf column is an error, not silence', () => {
+  const { dir, kb } = kbFrom({
+    'kb/lexicon.md': [
+      '| ID | Avoid | Prefer | Why | Conf | Ev |',
+      '|---|---|---|---|---|---|',
+      '| L1 | utilize | use | plain | | |',
+      '| L2 | leverage | use | plain | confirmed | |'
+    ].join('\n')
+  })
+  try {
+    const report = validateKb(kb)
+    const codes = codesOf(report)
+    assert.ok(codes.includes('E_NO_CONFIDENCE'), JSON.stringify(report.findings))
+
+    // The row with no confidence used to produce zero findings while the row
+    // that declared one produced two. Pin that L1 is now reported at all, and
+    // that it is reported once - E_NO_CONFIDENCE replaces E_UNKNOWN_CONFIDENCE
+    // rather than stacking with it.
+    const forL1 = report.findings.filter((f) => /\bL1\b/.test(f.message))
+    assert.deepEqual(forL1.map((f) => f.code), ['E_NO_CONFIDENCE'])
+    assert.equal(forL1[0].severity, 'error')
+    assert.equal(forL1[0].file, 'lexicon.md')
+    assert.equal(forL1[0].line, 3)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a rule-shaped heading with no confidence is warned about instead of vanishing', () => {
+  const { dir, kb } = kbFrom({
+    'kb/voice.md': [
+      '## Characteristics',
+      '',
+      '### V1 · Plainspoken',
+      '',
+      '**Means:** Clarity above all.',
+      '',
+      '### V2 · Genuine `confirmed`',
+      '',
+      '**Means:** We sound like a person.'
+    ].join('\n'),
+    'kb/lexicon.md': '### Q1 · Unknown prefix and no confidence\n\n**Means:** Doubly invisible.\n',
+    'kb/tone.md': [
+      '### T-system-error/frustrated',
+      '',
+      '**Dials:** warmth 2 · humor 0 · directness 4 · detail 3 · urgency 1 · formality 2'
+    ].join('\n')
+  })
+  try {
+    const report = validateKb(kb)
+    const unparsed = report.findings.filter((f) => f.code === 'W_UNPARSED_RULE_HEADING')
+
+    // Exactly the three headings HEADING could not parse, and neither of the
+    // ordinary section headings ("## Characteristics") nor the one that parsed.
+    // Q1 is there because an unknown prefix that also omits the confidence is
+    // caught by neither E_UNKNOWN_PREFIX (no rule is parsed) nor anything else.
+    assert.deepEqual(
+      unparsed.map((f) => `${f.file}:${f.line}`).sort(),
+      ['lexicon.md:1', 'tone.md:1', 'voice.md:3']
+    )
+    assert.equal(unparsed[0].severity, 'warning')
+    assert.ok(unparsed.every((f) => !/V2/.test(f.message)), 'a heading that parsed is not warned about')
+    assert.equal(kb.rules.filter((r) => r.id === 'V1').length, 0,
+      'the premise: V1 really is invisible to the parser')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('ordinary section headings never trip the unparsed-rule warning', () => {
+  // The check is keyed on the rule-ID shape, not on "a capitalized word", so
+  // that the shipped templates - "## Humor gates", "## State vectors",
+  // "## Never say", "## Avoid" - stay warning-free.
+  const { dir, kb } = kbFrom({
+    'kb/voice.md': [
+      '# Voice - constant', '', '## Characteristics', '', '## Voice - constant', '',
+      '## We Are / We Are Not', '', '## Tone', '', '## Avoid', '', '## Never say', ''
+    ].join('\n')
+  })
+  try {
+    assert.deepEqual(codesOf(validateKb(kb)).filter((c) => c === 'W_UNPARSED_RULE_HEADING'), [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('validateKb returns a report rather than throwing on a half-built vectors object', () => {
+  // D3: reading vectors.contexts off {states:{}} used to throw a TypeError,
+  // turning a validation call into an unexpected-error exit 1.
+  assert.equal(validateKb({ vectors: { states: {} } }).errors, 0)
+  assert.equal(validateKb({ vectors: { contexts: {} } }).errors, 0)
+  assert.equal(validateKb({ vectors: {} }).errors, 0)
+
+  const statesOnly = validateKb({
+    vectors: { states: { frustrated: { warmth: 9 } } }
+  })
+  assert.ok(codesOf(statesOnly).includes('E_VECTOR_RANGE'), 'the surviving half is still checked')
+  assert.ok(codesOf(statesOnly).includes('W_MISSING_VECTOR'), 'every context still reports as missing')
+})
+
 test('validateKb never throws, even on a hand-built kb missing every top-level field', () => {
   const report = validateKb({})
   assert.deepEqual(report, {
