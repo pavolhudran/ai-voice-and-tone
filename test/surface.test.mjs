@@ -130,3 +130,18 @@ test('the review command routes to the review skill and offers the critic', () =
   assert.match(body, /voice-review/)
   assert.match(body, /voice-critic/)
 })
+
+test('the critic cannot browse its way to the read-back answer', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('agents', 'voice-critic.md'))
+  assert.ok(!/Glob/.test(frontmatter.tools), 'critic must not be granted Glob - it cannot discover .drafts/ paths it should not have')
+  assert.ok(!/Grep/.test(frontmatter.tools), 'critic must not be granted Grep - it cannot search for the answer')
+  assert.match(body, /never[^\n]*\.drafts\//i, 'the critic must be told never to read .drafts/, under any circumstance')
+})
+
+test('the review skill mechanizes the critic dispatch as two turns, not one prompt', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-review', 'SKILL.md'))
+  assert.match(body, /Turn 1/)
+  assert.match(body, /Turn 2/)
+  assert.match(body, /SendMessage/)
+  assert.match(body, /never combine/i, 'the skill must forbid folding the reveal into the same prompt as the guess')
+})

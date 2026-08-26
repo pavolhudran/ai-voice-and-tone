@@ -68,12 +68,34 @@ teaches the user to distrust the whole report.
 
 ## Dispatching the critic
 
-Hand it the draft as plain text with the frontmatter stripped - no `cell:`,
-`context:`, or `state:` fields, and no file path into `<KB>/.drafts/` where those
-fields live, since reading that file would show the answer and the guess before
-it. The read-back test only means something if the guess happens before the
-critic can see what it was supposed to guess. Reveal the actual cell to the
-critic only after Task 1's guess is recorded, so it can do its own comparison.
+The read-back test only means something if the guess happens before the critic
+can see the answer - and a single-shot prompt cannot guarantee an order like
+that. Whatever is in the prompt is in the prompt; a "reveal" tacked onto the end
+of the same message was available the whole time, however it reads on the page.
+So the dispatch is **two turns of the same agent conversation, not one message**:
+
+**Turn 1** - call the `voice-critic` agent (Agent tool, `subagent_type:
+voice-critic`) with only:
+- the draft as plain text pasted into the prompt - no frontmatter, no `cell:`,
+  `context:`, or `state:` field, and no file path into `<KB>/.drafts/`, since
+  that directory is exactly where the answer lives
+- the paths to `<KB>/CONTEXT.md`, `voice.md`, and `tone.md`
+
+Its reply is nothing but the Task 1 guess. Stop there and read it before doing
+anything else.
+
+**Turn 2** - continue the *same* agent with `SendMessage` (not a fresh `Agent`
+call - a new call starts a new fresh-context conversation and loses the turn-1
+guess entirely, which defeats the point) and hand it:
+- the draft's actual cell
+- the paths to `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the relevant
+  `channels/` and `locales/` files
+
+It replies with the comparison, the findings, and the verdict.
+
+**Never combine these into one message.** A prompt that pastes the stripped
+draft and the actual cell together in the same turn is not a blind guess with
+extra steps - it is not blind at all, no matter what the reply claims.
 
 ## After the report
 
