@@ -5,15 +5,20 @@ import {
 } from './lib/kb.mjs'
 import { parseCliArgs, resolveRoots, die, printHelp } from './lib/cli.mjs'
 
-export function validateKb (kb) {
+export function validateKb (kb = {}) {
+  const rules = kb.rules ?? []
+  const evidence = kb.evidence ?? []
+  const cells = kb.cells ?? []
+  const vectors = kb.vectors ?? { states: {}, contexts: {} }
+
   const findings = []
   const add = (severity, code, message, file, line) =>
     findings.push({ severity, code, message, file: `${file}.md`, line })
 
-  const evidenceById = new Map(kb.evidence.map((entry) => [entry.id, entry]))
+  const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]))
   const ruleIds = new Set()
 
-  for (const rule of kb.rules) {
+  for (const rule of rules) {
     if (ruleIds.has(rule.id)) {
       add('error', 'E_DUPLICATE_ID', `rule id ${rule.id} is used more than once`, rule.file, rule.line)
     }
@@ -26,8 +31,8 @@ export function validateKb (kb) {
       add('error', 'E_UNKNOWN_CONFIDENCE',
         `rule ${rule.id} has confidence "${rule.confidence}"`, rule.file, rule.line)
     }
-    const evidence = rule.evidence ?? []
-    for (const ref of evidence) {
+    const ruleEvidence = rule.evidence ?? []
+    for (const ref of ruleEvidence) {
       if (!evidenceById.has(ref)) {
         add('error', 'E_BROKEN_EVIDENCE_REF',
           `rule ${rule.id} cites ${ref}, which is not in the ledger`, rule.file, rule.line)
@@ -39,13 +44,13 @@ export function validateKb (kb) {
           rule.file, rule.line)
       }
     }
-    if (evidence.length === 0 && rule.confidence && rule.confidence !== 'assumed') {
+    if (ruleEvidence.length === 0 && rule.confidence && rule.confidence !== 'assumed') {
       add('warning', 'W_NO_EVIDENCE',
         `rule ${rule.id} is ${rule.confidence} but cites no evidence`, rule.file, rule.line)
     }
   }
 
-  for (const entry of kb.evidence) {
+  for (const entry of evidence) {
     if (!EVIDENCE_TYPES.includes(entry.type)) {
       add('error', 'E_UNKNOWN_EVIDENCE_TYPE',
         `evidence ${entry.id} has type "${entry.type}"`, 'evidence/ledger', entry.line)
@@ -59,7 +64,7 @@ export function validateKb (kb) {
     }
   }
 
-  for (const cell of kb.cells) {
+  for (const cell of cells) {
     const dials = cell.dials ?? {}
     if (!CONTEXTS.includes(cell.context)) {
       add('error', 'E_UNKNOWN_CONTEXT', `cell ${cell.id} names context "${cell.context}"`, 'tone', cell.line)
@@ -86,9 +91,9 @@ export function validateKb (kb) {
     }
   }
 
-  const hasVectors = Object.keys(kb.vectors.states).length > 0 || Object.keys(kb.vectors.contexts).length > 0
+  const hasVectors = Object.keys(vectors.states).length > 0 || Object.keys(vectors.contexts).length > 0
   if (hasVectors) {
-    for (const [state, dials] of Object.entries(kb.vectors.states)) {
+    for (const [state, dials] of Object.entries(vectors.states)) {
       if (!STATES.includes(state)) add('error', 'E_UNKNOWN_STATE', `state vector "${state}" is not a known state`, 'tone', 0)
       for (const [dial, value] of Object.entries(dials)) {
         if (!Number.isInteger(value) || value < 0 || value > 4) {
@@ -96,7 +101,7 @@ export function validateKb (kb) {
         }
       }
     }
-    for (const [context, dials] of Object.entries(kb.vectors.contexts)) {
+    for (const [context, dials] of Object.entries(vectors.contexts)) {
       if (!CONTEXTS.includes(context)) add('error', 'E_UNKNOWN_CONTEXT', `context offset "${context}" is not a known context`, 'tone', 0)
       for (const [dial, value] of Object.entries(dials)) {
         if (!Number.isInteger(value) || value < -4 || value > 4) {
@@ -105,12 +110,12 @@ export function validateKb (kb) {
       }
     }
     for (const state of STATES) {
-      if (!kb.vectors.states[state]) {
+      if (!vectors.states[state]) {
         add('warning', 'W_MISSING_VECTOR', `state "${state}" has no vector; interpolation falls back to neutral`, 'tone', 0)
       }
     }
     for (const context of CONTEXTS) {
-      if (!kb.vectors.contexts[context]) {
+      if (!vectors.contexts[context]) {
         add('warning', 'W_MISSING_VECTOR', `context "${context}" has no offset; interpolation falls back to neutral`, 'tone', 0)
       }
     }
@@ -121,10 +126,10 @@ export function validateKb (kb) {
     errors: findings.filter((f) => f.severity === 'error').length,
     warnings: findings.filter((f) => f.severity === 'warning').length,
     counts: {
-      rules: kb.rules.length,
-      cells: kb.cells.length,
-      evidence: kb.evidence.length,
-      authoredCells: kb.cells.length,
+      rules: rules.length,
+      cells: cells.length,
+      evidence: evidence.length,
+      authoredCells: cells.length,
       possibleCells: CONTEXTS.length * STATES.length
     }
   }

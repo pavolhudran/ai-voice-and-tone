@@ -261,3 +261,63 @@ test('a state or context with no vector produces W_MISSING_VECTOR, and only that
     cleanup(dir)
   }
 })
+
+test('validateKb never throws, even on a hand-built kb missing every top-level field', () => {
+  const report = validateKb({})
+  assert.deepEqual(report, {
+    findings: [],
+    errors: 0,
+    warnings: 0,
+    counts: {
+      rules: 0,
+      cells: 0,
+      evidence: 0,
+      authoredCells: 0,
+      possibleCells: CONTEXTS.length * STATES.length
+    }
+  })
+})
+
+test('validateKb tolerates a completely empty argument', () => {
+  const report = validateKb()
+  assert.deepEqual(report.findings, [])
+  assert.equal(report.errors, 0)
+  assert.equal(report.warnings, 0)
+  assert.deepEqual(report.counts, {
+    rules: 0,
+    cells: 0,
+    evidence: 0,
+    authoredCells: 0,
+    possibleCells: CONTEXTS.length * STATES.length
+  })
+})
+
+test('validateKb tolerates a partial kb object with only some top-level fields present', () => {
+  // Shaped the way a hand-built probe or a future caller is most likely to
+  // construct one: just the field under test, everything else absent.
+  const report = validateKb({
+    rules: [{ id: 'V1', file: 'voice', line: 1, confidence: 'confirmed', evidence: [] }]
+  })
+  assert.equal(report.errors, 0)
+  assert.equal(report.counts.rules, 1)
+  assert.equal(report.counts.cells, 0)
+  assert.equal(report.counts.evidence, 0)
+
+  const evidenceOnly = validateKb({
+    evidence: [{ id: 'e1', type: 'interview', produced: [], line: 1 }]
+  })
+  assert.equal(evidenceOnly.errors, 0)
+  assert.equal(evidenceOnly.counts.evidence, 1)
+
+  const cellsOnly = validateKb({
+    cells: [{
+      id: 'T-email/curious',
+      context: 'email',
+      state: 'curious',
+      dials: { warmth: 2, humor: 1, directness: 2, detail: 2, urgency: 1, formality: 2 },
+      line: 1
+    }]
+  })
+  assert.equal(cellsOnly.errors, 0)
+  assert.equal(cellsOnly.counts.cells, 1)
+})
