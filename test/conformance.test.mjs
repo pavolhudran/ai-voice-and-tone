@@ -8,7 +8,20 @@ import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { toAscii } from '../scripts/lib/cli.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SCRIPTS = ['scan.mjs', 'fingerprint.mjs', 'compile-context.mjs', 'validate.mjs', 'diff.mjs']
+
+// D1: derived, never listed. A hardcoded array silently stops help-checking the
+// day a sixth script lands, which is the stale-list defect this codebase keeps
+// producing.
+const SCRIPTS = readdirSync(path.join(root, 'scripts'))
+  .filter((name) => name.endsWith('.mjs'))
+  .sort()
+
+// The global constraints bind the procedures written into skill, command, and
+// agent markdown just as hard as they bind the scripts - those files are plugin
+// logic executed by a model, and markdown telling a model to `grep` is the most
+// likely place for the violation, since no linter catches it.
+const LOGIC_DIRS = ['scripts', 'skills', 'commands', 'agents']
+const LOGIC_FILE = /\.(mjs|md)$/
 
 function walkPlugin (dir = root, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -20,6 +33,34 @@ function walkPlugin (dir = root, out = []) {
   return out
 }
 
+function walkPluginLogic () {
+  const out = []
+  for (const dir of LOGIC_DIRS) {
+    for (const abs of walkPlugin(path.join(root, dir))) {
+      if (LOGIC_FILE.test(abs)) out.push(abs)
+    }
+  }
+  return out
+}
+
+test('the conformance walk actually reaches every directory holding plugin logic', () => {
+  // Without this, extending the walks below is unfalsifiable: a walk that
+  // silently visits nothing passes every assertion in every loop it feeds.
+  const visited = new Set(walkPluginLogic())
+  const mustSee = [
+    path.join(root, 'scripts', 'validate.mjs'),
+    path.join(root, 'scripts', 'lib', 'kb.mjs'),
+    path.join(root, 'skills', 'voice-and-tone', 'SKILL.md'),
+    path.join(root, 'skills', 'voice-and-tone', 'references', 'write-flow.md'),
+    path.join(root, 'commands', 'write.md'),
+    path.join(root, 'agents', 'voice-critic.md')
+  ]
+  for (const abs of mustSee) {
+    assert.ok(visited.has(abs), `the logic walk never visits ${path.relative(root, abs)}`)
+  }
+  assert.ok(SCRIPTS.length >= 5, `expected the five shipped scripts, found ${SCRIPTS.length}`)
+})
+
 test('no symlinks anywhere in the plugin tree', () => {
   for (const abs of walkPlugin()) {
     assert.ok(!lstatSync(abs).isSymbolicLink(), `${path.relative(root, abs)} is a symlink`)
@@ -28,17 +69,15 @@ test('no symlinks anywhere in the plugin tree', () => {
 
 test('plugin logic never shells out to unix text tools', () => {
   const forbidden = /\b(?:grep|sed|awk|find|cat)\s+-|\bexecSync\(|\bchild_process\b/
-  for (const abs of walkPlugin(path.join(root, 'scripts'))) {
-    if (!abs.endsWith('.mjs')) continue
+  for (const abs of walkPluginLogic()) {
     const source = readFileSync(abs, 'utf8')
     assert.ok(!forbidden.test(source), `${path.relative(root, abs)} shells out or uses a unix text tool`)
   }
 })
 
-test('scripts build paths with path.join, never by concatenating a separator', () => {
+test('plugin logic builds paths with path.join, never by concatenating a separator', () => {
   const concatenated = /['"`]\s*\+\s*['"`]\/|\/['"`]\s*\+\s*(?!\/)/
-  for (const abs of walkPlugin(path.join(root, 'scripts'))) {
-    if (!abs.endsWith('.mjs')) continue
+  for (const abs of walkPluginLogic()) {
     for (const [index, line] of readFileSync(abs, 'utf8').split('\n').entries()) {
       if (line.includes('http') || line.trim().startsWith('*') || line.trim().startsWith('//')) continue
       assert.ok(!concatenated.test(line),
