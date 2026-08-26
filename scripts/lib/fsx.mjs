@@ -7,11 +7,33 @@ export function toPosix (p) {
   return String(p).split(path.sep).join('/').split('\\').join('/')
 }
 
-// A directory is pruned when an exclude pattern would match anything inside it.
-// Probing with a sentinel child generalizes to "dist/**", "**/node_modules/**",
-// and anything else, without special-casing pattern shapes.
+const PROBE = '__vat_probe__'
+const HAS_WILDCARD = /[*?{]/
+
+// A directory is pruned in two distinct ways:
+//
+// 1. A literal, wildcard-free pattern (e.g. bare "dist" or "node_modules")
+//    can only ever denote one exact path, so a direct match against this
+//    directory's own path is unambiguous grounds to prune the whole subtree.
+//
+// 2. A pattern containing a wildcard is checked by depth instead: prune only
+//    when it matches arbitrarily deep beneath this directory, probed at two
+//    depths. A depth-limited pattern like "docs/*" matches the shallow probe
+//    but not the deep one, so it does NOT prune -- it falls through to the
+//    per-file exclude check in walk() instead.
+//
+// The two must be kept separate: a wildcard pattern like "docs/*" also
+// matches the literal path of any real subdirectory that happens to sit one
+// level below it (e.g. "docs/sub"), purely by string coincidence. Treating
+// that coincidence as prune-worthy (as a single direct-match check does)
+// wrongly deletes docs/sub/keep.md from the corpus. Restricting the direct
+// full-path match to wildcard-free patterns avoids that false prune while
+// still letting bare directory names work.
 function isPrunedDir (relPosix, exclude) {
-  return matchesAny(`${relPosix}/__vat_probe__`, exclude) || matchesAny(relPosix, exclude)
+  const literalHit = exclude.some((pattern) => !HAS_WILDCARD.test(pattern) && matchesAny(relPosix, [pattern]))
+  if (literalHit) return true
+  return matchesAny(`${relPosix}/${PROBE}`, exclude) &&
+         matchesAny(`${relPosix}/${PROBE}/${PROBE}`, exclude)
 }
 
 export function walk (rootDir, { include = [], exclude = [] } = {}) {

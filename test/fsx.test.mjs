@@ -24,6 +24,25 @@ test('walk includes matches, prunes excluded directories, and sorts', () => {
   }
 })
 
+test('walk does not prune a directory on a depth-limited exclude pattern', () => {
+  const dir = makeTmpProject({
+    'docs/skip.md': 'skip',
+    'docs/sub/keep.md': 'keep'
+  })
+  try {
+    const found = walk(dir, {
+      include: ['docs/**/*.md'],
+      exclude: ['docs/*']
+    }).map((abs) => toPosix(path.relative(dir, abs)))
+    // docs/* matches only direct children, so it must exclude docs/skip.md
+    // per-file while leaving the docs/ subtree itself unpruned -- docs/sub/keep.md
+    // is not a direct child of docs and must still be found.
+    assert.deepEqual(found, ['docs/sub/keep.md'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('walk with no include patterns returns nothing', () => {
   const dir = makeTmpProject({ 'a.md': 'a' })
   try {
