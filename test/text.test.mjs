@@ -43,7 +43,19 @@ test('words are Unicode-aware and keep internal punctuation', () => {
 test('English syllable counting is close enough for a reading grade', () => {
   assert.equal(countSyllablesEn('the'), 1)
   assert.equal(countSyllablesEn('campaign'), 2)
-  assert.equal(countSyllablesEn('scheduled'), 3)
+  assert.equal(countSyllablesEn('newsletter'), 3)
+  assert.equal(countSyllablesEn('marketing'), 3)
   assert.equal(countSyllablesEn('accessibility'), 6)
   assert.equal(countSyllablesEn(''), 0)
+})
+
+test('the syllable heuristic over-counts -uled words, a known blind spot', () => {
+  // True count for "scheduled" is 2 (sched-uled). The heuristic returns 3
+  // because its trailing-consonant trim excludes 'l' - e.g. [^laeiouy]ed$
+  // won't strip the "-ed" here since the letter before it is 'l' - so the
+  // silent e in "-uled" survives as its own vowel group. That exclusion is
+  // deliberate: without it, syllabic "-le" words like "candle" and
+  // "toppled" would be wrongly counted as 1 syllable instead of 2. This
+  // test documents the resulting blind spot rather than hiding it.
+  assert.equal(countSyllablesEn('scheduled'), 3)
 })

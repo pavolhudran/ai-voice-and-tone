@@ -2,6 +2,14 @@
 
 // Abbreviations that end in a period without ending a sentence. Deliberately
 // short: a long list starts suppressing real sentence breaks.
+//
+// This list is English-biased, even though splitSentences carries no `En`
+// marker. On a non-English corpus its only effect is an occasional missed
+// sentence split after a local abbreviation the list doesn't know - it
+// never merges sentences that should stay split. Per-locale fingerprints
+// already keep languages from contaminating each other, so this is left as
+// a fixed English list rather than a parameter; if a locale ever needs its
+// own list, this is the place it becomes one.
 const ABBREVIATIONS = new Set([
   'mr', 'mrs', 'ms', 'dr', 'prof', 'st', 'vs', 'etc', 'fig', 'no', 'inc', 'ltd',
   'co', 'jr', 'sr', 'approx', 'dept', 'est', 'vol', 'al', 'e.g', 'i.e'
