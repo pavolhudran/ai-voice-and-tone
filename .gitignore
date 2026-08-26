@@ -3,3 +3,9 @@ node_modules/
 Thumbs.db
 *.log
 .tmp/
+
+# Demo runbooks and recordings built against a real client corpus. These name
+# the company, quote its copy, and carry local paths - they stay on the machine
+# that made them. This repository is public.
+*-demo-runbook.md
+*.cast
