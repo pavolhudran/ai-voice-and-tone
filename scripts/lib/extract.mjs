@@ -27,9 +27,10 @@ function isCopy (value) {
   if (text.length === 0) return false
   if (!/\p{L}/u.test(text)) return false
   if (/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(text)) return false
-  if (/^[#.]?[0-9a-f]{3,8}$/i.test(text)) return false
-  if (/^[/.]{1,2}\//.test(text)) return false
-  if (/^[A-Z0-9_]+$/.test(text) && text.length > 2) return false
+  if (/^#[0-9a-f]{3,8}$/i.test(text)) return false
+  if (/^[0-9a-f]{3,8}$/i.test(text) && /\d/.test(text)) return false
+  if (/^[/.]{0,2}\//.test(text)) return false
+  if (/^[A-Z0-9_]+$/.test(text) && /[_0-9]/.test(text)) return false
   return true
 }
 
@@ -147,8 +148,8 @@ function extractHtml (raw) {
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
 
-  for (const match of body.matchAll(/\b(?:alt|title|aria-label|placeholder)\s*=\s*"([^"]*)"/gi)) {
-    pushCopy(out, decodeEntities(match[1]))
+  for (const match of body.matchAll(/\b(?:alt|title|aria-label|placeholder)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    pushCopy(out, decodeEntities(match[1] ?? match[2]))
   }
   for (const chunk of body.replace(/<[^>]*>/g, '\n').split('\n')) {
     pushCopy(out, decodeEntities(chunk))
@@ -158,7 +159,7 @@ function extractHtml (raw) {
 
 export function extractHeadings (absPath, raw) {
   const format = formatFor(absPath)
-  const text = String(raw).replace(/\r\n?/g, '\n')
+  const text = String(raw).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
   const out = []
 
   if (format === 'markdown') {

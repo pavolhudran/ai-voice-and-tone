@@ -113,3 +113,36 @@ test('unsupported extensions are recognised as such, not guessed at', () => {
   assert.equal(formatFor('/x/app.tsx'), null)
   assert.deepEqual(extractStrings('/x/app.tsx', 'const a = "Save"'), { format: null, strings: [] })
 })
+
+// --- Fix round 1: filter-layer defects found in review ---
+
+test('hex-colour filter drops colours but keeps real words spelled from a-f', () => {
+  const json = JSON.stringify({ word: 'decade', color: '#4A90D9' })
+  const { strings } = extractStrings('/x/en.json', json)
+  assert.ok(strings.includes('decade'))
+  assert.ok(!strings.includes('#4A90D9'))
+})
+
+test('ALL-CAPS filter keeps microcopy labels but drops identifier-like tokens', () => {
+  const json = JSON.stringify({ button: 'SAVE', constant: 'MAX_RETRIES' })
+  const { strings } = extractStrings('/x/en.json', json)
+  assert.ok(strings.includes('SAVE'))
+  assert.ok(!strings.includes('MAX_RETRIES'))
+})
+
+test('path filter catches single-leading-slash route strings', () => {
+  const json = JSON.stringify({ route: '/docs/setup' })
+  const { strings } = extractStrings('/x/en.json', json)
+  assert.ok(!strings.includes('/docs/setup'))
+})
+
+test('html captures single-quoted alt attributes as well as double-quoted', () => {
+  const html = "<img alt='A calendar icon' src='/c.png'>"
+  const { strings } = extractStrings('/x/a.html', html)
+  assert.ok(strings.includes('A calendar icon'))
+})
+
+test('extractHeadings strips a BOM before matching the first heading', () => {
+  const md = '\uFEFF# Schedule a campaign\n'
+  assert.deepEqual(extractHeadings('/x/a.md', md), ['Schedule a campaign'])
+})
