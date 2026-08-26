@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { loadKb } from '../scripts/lib/kb.mjs'
+import { loadKb, STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
 import { validateKb } from '../scripts/validate.mjs'
 
 const codesOf = (report) => report.findings.map((f) => f.code)
@@ -38,6 +38,25 @@ test('a clean knowledge base reports nothing', () => {
     const report = validateKb(kb)
     assert.equal(report.errors, 0, JSON.stringify(report.findings))
     assert.ok(!codesOf(report).includes('W_ONE_WAY_EVIDENCE'))
+
+    // The fixture authors exactly one state vector (frustrated) and one
+    // context offset (system-error). Every other state and context has no
+    // vector, and W_MISSING_VECTOR is the only code a KB this clean can
+    // still produce. Pin the code set (not just "no errors") and derive the
+    // expected count from the vocab sizes so a regression that silences
+    // W_MISSING_VECTOR, or fires it for slots that do have a vector, fails
+    // loudly instead of slipping through report.errors alone.
+    const missingStates = STATES.length - 1 // all but 'frustrated'
+    const missingContexts = CONTEXTS.length - 1 // all but 'system-error'
+    const expectedWarnings = missingStates + missingContexts
+    assert.deepEqual(new Set(codesOf(report)), new Set(['W_MISSING_VECTOR']))
+    assert.equal(
+      report.warnings,
+      expectedWarnings,
+      `expected ${missingStates} missing-state + ${missingContexts} missing-context ` +
+      `W_MISSING_VECTOR warnings (${STATES.length} states - 1 declared, ` +
+      `${CONTEXTS.length} contexts - 1 declared) = ${expectedWarnings}, got ${report.warnings}`
+    )
   } finally {
     cleanup(dir)
   }
@@ -165,6 +184,79 @@ test('an authored cell that omits a dial is an error, not a silent undefined', (
     assert.match(finding.message, /formality/)
     assert.equal(finding.severity, 'error')
     assert.ok(report.errors > 0)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an evidence entry with an out-of-vocabulary type is an error', () => {
+  const { dir, kb } = kbFrom({
+    'kb/evidence/ledger.md': '### e1 — 2026-08-26 — survey\n\n**Produced:**\n'
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'E_UNKNOWN_EVIDENCE_TYPE')
+    assert.ok(finding, 'ledger type "survey" is not one of the five known evidence types')
+    assert.equal(finding.severity, 'error')
+    assert.match(finding.message, /survey/)
+    assert.equal(finding.file, 'evidence/ledger.md')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a state vector or context offset outside its allowed range is an error', () => {
+  const { dir, kb } = kbFrom({
+    'kb/tone.md': [
+      '## State vectors',
+      '',
+      '| State | warmth | humor | directness | detail | urgency | formality |',
+      '|---|---|---|---|---|---|---|',
+      '| frustrated | 9 | 0 | 4 | 3 | 1 | 2 |',
+      '',
+      '## Context offsets',
+      '',
+      '| Context | warmth | humor | directness | detail | urgency | formality |',
+      '|---|---|---|---|---|---|---|',
+      '| system-error | -9 | -2 | 1 | 0 | 0 | 0 |'
+    ].join('\n'),
+    'kb/evidence/ledger.md': ''
+  })
+  try {
+    const report = validateKb(kb)
+    const rangeFindings = report.findings.filter((f) => f.code === 'E_VECTOR_RANGE')
+    assert.equal(rangeFindings.length, 2, 'expected one out-of-range state dial and one out-of-range context dial')
+    assert.ok(rangeFindings.every((f) => f.severity === 'error'))
+    assert.ok(rangeFindings.some((f) => /frustrated\.warmth/.test(f.message)))
+    assert.ok(rangeFindings.some((f) => /system-error\.warmth/.test(f.message)))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a state or context with no vector produces W_MISSING_VECTOR, and only that code', () => {
+  const { dir, kb } = kbFrom({
+    'kb/tone.md': [
+      '## State vectors',
+      '',
+      '| State | warmth | humor | directness | detail | urgency | formality |',
+      '|---|---|---|---|---|---|---|',
+      '| curious | 3 | 2 | 2 | 2 | 1 | 1 |'
+    ].join('\n')
+  })
+  try {
+    const report = validateKb(kb)
+    // One state declared (curious): every other state is missing one.
+    // No context table at all: every context is missing one.
+    const expected = (STATES.length - 1) + CONTEXTS.length
+    assert.equal(report.errors, 0)
+    assert.deepEqual(new Set(codesOf(report)), new Set(['W_MISSING_VECTOR']))
+    assert.equal(
+      report.warnings,
+      expected,
+      `expected ${STATES.length - 1} missing-state + ${CONTEXTS.length} missing-context ` +
+      `warnings (1 state declared, 0 contexts declared) = ${expected}, got ${report.warnings}`
+    )
   } finally {
     cleanup(dir)
   }

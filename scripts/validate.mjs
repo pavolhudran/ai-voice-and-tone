@@ -26,7 +26,8 @@ export function validateKb (kb) {
       add('error', 'E_UNKNOWN_CONFIDENCE',
         `rule ${rule.id} has confidence "${rule.confidence}"`, rule.file, rule.line)
     }
-    for (const ref of rule.evidence) {
+    const evidence = rule.evidence ?? []
+    for (const ref of evidence) {
       if (!evidenceById.has(ref)) {
         add('error', 'E_BROKEN_EVIDENCE_REF',
           `rule ${rule.id} cites ${ref}, which is not in the ledger`, rule.file, rule.line)
@@ -38,7 +39,7 @@ export function validateKb (kb) {
           rule.file, rule.line)
       }
     }
-    if (rule.evidence.length === 0 && rule.confidence && rule.confidence !== 'assumed') {
+    if (evidence.length === 0 && rule.confidence && rule.confidence !== 'assumed') {
       add('warning', 'W_NO_EVIDENCE',
         `rule ${rule.id} is ${rule.confidence} but cites no evidence`, rule.file, rule.line)
     }
@@ -59,27 +60,28 @@ export function validateKb (kb) {
   }
 
   for (const cell of kb.cells) {
+    const dials = cell.dials ?? {}
     if (!CONTEXTS.includes(cell.context)) {
       add('error', 'E_UNKNOWN_CONTEXT', `cell ${cell.id} names context "${cell.context}"`, 'tone', cell.line)
     }
     if (!STATES.includes(cell.state)) {
       add('error', 'E_UNKNOWN_STATE', `cell ${cell.id} names state "${cell.state}"`, 'tone', cell.line)
     }
-    for (const [dial, value] of Object.entries(cell.dials)) {
+    for (const [dial, value] of Object.entries(dials)) {
       if (!DIALS.includes(dial) || !Number.isInteger(value) || value < 0 || value > 4) {
         add('error', 'E_DIAL_RANGE', `cell ${cell.id} has ${dial} = ${value}; dials are integers 0-4`,
           'tone', cell.line)
       }
     }
     for (const dial of DIALS) {
-      if (!(dial in cell.dials)) {
+      if (!(dial in dials)) {
         add('error', 'E_DIAL_MISSING', `cell ${cell.id} does not declare dial "${dial}"; all six dials are required`,
           'tone', cell.line)
       }
     }
-    if (HUMOR_ZERO_STATES.includes(cell.state) && Number(cell.dials.humor) > 0) {
+    if (HUMOR_ZERO_STATES.includes(cell.state) && Number(dials.humor) > 0) {
       add('error', 'E_HUMOR_GATE',
-        `cell ${cell.id} sets humor ${cell.dials.humor}; state "${cell.state}" forces humor 0`,
+        `cell ${cell.id} sets humor ${dials.humor}; state "${cell.state}" forces humor 0`,
         'tone', cell.line)
     }
   }
