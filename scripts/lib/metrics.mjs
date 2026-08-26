@@ -20,14 +20,23 @@ export const PERSON_MARKERS = {
   }
 }
 
+// 'just' and 'could' are high-frequency and inflate this rate on their own -
+// that's fine, because hedgePer1000Words is only ever compared against the
+// brand's own baseline, never an absolute threshold. Do not trim them to
+// make the number look smaller; doing so would break comparability against
+// baselines already computed with the full list.
 const EN_HEDGES = new Set([
   'maybe', 'perhaps', 'might', 'could', 'somewhat', 'fairly', 'rather', 'seems',
   'appears', 'generally', 'usually', 'often', 'probably', 'possibly', 'just',
   'simply', 'basically', 'essentially', 'quite', 'slightly'
 ])
+// Intensifiers only - words that amplify a neighboring word (very good,
+// really fast). Evaluative adjectives like "amazing"/"awesome"/"huge" are
+// not intensifiers and are covered separately by the lexicon rules; mixing
+// them in here would mislabel what intensifierPer1000Words counts.
 const EN_INTENSIFIERS = new Set([
   'very', 'really', 'extremely', 'incredibly', 'super', 'totally', 'absolutely',
-  'highly', 'completely', 'definitely', 'literally', 'amazing', 'awesome', 'huge'
+  'highly', 'completely', 'definitely', 'literally'
 ])
 const EN_IMPERATIVE_OPENERS = new Set([
   'add', 'browse', 'check', 'choose', 'click', 'connect', 'copy', 'create',
@@ -82,7 +91,16 @@ export function universalMetrics ({ strings = [], headings = [], locale = 'en' }
   const lowerWords = words.map((w) => w.toLowerCase())
   const countIn = (set) => lowerWords.filter((w) => set.includes(w)).length
 
-  const headingVerdicts = headings.map(isTitleCase).filter((v) => v !== null)
+  // Title Case is a stylistic choice only in languages that don't already
+  // capitalize by grammar. German capitalizes every noun regardless of
+  // styling, so a heading list of ordinary nouns with no brand styling at
+  // all ("Berichte", "Einstellungen") scores 1.0 under the raw heuristic -
+  // a false signal. Czech doesn't title-case headings at all, so the same
+  // heuristic trends to 0 for an axis that doesn't exist in the language.
+  // Gate this the same way PERSON_MARKERS gates person rates: compute only
+  // where title case is a real editorial decision (English), null elsewhere.
+  const isEnglishLocale = String(locale).toLowerCase().startsWith('en')
+  const headingVerdicts = isEnglishLocale ? headings.map(isTitleCase).filter((v) => v !== null) : []
 
   return {
     sentenceCount: sentences.length,
@@ -100,7 +118,7 @@ export function universalMetrics ({ strings = [], headings = [], locale = 'en' }
     emojiPer1000Words: per1000(countMatches(text, /\p{Extended_Pictographic}/gu), wordCount),
     emDashPer1000Words: per1000(countMatches(text, /—|\s-\s/g), wordCount),
     semicolonPer1000Words: per1000(countMatches(text, /;/g), wordCount),
-    headingTitleCaseRatio: share(headingVerdicts.filter(Boolean).length, headingVerdicts.length),
+    headingTitleCaseRatio: isEnglishLocale ? share(headingVerdicts.filter(Boolean).length, headingVerdicts.length) : null,
     firstPersonPer1000Words: markers ? per1000(countIn(markers.first), wordCount) : null,
     secondPersonPer1000Words: markers ? per1000(countIn(markers.second), wordCount) : null
   }

@@ -30,6 +30,23 @@ test('heading case ratio counts Title Case among multi-word headings', () => {
   assert.equal(m.headingTitleCaseRatio, 0.667, 'Reports is single-word and excluded')
 })
 
+test('headingTitleCaseRatio is gated by locale - only English computes it', () => {
+  // German capitalizes every noun by grammar, not by editorial styling: an
+  // ordinary heading list with no brand styling at all still scores 1.0
+  // under the raw capitalization heuristic. English gets a real number;
+  // German and Czech (which doesn't title-case headings at all) get null.
+  const headings = ['Kunden Berichte', 'Neue Einstellungen']
+
+  const en = universalMetrics({ strings: ['x'], headings, locale: 'en' })
+  assert.equal(en.headingTitleCaseRatio, 1)
+
+  const de = universalMetrics({ strings: ['x'], headings, locale: 'de' })
+  assert.equal(de.headingTitleCaseRatio, null)
+
+  const cs = universalMetrics({ strings: ['x'], headings, locale: 'cs' })
+  assert.equal(cs.headingTitleCaseRatio, null)
+})
+
 test('person marker rates are null for a locale with no marker set', () => {
   assert.ok(PERSON_MARKERS.en.second.includes('you'))
   const en = universalMetrics({ strings: ['You can schedule it. We will send it.'], headings: [], locale: 'en' })
@@ -66,6 +83,13 @@ test('english metrics detect contractions, passive, imperative, hedges, intensif
   assert.ok(m.intensifierPer1000Words > 0)
   assert.ok(m.readingGrade > 0)
   assert.ok(m.longWordRate >= 0)
+})
+
+test('EN_INTENSIFIERS excludes evaluative adjectives like amazing', () => {
+  const withAmazing = englishMetrics({ strings: ['This is amazing.'] })
+  assert.equal(withAmazing.intensifierPer1000Words, 0)
+  const withExtremely = englishMetrics({ strings: ['This is extremely good.'] })
+  assert.ok(withExtremely.intensifierPer1000Words > 0)
 })
 
 test('oxford comma rate is measured only over serial-list candidates', () => {
