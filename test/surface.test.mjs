@@ -145,3 +145,20 @@ test('the review skill mechanizes the critic dispatch as two turns, not one prom
   assert.match(body, /SendMessage/)
   assert.match(body, /never combine/i, 'the skill must forbid folding the reveal into the same prompt as the guess')
 })
+
+test('microcopy declares itself and defers to the applier for long form', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('skills', 'microcopy', 'SKILL.md'))
+  assert.equal(frontmatter.name, 'microcopy')
+  assert.match(frontmatter.description, /button|error|empty state|notification/i)
+  assert.match(body, /patterns\.md/)
+  assert.match(body, /voice-and-tone/, 'must hand off long-form work')
+  assert.match(body, /humor/i)
+})
+
+test('microcopy patterns carry concrete length budgets', () => {
+  const text = readFileSync(surfaceFile('skills', 'microcopy', 'references', 'patterns.md'), 'utf8')
+  for (const element of ['Button', 'Error', 'Empty state', 'Notification', 'Tooltip']) {
+    assert.ok(text.includes(element), `patterns.md must cover ${element}`)
+  }
+  assert.match(text, /\d+\s*(characters|chars|words)/i, 'budgets must be numeric, not vibes')
+})
