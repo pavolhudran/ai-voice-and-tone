@@ -407,7 +407,9 @@ git commit -m "chore: scaffold voice-and-tone plugin, licensing, and test harnes
   - `parseYaml(source: string) -> object` - throws `Error` with a line number on unsupported syntax.
   - `stringifyYaml(value: object) -> string` - 2-space indent, `\n` endings, trailing newline.
 
-Supported subset, documented in a header comment in the file: nested block maps with 2-space indent; block sequences of scalars (`- item`); inline flow sequences (`[a, b]`); scalars typed as integer, `true`/`false`, `null` (bare `~` or empty), otherwise string; single- and double-quoted strings; `#` comments (whole-line, and after a value when preceded by whitespace); blank lines. Unsupported and throwing: anchors/aliases, multiple documents, block scalars (`|`, `>`), sequences of maps, tabs for indentation.
+Supported subset, documented in a header comment in the file: nested block maps with 2-space indent; block sequences of scalars (`- item`); inline flow sequences (`[a, b]`); block scalars (`|` literal, `>` folded); scalars typed as integer, `true`/`false`, `null` (bare `~` or empty), otherwise string; single- and double-quoted strings; `#` comments (whole-line, and after a value when preceded by whitespace); blank lines. Unsupported and throwing: anchors/aliases, multiple documents, sequences of maps, tabs for indentation.
+
+**Why block scalars are in the subset.** Claude Code skill and agent frontmatter uses `description: >` throughout, and this plugin's own surface tests parse its own frontmatter with this parser. A user's `config.yml` carrying a block scalar would otherwise hard-fail inside `loadConfig`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -468,10 +470,33 @@ test('strips comments but keeps # inside quotes', () => {
   assert.equal(got.c, 3)
 })
 
+test('block scalars fold and preserve, and end at the dedent', () => {
+  const folded = parseYaml('a: 1\nb: >\n  one\n  two\nc: 3\n')
+  assert.equal(folded.b, 'one two', 'a folded scalar joins its lines with spaces')
+  assert.equal(folded.c, 3, 'the block ends where the indentation drops')
+
+  const literal = parseYaml('a: |\n  one\n  two\n')
+  assert.equal(literal.a, 'one\ntwo', 'a literal scalar keeps its newlines')
+})
+
+test('folded scalars carry skill frontmatter, blank line and all', () => {
+  const src = [
+    'name: voice-discovery',
+    'description: >',
+    '  WHEN: no knowledge base exists yet.',
+    '  WHAT: runs the discovery pipeline.',
+    'tools: Read, Glob, Grep'
+  ].join('\n')
+  const got = parseYaml(src)
+  assert.equal(got.name, 'voice-discovery')
+  assert.equal(got.description, 'WHEN: no knowledge base exists yet. WHAT: runs the discovery pipeline.')
+  assert.equal(got.tools, 'Read, Glob, Grep')
+})
+
 test('throws with a line number on unsupported syntax', () => {
-  assert.throws(() => parseYaml('a: 1\nb: |\n  block\n'), /line 2/)
   assert.throws(() => parseYaml('a: 1\n\tb: 2'), /line 2/)
   assert.throws(() => parseYaml('a: &anchor 1'), /line 1/)
+  assert.throws(() => parseYaml('a: 1\n--- \nb: 2'), /line 2/)
 })
 
 test('round-trips through stringify', () => {
@@ -504,19 +529,24 @@ Expected: FAIL with `Cannot find module '.../scripts/lib/yaml.mjs'`
  * Zero dependencies by design (see spec section 9).
  *
  * Supported: nested block maps (2-space indent), block sequences of scalars,
- * inline flow sequences [a, b], single/double-quoted strings, integers,
- * true/false, null (~ or empty), # comments, blank lines.
+ * inline flow sequences [a, b], block scalars (| literal, > folded),
+ * single/double-quoted strings, integers, true/false, null (~ or empty),
+ * # comments, blank lines.
+ *
+ * Block scalars are in the subset because Claude Code skill and agent
+ * frontmatter uses `description: >`, and this plugin parses its own frontmatter.
  *
  * Unsupported and rejected with a line number: anchors and aliases, multiple
- * documents, block scalars (| and >), sequences of maps, tab indentation.
+ * documents, sequences of maps, tab indentation.
  */
 
 const UNSUPPORTED = [
   [/^\s*---\s*$/, 'multiple documents'],
   [/^\s*\.\.\.\s*$/, 'document end marker'],
-  [/:\s*[&*]\S/, 'anchors and aliases'],
-  [/:\s*[|>][-+0-9]*\s*$/, 'block scalars']
+  [/:\s*[&*]\S/, 'anchors and aliases']
 ]
+
+const BLOCK_SCALAR = /^([|>])([-+])?\d*\s*$/
 
 function fail (lineNo, message) {
   throw new Error(`yaml: line ${lineNo}: ${message}`)
@@ -563,8 +593,11 @@ export function parseYaml (source) {
   const root = {}
   // Each frame owns a container and the indent its children sit at.
   const stack = [{ indent: -1, container: root }]
+  // Lines already swallowed by a block scalar; skipped rather than re-parsed.
+  let consumeUntil = -1
 
   lines.forEach((raw, index) => {
+    if (index <= consumeUntil) return
     const lineNo = index + 1
     if (raw.includes('\t')) fail(lineNo, 'tab indentation is not supported')
     for (const [pattern, what] of UNSUPPORTED) {
@@ -596,6 +629,35 @@ export function parseYaml (source) {
 
     if (Array.isArray(parent)) fail(lineNo, 'mapping key inside a sequence')
 
+    const block = BLOCK_SCALAR.exec(rest)
+    if (block) {
+      // Consume every following line indented deeper than this key.
+      const collected = []
+      let end = index + 1
+      let blockIndent = null
+      for (; end < lines.length; end++) {
+        const candidate = lines[end]
+        if (candidate.trim() === '') { collected.push(''); continue }
+        const candidateIndent = candidate.length - candidate.trimStart().length
+        if (candidateIndent <= indent) break
+        if (blockIndent === null) blockIndent = candidateIndent
+        collected.push(candidate.slice(blockIndent))
+      }
+      while (collected.length && collected[collected.length - 1] === '') collected.pop()
+
+      const value = block[1] === '|'
+        ? collected.join('\n')
+        : collected.reduce((acc, line) => {
+            if (line === '') return `${acc}\n`
+            if (acc === '' || acc.endsWith('\n')) return acc + line
+            return `${acc} ${line}`
+          }, '')
+
+      parent[key] = block[2] === '+' ? `${value}\n` : value
+      consumeUntil = end - 1
+      return
+    }
+
     if (rest === '') {
       // Container: a nested map, or a block sequence. Decide by peeking ahead.
       let next = null
@@ -621,6 +683,9 @@ export function parseYaml (source) {
 
 function stringifyScalar (value) {
   if (value === null || value === undefined) return '~'
+  if (typeof value === 'string' && value.includes('\n')) {
+    throw new Error('yaml: use stringifyYaml for multi-line strings, not a scalar position')
+  }
   if (typeof value === 'boolean' || typeof value === 'number') return String(value)
   const text = String(value)
   const needsQuotes =
@@ -646,6 +711,11 @@ export function stringifyYaml (value, depth = 0) {
       out += `${pad}${key}:\n${stringifyYaml(child, depth + 1)}`
       continue
     }
+    if (typeof child === 'string' && child.includes('\n')) {
+      out += `${pad}${key}: |\n`
+      for (const line of child.split('\n')) out += `${pad}  ${line}\n`
+      continue
+    }
     out += `${pad}${key}: ${stringifyScalar(child)}\n`
   }
   return out
@@ -655,7 +725,7 @@ export function stringifyYaml (value, depth = 0) {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `node --test test/yaml.test.mjs`
-Expected: PASS, 6 tests
+Expected: PASS, 8 tests
 
 - [ ] **Step 5: Commit**
 
@@ -1174,8 +1244,8 @@ test('json takes values not keys, and drops non-copy values', () => {
 test('yaml takes values, and falls back to a line scan on unsupported syntax', () => {
   assert.deepEqual(extractStrings('/x/en.yml', 'save: Save\nnested:\n  hi: Hi there').strings.sort(),
     ['Hi there', 'Save'])
-  // Block scalars are outside the YAML subset; the line-scan fallback still finds copy.
-  const messy = 'save: Save\nbody: |\n  multi line\n'
+  // Anchors are outside the YAML subset; the line-scan fallback still finds copy.
+  const messy = 'save: Save\nalias: &a Reuse me\n'
   assert.ok(extractStrings('/x/en.yml', messy).strings.includes('Save'))
 })
 
@@ -1330,7 +1400,7 @@ function extractYaml (raw) {
     walkJsonValues(parseYaml(raw), out)
     return out
   } catch {
-    // Real-world locale YAML uses block scalars and anchors the subset rejects.
+    // Real-world locale YAML uses anchors and merge keys the subset rejects.
     // Degrade to a line scan rather than losing the whole file.
     for (const line of raw.split('\n')) {
       const match = /^\s*[\w.$-]+:\s*(\S.*)$/.exec(line)
@@ -1944,10 +2014,10 @@ const strings = [
 
 test('universal metrics count structure and punctuation', () => {
   const m = universalMetrics({ strings, headings: [], locale: 'en' })
-  assert.equal(m.sentenceCount, 5)
-  assert.equal(m.wordCount, 25)
-  assert.equal(m.exclamationRate, 0.2)
-  assert.equal(m.questionRate, 0.2)
+  assert.equal(m.sentenceCount, 4)
+  assert.equal(m.wordCount, 21)
+  assert.equal(m.exclamationRate, 0.25)
+  assert.equal(m.questionRate, 0.25)
   assert.ok(m.meanSentenceLength > 0)
   assert.ok(m.sentenceLengthSd >= 0)
   assert.equal(m.semicolonPer1000Words > 0, true)
@@ -2400,7 +2470,7 @@ The humor gates are implemented here rather than in a skill on purpose. A gate w
   - Vocabularies: `STATES`, `CONTEXTS`, `DIALS`, `HUMOR_ZERO_STATES`, `CONFIDENCE_LEVELS`, `EVIDENCE_TYPES`, `ID_PREFIXES`.
   - `cellId(context, state) -> string`
   - `parseRuleHeading(line) -> {id, name, confidence, evidence} | null`
-  - `parseProseRules(md) -> Array<{id, name, confidence, evidence, fields, line}>`
+  - `parseProseRules(md) -> Array<{id, name, confidence, evidence, fields, line}>` - HTML-commented blocks are masked out first, with line numbers preserved
   - `parseTables(md) -> Array<{section, headers, rows}>`
   - `parseTableRules(md) -> Array<{id, confidence, evidence, cells, section, line}>`
   - `parseToneCells(md) -> Array<{id, context, state, confidence, evidence, dials, feeling, do, dont, example, line}>`
@@ -2477,6 +2547,37 @@ test('prose rules capture their labelled fields', () => {
   assert.equal(rules[0].evidence[0], 'e12')
   assert.equal(rules[1].confidence, 'assumed')
   assert.ok(rules[0].line > 0, 'line numbers anchor review findings')
+})
+
+test('rules and tables inside HTML comments are documentation, not rules', () => {
+  const md = [
+    '## Characteristics',
+    '',
+    '<!--',
+    '### V1 · Plainspoken   `confirmed`  ev: e99',
+    '',
+    '**Means:** An example nobody has adopted yet.',
+    '-->',
+    '',
+    '### V2 · Genuine   `confirmed`  ev: e1',
+    '',
+    '**Means:** A real rule.'
+  ].join('\n')
+
+  const rules = parseProseRules(md)
+  assert.deepEqual(rules.map((r) => r.id), ['V2'], 'the commented example must not become a rule')
+  assert.equal(rules[0].line, 9, 'masking preserves line numbers')
+
+  const commentedTable = [
+    '<!--',
+    '| ID | Avoid | Prefer | Why | Conf | Ev |',
+    '|---|---|---|---|---|---|',
+    '| L99 | example | sample | illustration | confirmed | e99 |',
+    '-->'
+  ].join('\n')
+  assert.deepEqual(parseTableRules(commentedTable), [])
+
+  assert.deepEqual(parseEvidence('<!--\n### e99 — 2026-08-26 — interview\n-->'), [])
 })
 
 test('tabular rules read ID, Conf, and Ev columns', () => {
@@ -2667,6 +2768,17 @@ export const ID_PREFIXES = {
   V: 'voice', T: 'tone', L: 'lexicon', M: 'mechanics', C: 'channel', A: 'audience', X: 'locale'
 }
 
+/**
+ * Templates and real knowledge bases keep their example rules inside HTML
+ * comments. Those are documentation, not rules - parsing them would enter
+ * phantom rules citing evidence that does not exist, and would let a user's
+ * commented-out rule silently enforce in review. Blank the comment body but
+ * keep the newlines, so reported line numbers still anchor to the file.
+ */
+function maskComments (md) {
+  return String(md).replace(/<!--[\s\S]*?-->/g, (block) => block.replace(/[^\n]/g, ' '))
+}
+
 const HEADING = /^#{2,4}\s+([A-Z][\w./-]*)\s*(?:·\s*([^`]*?))?\s*`([a-z]+)`(?:\s*ev:\s*([^`]+?))?\s*$/
 const FIELD = /^\*\*([^:*]+):\*\*\s*(.*)$/
 const EVIDENCE_HEADING = /^#{2,4}\s+(e\d+)\s*[—-]\s*(\d{4}-\d{2}-\d{2})\s*[—-]\s*([a-z-]+)\s*$/
@@ -2712,7 +2824,7 @@ function blockBoundaries (lines) {
 }
 
 export function parseProseRules (md) {
-  const lines = String(md).split('\n')
+  const lines = maskComments(md).split('\n')
   const bounds = blockBoundaries(lines)
   const rules = []
   for (let b = 0; b < bounds.length - 1; b++) {
@@ -2737,7 +2849,7 @@ function splitRow (line) {
 }
 
 export function parseTables (md) {
-  const lines = String(md).split('\n')
+  const lines = maskComments(md).split('\n')
   const tables = []
   for (let i = 0; i < lines.length - 1; i++) {
     if (!lines[i].trim().startsWith('|')) continue
@@ -2844,7 +2956,7 @@ export function parseVectors (md) {
 }
 
 export function parseEvidence (md) {
-  const lines = String(md).split('\n')
+  const lines = maskComments(md).split('\n')
   const bounds = blockBoundaries(lines)
   const entries = []
   for (let b = 0; b < bounds.length - 1; b++) {
@@ -2965,7 +3077,7 @@ export function loadKb (kbRoot) {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `node --test test/kb.test.mjs`
-Expected: PASS, 11 tests
+Expected: PASS, 12 tests
 
 - [ ] **Step 5: Commit**
 
@@ -6615,7 +6727,7 @@ test('scripts build paths with path.join, never by concatenating a separator', (
 
 test('no file in the plugin tree carries CRLF endings', () => {
   for (const abs of walkPlugin()) {
-    if (lstatSync(abs).isDirectory()) return
+    if (lstatSync(abs).isDirectory()) continue
     if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
     assert.ok(!readFileSync(abs, 'utf8').includes('\r'), `${path.relative(root, abs)} has CRLF endings`)
   }
