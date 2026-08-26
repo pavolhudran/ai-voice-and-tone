@@ -103,3 +103,30 @@ test('the write command lists the fixed context and state vocabularies', () => {
     assert.ok(body.includes(token), `write.md must list ${token}`)
   }
 })
+
+test('the review skill maps every confidence level to a severity', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('skills', 'voice-review', 'SKILL.md'))
+  assert.equal(frontmatter.name, 'voice-review')
+  const severity = readFileSync(surfaceFile('skills', 'voice-review', 'references', 'severity.md'), 'utf8')
+  for (const level of ['confirmed', 'derived', 'assumed', 'disputed']) {
+    assert.ok(severity.includes(level), `severity.md must map ${level}`)
+  }
+  assert.match(severity, /never enforced/i, 'disputed rules are never enforced')
+  assert.match(severity, /accessibility/i)
+  assert.match(severity, /inclusive/i)
+  assert.match(body, /file:line/)
+})
+
+test('the critic agent runs fresh and is told what it may not see', () => {
+  const { frontmatter, body } = readFrontmatter(surfaceFile('agents', 'voice-critic.md'))
+  assert.equal(frontmatter.name, 'voice-critic')
+  assert.match(body, /fresh context/i)
+  assert.match(body, /read-back/i)
+  assert.match(body, /rationale/i, 'the critic must be told it never sees the drafting rationale')
+})
+
+test('the review command routes to the review skill and offers the critic', () => {
+  const { body } = readFrontmatter(surfaceFile('commands', 'review.md'))
+  assert.match(body, /voice-review/)
+  assert.match(body, /voice-critic/)
+})
