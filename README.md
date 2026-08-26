@@ -37,7 +37,14 @@ are recorded in `evidence/conflicts.md` and neither is enforced until you decide
 ## Install
 
 ```
-/plugin install voice-and-tone
+/plugin marketplace add https://gitlab.com/pavol.hudran/ai-voice-and-tone
+/plugin install voice-and-tone@ai-voice-and-tone
+```
+
+Or from a local checkout, point the marketplace at the directory instead:
+
+```
+/plugin marketplace add ~/Sites/ai-voice-and-tone
 ```
 
 **Requires Node 18 or newer.** `/voice-and-tone:init`, `:learn`, `:audit`, and
