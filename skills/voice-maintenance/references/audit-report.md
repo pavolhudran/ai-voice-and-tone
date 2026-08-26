@@ -58,7 +58,7 @@ Rule health
 
   dead         C03  "press release boilerplate"  no findings, no drafts, 11 months
 
-  disputed     D1   contraction use            marketing 0%, app UI 61%
+  disputed     M12  contraction use            marketing 0%, app UI 61%
 ```
 
 A rule flagged `overridden` is the highest-value line in the whole report. It is

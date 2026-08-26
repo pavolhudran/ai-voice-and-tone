@@ -66,6 +66,12 @@ opinion, not three.
 **The one exception:** an unambiguous lexicon swap fires immediately. If a user
 changes `leverage` to `use`, there is nothing to corroborate.
 
+A single-word replacement is not automatically unambiguous. Before firing the
+exception, apply the "Telling word swap from tone shift" test in
+`references/correction-classes.md` - a word that carries its own warmth or
+formality (`excited` -> `pleased`) is a tone shift wearing a word-swap
+disguise, and stays corroboration-gated.
+
 Without this threshold the knowledge base overfits to a single editing session
 and begins confidently enforcing an accidental preference - which is worse than
 having no rule, because now it blocks.

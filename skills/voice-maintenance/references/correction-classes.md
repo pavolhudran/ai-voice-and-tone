@@ -32,6 +32,34 @@ They overlap, and it matters because they produce different rules.
 
 When genuinely both, record both, and let corroboration decide which survives.
 
+## Telling word swap from tone shift
+
+This is the pairing that matters most, because word swap is the one class that
+skips corroboration entirely. A single-word replacement can be either class,
+and only a genuine word swap fires immediately - a tone shift that happens to
+be expressed through one word is still corroboration-gated, same as any other
+dial move.
+
+**Test:** would the original word, standing alone, name a feeling, an emphasis
+level, or a formality register - the kind of word a thesaurus groups by *how
+warm or formal it sounds*, not by *what it means*? If yes, it is a tone shift.
+If the two words are interchangeable in warmth and formality and differ only in
+whether one is jargon, technical terminology, or a stock phrase - same
+register, only the plainness changed - it is a genuine word swap.
+
+- `leverage` -> `use`: same warmth, same formality, same register. The only
+  difference is that one is corporate jargon. **Word swap** - fires
+  immediately.
+- `excited` -> `pleased`: same shape as the swap above - one word in, one word
+  out - but `excited` and `pleased` sit at different points on the warmth
+  dial. Swapping one for the other is not jargon removal, it is cooling the
+  copy down. **Tone shift wearing a word-swap disguise** - corroboration-gated.
+
+When in doubt, ask whether the correction would still make sense as a
+`<KB>/lexicon.md` entry on its own, with no dial attached. `leverage -> use`
+does. `excited -> pleased` does not - "excited" is not wrong or non-standard,
+this piece just wanted a calmer register.
+
 ## Threshold, restated
 
 Two independent corrections, from **different drafts**, pointing the same way.
