@@ -1,0 +1,211 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync, readdirSync, lstatSync, existsSync } from 'node:fs'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
+import { toAscii } from '../scripts/lib/cli.mjs'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+// D1: derived, never listed. A hardcoded array silently stops help-checking the
+// day a sixth script lands, which is the stale-list defect this codebase keeps
+// producing.
+const SCRIPTS = readdirSync(path.join(root, 'scripts'))
+  .filter((name) => name.endsWith('.mjs'))
+  .sort()
+
+// The global constraints bind the procedures written into skill, command, and
+// agent markdown just as hard as they bind the scripts - those files are plugin
+// logic executed by a model, and markdown telling a model to `grep` is the most
+// likely place for the violation, since no linter catches it.
+const LOGIC_DIRS = ['scripts', 'skills', 'commands', 'agents']
+const LOGIC_FILE = /\.(mjs|md)$/
+
+function walkPlugin (dir = root, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember'].includes(entry.name)) continue
+    const abs = path.join(dir, entry.name)
+    out.push(abs)
+    if (entry.isDirectory()) walkPlugin(abs, out)
+  }
+  return out
+}
+
+function walkPluginLogic () {
+  const out = []
+  for (const dir of LOGIC_DIRS) {
+    for (const abs of walkPlugin(path.join(root, dir))) {
+      if (LOGIC_FILE.test(abs)) out.push(abs)
+    }
+  }
+  return out
+}
+
+test('the conformance walk actually reaches every directory holding plugin logic', () => {
+  // Without this, extending the walks below is unfalsifiable: a walk that
+  // silently visits nothing passes every assertion in every loop it feeds.
+  const visited = new Set(walkPluginLogic())
+  const mustSee = [
+    path.join(root, 'scripts', 'validate.mjs'),
+    path.join(root, 'scripts', 'lib', 'kb.mjs'),
+    path.join(root, 'skills', 'voice-and-tone', 'SKILL.md'),
+    path.join(root, 'skills', 'voice-and-tone', 'references', 'write-flow.md'),
+    path.join(root, 'commands', 'write.md'),
+    path.join(root, 'agents', 'voice-critic.md')
+  ]
+  for (const abs of mustSee) {
+    assert.ok(visited.has(abs), `the logic walk never visits ${path.relative(root, abs)}`)
+  }
+  assert.ok(SCRIPTS.length >= 5, `expected the five shipped scripts, found ${SCRIPTS.length}`)
+})
+
+test('no symlinks anywhere in the plugin tree', () => {
+  for (const abs of walkPlugin()) {
+    assert.ok(!lstatSync(abs).isSymbolicLink(), `${path.relative(root, abs)} is a symlink`)
+  }
+})
+
+test('plugin logic never shells out to unix text tools', () => {
+  const forbidden = /\b(?:grep|sed|awk|find|cat)\s+-|\bexecSync\(|\bchild_process\b/
+  for (const abs of walkPluginLogic()) {
+    const source = readFileSync(abs, 'utf8')
+    assert.ok(!forbidden.test(source), `${path.relative(root, abs)} shells out or uses a unix text tool`)
+  }
+})
+
+test('plugin logic builds paths with path.join, never by concatenating a separator', () => {
+  const concatenated = /['"`]\s*\+\s*['"`]\/|\/['"`]\s*\+\s*(?!\/)/
+  for (const abs of walkPluginLogic()) {
+    for (const [index, line] of readFileSync(abs, 'utf8').split('\n').entries()) {
+      if (line.includes('http') || line.trim().startsWith('*') || line.trim().startsWith('//')) continue
+      assert.ok(!concatenated.test(line),
+        `${path.relative(root, abs)}:${index + 1} builds a path with a literal separator`)
+    }
+  }
+})
+
+test('no file in the plugin tree carries CRLF endings', () => {
+  for (const abs of walkPlugin()) {
+    if (lstatSync(abs).isDirectory()) continue
+    if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
+    assert.ok(!readFileSync(abs, 'utf8').includes('\r'), `${path.relative(root, abs)} has CRLF endings`)
+  }
+})
+
+test('no file in the plugin tree carries a literal byte-order mark', () => {
+  // A literal BOM is invisible in a diff and survives review by not being seen.
+  // Three implementers in this build typed one by accident where the source
+  // called for a \uFEFF escape. This guard does not rely on anyone noticing.
+  for (const abs of walkPlugin()) {
+    if (lstatSync(abs).isDirectory()) continue
+    if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
+    const bytes = readFileSync(abs)
+    for (let i = 0; i < bytes.length - 2; i++) {
+      const isBom = bytes[i] === 0xEF && bytes[i + 1] === 0xBB && bytes[i + 2] === 0xBF
+      assert.ok(!isBom, `${path.relative(root, abs)} contains a literal BOM at byte ${i}`)
+    }
+  }
+})
+
+test('every script prints ASCII-only help', () => {
+  for (const name of SCRIPTS) {
+    const out = execFileSync(process.execPath, [path.join(root, 'scripts', name), '--help'], { encoding: 'utf8' })
+    // eslint-disable-next-line no-control-regex
+    assert.ok(!/[^\x00-\x7F]/.test(out), `${name} --help printed a non-ASCII character`)
+    assert.match(out, /usage: node/)
+  }
+})
+
+test('scripts stay ASCII on stdout even when the corpus is not', () => {
+  const dir = makeTmpProject({
+    'content/a.md': '# Naplánováno\n\nVaše kampaň je naplánovaná. Skvělá práce!\n',
+    '.voice-and-tone/config.yml': [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    name: "Značka"',
+      '    primary_locale: cs',
+      '    locales: [cs]',
+      'scan:',
+      '  include:',
+      '    - "content/**/*.md"',
+      '  exclude:',
+      '    - "node_modules/**"'
+    ].join('\n')
+  })
+  try {
+    for (const name of ['scan.mjs', 'fingerprint.mjs']) {
+      const out = execFileSync(
+        process.execPath,
+        [path.join(root, 'scripts', name), '--root', dir, '--now', '2026-08-26T00:00:00.000Z'],
+        { encoding: 'utf8' }
+      )
+      // eslint-disable-next-line no-control-regex
+      assert.ok(!/[^\x00-\x7F]/.test(out), `${name} leaked a non-ASCII character to stdout`)
+    }
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('scripts write UTF-8 files even though they print ASCII', () => {
+  const dir = makeTmpProject({
+    'content/a.md': 'Vaše kampaň je naplánovaná.\n',
+    '.voice-and-tone/config.yml': 'version: 1\nscan:\n  include:\n    - "content/**/*.md"\n  exclude:\n    - "node_modules/**"\n'
+  })
+  try {
+    execFileSync(process.execPath, [path.join(root, 'scripts', 'scan.mjs'), '--root', dir], { encoding: 'utf8' })
+    const manifest = readFileSync(path.join(dir, '.voice-and-tone', 'evidence', 'manifest.json'), 'utf8')
+    assert.ok(manifest.includes('content/a.md'))
+    assert.ok(!manifest.includes('\r'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('README carries attribution, install, and all eight commands', () => {
+  const readme = readFileSync(path.join(root, 'README.md'), 'utf8')
+  assert.match(readme, /not affiliated with or endorsed by Mailchimp/i)
+  assert.match(readme, /CC BY-NC 4\.0/)
+  assert.match(readme, /MIT/)
+  for (const command of ['init', 'write', 'review', 'rewrite', 'learn', 'audit', 'sync', 'localize']) {
+    assert.ok(readme.includes(`/voice-and-tone:${command}`), `README omits :${command}`)
+  }
+  assert.ok(!readme.includes('makeareadme.com'), 'the GitLab template README must be replaced')
+})
+
+test('the repo root holds no stray plugin entry points', () => {
+  assert.ok(existsSync(path.join(root, '.claude-plugin', 'plugin.json')))
+  assert.ok(!existsSync(path.join(root, 'plugin.json')), 'the manifest belongs in .claude-plugin/')
+})
+
+test('walkPlugin skips gitignored scratch trees but still visits real plugin dot-directories', () => {
+  // F58: the exclusion list names .superpowers and .remember explicitly rather
+  // than skipping every dot-directory - a blanket dotdir rule would also skip
+  // .claude-plugin/, which holds plugin.json and is real shipped plugin content.
+  // This pins that distinction so a future "just skip dotdirs" refactor fails
+  // loudly instead of silently narrowing what the conformance suite checks.
+  const visited = walkPlugin()
+  assert.ok(
+    visited.includes(path.join(root, '.claude-plugin', 'plugin.json')),
+    'walkPlugin must still visit .claude-plugin/plugin.json'
+  )
+  for (const abs of visited) {
+    assert.ok(
+      !abs.includes(`${path.sep}.superpowers${path.sep}`) && !abs.endsWith(`${path.sep}.superpowers`),
+      `walkPlugin must not descend into .superpowers, found ${path.relative(root, abs)}`
+    )
+  }
+})
+
+test('toAscii normalizes a non-breaking space to a regular space, not a question mark', () => {
+  // F57: the NBSP entry in cli.mjs's TYPOGRAPHIC table was a dead no-op
+  // (pattern and replacement both an ordinary space). A real NBSP fell
+  // through to the blanket [^\x00-\x7F] replace and became '?'.
+  const input = 'a\u00A0b'
+  const output = toAscii(input)
+  assert.equal(output, 'a b')
+  assert.ok(!output.includes('?'), 'a non-breaking space must not degrade to a question mark')
+})

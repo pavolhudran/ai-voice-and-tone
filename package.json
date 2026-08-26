@@ -1,0 +1,13 @@
+{
+  "name": "voice-and-tone-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tests and zero-dependency scripts for the voice-and-tone Claude Code plugin.",
+  "engines": {
+    "node": ">=18.13.0"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

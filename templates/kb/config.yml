@@ -1,0 +1,32 @@
+# Voice & Tone knowledge base configuration.
+# Built on Mailchimp's Voice and Tone framework (CC BY-NC 4.0).
+# Not affiliated with or endorsed by Mailchimp.
+version: 1
+kb_version: 0.1.0
+profiles:
+  default:
+    name: "Unnamed"
+    primary_locale: en
+    locales: [en]
+scan:
+  include:
+    - "content/**/*.md"
+    - "content/**/*.mdx"
+    - "docs/**/*.md"
+    - "locales/**/*.json"
+    - "locales/**/*.yml"
+    - "locales/**/*.po"
+    - "README.md"
+  exclude:
+    - "node_modules/**"
+    - "dist/**"
+    - "build/**"
+    - ".git/**"
+    - ".voice-and-tone/**"
+runtime:
+  node: detected
+  probed: ~
+thresholds:
+  corroboration: 2
+  derived_min_samples: 5
+  stale_months: 9
