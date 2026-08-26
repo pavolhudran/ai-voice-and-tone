@@ -5,13 +5,14 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
+import { toAscii } from '../scripts/lib/cli.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPTS = ['scan.mjs', 'fingerprint.mjs', 'compile-context.mjs', 'validate.mjs', 'diff.mjs']
 
 function walkPlugin (dir = root, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (['.git', 'node_modules', '.tmp'].includes(entry.name)) continue
+    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember'].includes(entry.name)) continue
     const abs = path.join(dir, entry.name)
     out.push(abs)
     if (entry.isDirectory()) walkPlugin(abs, out)
@@ -139,4 +140,33 @@ test('README carries attribution, install, and all eight commands', () => {
 test('the repo root holds no stray plugin entry points', () => {
   assert.ok(existsSync(path.join(root, '.claude-plugin', 'plugin.json')))
   assert.ok(!existsSync(path.join(root, 'plugin.json')), 'the manifest belongs in .claude-plugin/')
+})
+
+test('walkPlugin skips gitignored scratch trees but still visits real plugin dot-directories', () => {
+  // F58: the exclusion list names .superpowers and .remember explicitly rather
+  // than skipping every dot-directory - a blanket dotdir rule would also skip
+  // .claude-plugin/, which holds plugin.json and is real shipped plugin content.
+  // This pins that distinction so a future "just skip dotdirs" refactor fails
+  // loudly instead of silently narrowing what the conformance suite checks.
+  const visited = walkPlugin()
+  assert.ok(
+    visited.includes(path.join(root, '.claude-plugin', 'plugin.json')),
+    'walkPlugin must still visit .claude-plugin/plugin.json'
+  )
+  for (const abs of visited) {
+    assert.ok(
+      !abs.includes(`${path.sep}.superpowers${path.sep}`) && !abs.endsWith(`${path.sep}.superpowers`),
+      `walkPlugin must not descend into .superpowers, found ${path.relative(root, abs)}`
+    )
+  }
+})
+
+test('toAscii normalizes a non-breaking space to a regular space, not a question mark', () => {
+  // F57: the NBSP entry in cli.mjs's TYPOGRAPHIC table was a dead no-op
+  // (pattern and replacement both an ordinary space). A real NBSP fell
+  // through to the blanket [^\x00-\x7F] replace and became '?'.
+  const input = 'a\u00A0b'
+  const output = toAscii(input)
+  assert.equal(output, 'a b')
+  assert.ok(!output.includes('?'), 'a non-breaking space must not degrade to a question mark')
 })
