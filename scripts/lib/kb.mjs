@@ -30,9 +30,15 @@ export const ID_PREFIXES = {
  * phantom rules citing evidence that does not exist, and would let a user's
  * commented-out rule silently enforce in review. Blank the comment body but
  * keep the newlines, so reported line numbers still anchor to the file.
+ *
+ * A comment missing its closing `-->` (a realistic hand-edit slip) must not
+ * leave its body live - that is exactly the phantom-rule failure this
+ * function exists to prevent. The second alternative below only fires when
+ * the first (which requires a closing tag) cannot match, and masks from the
+ * unterminated `<!--` straight through to end of file.
  */
 function maskComments (md) {
-  return String(md).replace(/<!--[\s\S]*?-->/g, (block) => block.replace(/[^\n]/g, ' '))
+  return String(md).replace(/<!--[\s\S]*?-->|<!--[\s\S]*$/g, (block) => block.replace(/[^\n]/g, ' '))
 }
 
 const HEADING = /^#{2,4}\s+([A-Z][\w./-]*)\s*(?:·\s*([^`]*?))?\s*`([a-z]+)`(?:\s*ev:\s*([^`]+?))?\s*$/
@@ -164,6 +170,13 @@ function parseList (raw) {
   return String(raw).split(LIST_SEPARATOR).map((item) => item.trim()).filter(Boolean)
 }
 
+/**
+ * Returns dials exactly as authored - ungated. This is deliberate: it is a
+ * parser, and validate.mjs (Task 10) needs the literal value a human wrote
+ * in order to report E_HUMOR_GATE on a cell that tries to smuggle humor
+ * past gate 2. Gating here would hide the very violation validation exists
+ * to catch. Gate-safe dials come only from resolveCell().
+ */
 export function parseToneCells (md) {
   const cells = []
   for (const rule of parseProseRules(md)) {
@@ -251,19 +264,27 @@ export function applyHumorGates (dials, state) {
   return out
 }
 
+/**
+ * Gate-safe dials everywhere in the return value. Both `dials` and, for an
+ * authored cell, `cell.dials` are the same gated object - there is no
+ * ungated path out of this function. (`cells` passed in, from
+ * parseToneCells, still carries the raw authored value; that is where
+ * validate.mjs looks to catch a cell that violates gate 2.)
+ */
 export function resolveCell (context, state, { cells = [], vectors = { states: {}, contexts: {} } } = {}) {
   const id = cellId(context, state)
   const authored = cells.find((cell) => cell.id === id)
 
   if (authored) {
+    const gated = applyHumorGates({ ...authored.dials }, state)
     return {
       id,
       context,
       state,
-      dials: applyHumorGates({ ...authored.dials }, state),
+      dials: gated,
       source: 'authored',
       confidence: authored.confidence,
-      cell: authored
+      cell: { ...authored, dials: gated }
     }
   }
 

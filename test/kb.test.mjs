@@ -242,3 +242,31 @@ test('loadKb reads every KB file it finds and tolerates missing ones', () => {
     cleanup(dir)
   }
 })
+
+test("resolveCell gates the nested cell's dials too, so cell.dials agrees with the top-level dials", () => {
+  const md = [
+    '### T-system-error/frustrated   `confirmed`  ev: e1',
+    '',
+    '**Dials:** warmth 3 · humor 4 · directness 2 · detail 2 · urgency 2 · formality 2'
+  ].join('\n')
+
+  const cells = parseToneCells(md)
+  assert.equal(cells[0].dials.humor, 4, 'parseToneCells returns the raw authored value, for validate.mjs')
+
+  const resolved = resolveCell('system-error', 'frustrated', { cells, vectors: { states: {}, contexts: {} } })
+  assert.equal(resolved.dials.humor, 0, 'top-level dials are gated')
+  assert.equal(resolved.cell.dials.humor, 0, 'the nested cell dials must agree with the top-level dials')
+})
+
+test('an unterminated HTML comment masks to end of file, not just to the next stray -->', () => {
+  const md = [
+    '## Characteristics',
+    '',
+    '<!--',
+    '### V9 · Never adopted   `confirmed`  ev: e1',
+    '',
+    '**Means:** Should never appear.'
+  ].join('\n')
+
+  assert.deepEqual(parseProseRules(md), [])
+})
