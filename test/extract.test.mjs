@@ -116,11 +116,13 @@ test('unsupported extensions are recognised as such, not guessed at', () => {
 
 // --- Fix round 1: filter-layer defects found in review ---
 
-test('hex-colour filter drops colours but keeps real words spelled from a-f', () => {
-  const json = JSON.stringify({ word: 'decade', color: '#4A90D9' })
-  const { strings } = extractStrings('/x/en.json', json)
-  assert.ok(strings.includes('decade'))
-  assert.ok(!strings.includes('#4A90D9'))
+test('hex-colour filter drops bare/hash colours but keeps real words and digit-bearing abbreviations spelled from a-f', () => {
+  const kept = { word: 'decade', word2: 'facade', abbrev: 'B2B', abbrev2: 'E2E', abbrev3: '2FA' }
+  const dropped = { hash: '#4A90D9', bare: '4A90D9', short: 'ff0000', shortHash: '#fff' }
+  const { strings: keptStrings } = extractStrings('/x/en.json', JSON.stringify(kept))
+  const { strings: droppedStrings } = extractStrings('/x/en.json', JSON.stringify(dropped))
+  for (const word of Object.values(kept)) assert.ok(keptStrings.includes(word), `expected "${word}" to survive`)
+  for (const word of Object.values(dropped)) assert.ok(!droppedStrings.includes(word), `expected "${word}" to be filtered`)
 })
 
 test('ALL-CAPS filter keeps microcopy labels and digit-bearing abbreviations, but drops SCREAMING_SNAKE identifiers', () => {
