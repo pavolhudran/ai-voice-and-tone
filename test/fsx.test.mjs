@@ -43,6 +43,25 @@ test('walk does not prune a directory on a depth-limited exclude pattern', () =>
   }
 })
 
+test('walk prunes a directory named by a literal exclude segment, even under **', () => {
+  const dir = makeTmpProject({
+    'a/node_modules/pkg/index.js': 'never',
+    'a/src/index.js': 'keep'
+  })
+  try {
+    const found = walk(dir, {
+      include: ['**/*.js'],
+      exclude: ['**/node_modules']
+    }).map((abs) => toPosix(path.relative(dir, abs)))
+    // "**/node_modules" names a directory (its final segment has no wildcard),
+    // so it must prune the whole a/node_modules subtree -- not just fail to
+    // match individual files inside it, which would silently leak them in.
+    assert.deepEqual(found, ['a/src/index.js'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('walk with no include patterns returns nothing', () => {
   const dir = makeTmpProject({ 'a.md': 'a' })
   try {
