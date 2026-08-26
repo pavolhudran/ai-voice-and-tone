@@ -3,10 +3,15 @@
  * Zero dependencies by design (see spec section 9).
  *
  * Supported: nested block maps (2-space indent), block sequences of scalars,
- * inline flow sequences [a, b], block scalars with optional chomping
- * indicators (| literal, |- strip, |+ keep, > folded, >- strip, >+ keep),
- * single/double-quoted strings, integers, true/false, null (~ or empty),
- * # comments, blank lines.
+ * inline flow sequences [a, b], block scalars (| literal, > folded) with an
+ * optional chomping indicator, single/double-quoted strings, integers,
+ * true/false, null (~ or empty), # comments, blank lines.
+ *
+ * Chomping: | and > set the block style - literal keeps newlines, folded
+ * joins lines with spaces. A trailing + appends a single trailing newline.
+ * Bare and - behave identically: this subset has no clip/strip distinction,
+ * unlike standard YAML, where bare clips to one trailing newline and - strips
+ * it entirely.
  *
  * Block scalars are in the subset because Claude Code skill and agent
  * frontmatter uses `description: >` (and sometimes `description: >-`), and
