@@ -1,9 +1,7 @@
 # GitLab CI for the voice-and-tone plugin.
 #
-#   test   runs the suite, but only once package.json exists in the ref being
-#          built. This branch carries the presentation alone, so on a docs-only
-#          ref the job is skipped rather than failing on a missing manifest.
-#   pages  publishes docs/presentation/ to GitLab Pages from the default branch.
+#   test   runs the suite on every branch and every merge request
+#   pages  publishes docs/presentation/ to GitLab Pages from the default branch
 #
 # The plugin has zero npm dependencies, so there is no install step and no cache.
 
@@ -21,19 +19,12 @@ test:
     - npm test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      exists:
-        - package.json
     - if: $CI_COMMIT_BRANCH
-      exists:
-        - package.json
 
 pages:
   stage: deploy
-  # Optional, so the presentation still deploys before the code lands, and the
-  # moment package.json arrives a red suite starts blocking the deploy.
-  needs:
-    - job: test
-      optional: true
+  # A red suite must not reach the published page.
+  needs: ["test"]
   script:
     # The presentation is a single self-contained file. Copying the directory
     # means any asset added later ships without touching this config.
