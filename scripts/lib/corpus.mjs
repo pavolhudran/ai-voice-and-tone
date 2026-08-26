@@ -7,19 +7,27 @@ import { activeProfile, localeOf } from './config.mjs'
  * Read every copy-bearing file the config points at, in a stable order.
  * Files that yield no copy are dropped: an empty locale stub is not a data point.
  *
- * Exception: a JSON file that yields zero strings is ambiguous between "really
- * empty" and "malformed" - extractStrings has no error channel and swallows a
- * JSON.parse failure into an empty array. Rather than let a broken locale file
- * disappear indistinguishably from an empty valid one, its path is recorded on
- * the returned array's `unreadable` property. It still contributes no strings
- * to the corpus.
+ * @param {string} projectRoot
+ * @param {object} config
+ * @param {string} [profileName]
+ * @param {string[]} [unreadable] - out-parameter. A JSON file that yields zero
+ *   strings is ambiguous between "really empty" and "malformed" -
+ *   extractStrings has no error channel and swallows a JSON.parse failure
+ *   into an empty array. Rather than let a broken locale file disappear
+ *   indistinguishably from an empty valid one, its rel path is pushed here.
+ *   It still contributes no strings to the returned corpus. An out-parameter
+ *   is used instead of a property on the returned array because a property
+ *   does not survive .map/.filter/.flatMap/spread/Array.from/destructuring -
+ *   any of which a caller is free to apply to the array this function
+ *   returns - so a plain property would work only for a caller holding the
+ *   exact original reference. This one is visible in the signature and
+ *   passes through untouched by construction.
  */
-export function gatherCorpus (projectRoot, config, profileName = 'default') {
+export function gatherCorpus (projectRoot, config, profileName = 'default', unreadable = []) {
   const profile = activeProfile(config, profileName)
   const primary = profile.primary_locale ?? 'en'
   const locales = profile.locales ?? [primary]
   const out = []
-  const unreadable = []
 
   for (const abs of walk(projectRoot, config.scan)) {
     let raw
@@ -40,7 +48,6 @@ export function gatherCorpus (projectRoot, config, profileName = 'default') {
       headings: extractHeadings(abs, raw)
     })
   }
-  out.unreadable = unreadable
   return out
 }
 

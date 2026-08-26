@@ -11,7 +11,8 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
   const byLocale = {}
   const totals = { files: 0, strings: 0, words: 0, sentences: 0 }
 
-  const corpus = gatherCorpus(projectRoot, config, profileName)
+  const unreadablePaths = []
+  const corpus = gatherCorpus(projectRoot, config, profileName, unreadablePaths)
 
   for (const file of corpus) {
     const joined = file.strings.join('\n')
@@ -35,8 +36,6 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
     bucket.strings += entry.strings
     bucket.words += entry.words
   }
-
-  const unreadablePaths = corpus.unreadable ?? []
 
   return {
     generated,
@@ -73,7 +72,14 @@ function main (argv) {
   writeTextFile(out, `${JSON.stringify(manifest, null, 2)}\n`)
 
   if (values.json) {
-    process.stdout.write(`${JSON.stringify({ totals: manifest.totals, byLocale: manifest.byLocale, unreadable: manifest.unreadable })}\n`)
+    // Paths in manifest.unreadable.paths are real on-disk paths and may carry
+    // non-ASCII bytes; only the manifest file (UTF-8) is the right home for
+    // them. stdout stays ASCII-safe with a count alone.
+    process.stdout.write(`${JSON.stringify({
+      totals: manifest.totals,
+      byLocale: manifest.byLocale,
+      unreadable: { count: manifest.unreadable.count }
+    })}\n`)
     return
   }
   process.stdout.write(

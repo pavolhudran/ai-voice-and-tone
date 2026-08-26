@@ -43,6 +43,35 @@ test('saveConfig round-trips through loadConfig', () => {
   }
 })
 
+test('loadConfig does not alias DEFAULT_CONFIG nested objects across calls', () => {
+  const dir = makeTmpProject({ 'kb/config.yml': 'kb_version: 0.4.2\n' })
+  try {
+    const a = loadConfig(path.join(dir, 'kb'))
+    const b = loadConfig(path.join(dir, 'kb'))
+    assert.notEqual(a.thresholds, DEFAULT_CONFIG.thresholds, 'a fresh clone, not the frozen default')
+    assert.notEqual(a.thresholds, b.thresholds, 'two calls do not share the same nested object')
+    a.thresholds.corroboration = 999
+    assert.equal(DEFAULT_CONFIG.thresholds.corroboration, 2, 'mutating one result leaves the frozen default intact')
+    assert.equal(b.thresholds.corroboration, 2, 'mutating one result leaves a sibling call intact')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a user scan.exclude replaces the default array rather than concatenating with it', () => {
+  const dir = makeTmpProject({
+    'kb/config.yml': 'scan:\n  exclude:\n    - vendor/**\n'
+  })
+  try {
+    const config = loadConfig(path.join(dir, 'kb'))
+    assert.deepEqual(config.scan.exclude, ['vendor/**'])
+    assert.ok(!config.scan.exclude.includes('node_modules/**'), 'default entries are not merged in')
+    assert.deepEqual(config.scan.include, DEFAULT_CONFIG.scan.include, 'untouched sibling key survives the merge')
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('localeOf reads the locale from the path, else falls back to primary', () => {
   const locales = ['en', 'cs']
   assert.equal(localeOf('locales/cs/common.json', locales, 'en'), 'cs')

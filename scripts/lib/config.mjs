@@ -31,16 +31,38 @@ export function kbRootFor (projectRoot, override) {
   return override ? path.resolve(override) : path.join(projectRoot, KB_DIRNAME)
 }
 
+function isPlainObject (value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function clone (value) {
+  if (Array.isArray(value)) return value.map(clone)
+  if (isPlainObject(value)) {
+    const out = {}
+    for (const [key, v] of Object.entries(value)) out[key] = clone(v)
+    return out
+  }
+  return value
+}
+
+/**
+ * Merge patch onto base without mutating or aliasing either side. Every
+ * nested object and array is cloned, not merely spread, so an untouched
+ * branch of DEFAULT_CONFIG returned by one loadConfig() call can never be
+ * the same object a later call returns. Object.freeze on DEFAULT_CONFIG is
+ * shallow, so aliasing a nested object (say, .thresholds) would let one
+ * caller's in-place edit corrupt the defaults for every later call in the
+ * same process. A user-supplied array (e.g. scan.exclude) replaces the
+ * default array wholesale rather than concatenating with it - arrays are
+ * never recursed into, only cloned.
+ */
 function deepMerge (base, patch) {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch ?? base
-  const out = Array.isArray(base) ? [...base] : { ...base }
+  if (!isPlainObject(patch)) return patch === undefined ? clone(base) : clone(patch)
+  const out = {}
+  for (const [key, value] of Object.entries(base)) out[key] = clone(value)
   for (const [key, value] of Object.entries(patch)) {
     const current = out[key]
-    out[key] =
-      current && typeof current === 'object' && !Array.isArray(current) &&
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? deepMerge(current, value)
-        : value
+    out[key] = isPlainObject(current) && isPlainObject(value) ? deepMerge(current, value) : clone(value)
   }
   return out
 }
