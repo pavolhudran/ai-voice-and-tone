@@ -1,0 +1,8 @@
+{
+  "name": "voice-and-tone",
+  "version": "0.1.0",
+  "description": "Build, maintain, and apply a brand's voice and tone on any project. Every rule carries its evidence and a confidence level, so the guide can be proved rather than recited. Built on Mailchimp's Voice and Tone framework.",
+  "author": {
+    "name": "Pavol Hudran"
+  }
+}
