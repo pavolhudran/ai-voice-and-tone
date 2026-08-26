@@ -123,17 +123,29 @@ test('hex-colour filter drops colours but keeps real words spelled from a-f', ()
   assert.ok(!strings.includes('#4A90D9'))
 })
 
-test('ALL-CAPS filter keeps microcopy labels but drops identifier-like tokens', () => {
-  const json = JSON.stringify({ button: 'SAVE', constant: 'MAX_RETRIES' })
-  const { strings } = extractStrings('/x/en.json', json)
-  assert.ok(strings.includes('SAVE'))
-  assert.ok(!strings.includes('MAX_RETRIES'))
+test('ALL-CAPS filter keeps microcopy labels and digit-bearing abbreviations, but drops SCREAMING_SNAKE identifiers', () => {
+  const kept = { button: 'SAVE', quarter: 'Q4', model: 'P2P', locale: 'I18N', proto: 'HTTP2', hash: 'SHA256', seo: 'SEO', api: 'API' }
+  const dropped = { constant: 'MAX_RETRIES', err: 'ERROR_404', secret: 'API_KEY', header: 'X_TOTAL_COUNT' }
+  const { strings: keptStrings } = extractStrings('/x/en.json', JSON.stringify(kept))
+  const { strings: droppedStrings } = extractStrings('/x/en.json', JSON.stringify(dropped))
+  for (const word of Object.values(kept)) assert.ok(keptStrings.includes(word), `expected "${word}" to survive`)
+  for (const word of Object.values(dropped)) assert.ok(!droppedStrings.includes(word), `expected "${word}" to be filtered`)
 })
 
-test('path filter catches single-leading-slash route strings', () => {
-  const json = JSON.stringify({ route: '/docs/setup' })
+test('path filter catches leading-slash and dot-slash paths, but keeps prose with an embedded slash', () => {
+  const json = JSON.stringify({
+    route: '/docs/setup',
+    rel: './x',
+    parent: '../x',
+    cdn: '//cdn/x',
+    prose: 'Use A/B testing to compare campaigns.'
+  })
   const { strings } = extractStrings('/x/en.json', json)
   assert.ok(!strings.includes('/docs/setup'))
+  assert.ok(!strings.includes('./x'))
+  assert.ok(!strings.includes('../x'))
+  assert.ok(!strings.includes('//cdn/x'))
+  assert.ok(strings.includes('Use A/B testing to compare campaigns.'))
 })
 
 test('html captures single-quoted alt attributes as well as double-quoted', () => {

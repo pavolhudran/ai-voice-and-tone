@@ -30,7 +30,7 @@ function isCopy (value) {
   if (/^#[0-9a-f]{3,8}$/i.test(text)) return false
   if (/^[0-9a-f]{3,8}$/i.test(text) && /\d/.test(text)) return false
   if (/^[/.]{0,2}\//.test(text)) return false
-  if (/^[A-Z0-9_]+$/.test(text) && /[_0-9]/.test(text)) return false
+  if (/^[A-Z0-9_]+$/.test(text) && /_/.test(text)) return false
   return true
 }
 
