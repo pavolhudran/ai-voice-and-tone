@@ -86,7 +86,13 @@ test('lexicon entries are ranked by corpus violations, not by id', () => {
       corpusStrings: ['leverage leverage leverage', 'utilize'],
       generated: '2026-08-26T00:00:00.000Z'
     })
-    assert.ok(md.indexOf('leverage') < md.indexOf('utilize'),
+    // Scope to the Lexicon table itself, not the whole document - either
+    // term could legitimately appear elsewhere (a voice rule's "Rules out"
+    // line, say) without that saying anything about rank.
+    const start = md.indexOf('## Lexicon')
+    const end = md.indexOf('##', start + 1)
+    const lexiconSection = md.slice(start, end === -1 ? md.length : end)
+    assert.ok(lexiconSection.indexOf('leverage') < lexiconSection.indexOf('utilize'),
       'the more-violated term comes first even though L02 is confirmed')
   } finally {
     cleanup(dir)
@@ -114,6 +120,24 @@ test('an empty knowledge base still compiles a valid card', () => {
     })
     assert.match(md, /GENERATED FILE/)
     assert.match(md, /none yet/i)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an empty knowledge base never prints a nonzero humor default dial', () => {
+  // Gate 1 (kb.mjs interpolate()) forces humor 0 on every computed cell, so
+  // a KB with no authored **Default dials:** line must never show the card
+  // contradicting its own Humor gate section.
+  const dir = makeTmpProject({ 'kb/config.yml': 'kb_version: 0.1.0\n' })
+  try {
+    const md = compileContext(loadKb(path.join(dir, 'kb')), {
+      corpusStrings: [], generated: '2026-08-26T00:00:00.000Z'
+    })
+    const start = md.indexOf('## Default dials')
+    const end = md.indexOf('##', start + 1)
+    const dialsSection = md.slice(start, end === -1 ? md.length : end)
+    assert.match(dialsSection, /humor 0\b/)
   } finally {
     cleanup(dir)
   }

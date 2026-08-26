@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { writeTextFile, toPosix } from './lib/fsx.mjs'
 import { loadConfig, activeProfile } from './lib/config.mjs'
 import { gatherCorpus } from './lib/corpus.mjs'
-import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES } from './lib/kb.mjs'
+import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
 import { countHits, rankRules } from './lib/hits.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp } from './lib/cli.mjs'
 
@@ -11,7 +11,13 @@ const ATTRIBUTION =
   'Built on Mailchimp\'s Voice and Tone framework (CC BY-NC 4.0). ' +
   'Not affiliated with or endorsed by Mailchimp.'
 
-const NEUTRAL_DIALS = Object.fromEntries(DIALS.map((dial) => [dial, 2]))
+// Synthetic no-data fallback (no authored **Default dials:** line, or a
+// malformed one). humor is pinned to 0, not the neutral 2 the other five
+// dials get - gate 1 (kb.mjs interpolate()) forces humor 0 on every
+// computed cell, so a KB that has never authored a tone cell can never
+// resolve a nonzero humor value. Printing "humor 2" here would contradict
+// the card's own Humor gate section two headings down.
+const NEUTRAL_DIALS = { ...Object.fromEntries(DIALS.map((dial) => [dial, 2])), humor: 0 }
 
 export function estimateTokens (text) {
   return Math.ceil(String(text).length / 4)
@@ -100,7 +106,7 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
   lines.push('')
   lines.push('| Need | Load |')
   lines.push('|---|---|')
-  lines.push(`| A tone cell | \`tone.md\` - ${kb.cells.length} authored of ${10 * 8} |`)
+  lines.push(`| A tone cell | \`tone.md\` - ${kb.cells.length} authored of ${CONTEXTS.length * STATES.length} |`)
   const channelNames = Object.keys(kb.channels)
   const localeNames = Object.keys(kb.locales)
   lines.push(`| A channel playbook | ${channelNames.length ? channelNames.map((n) => `\`channels/${n}.md\``).join(', ') : '_none yet_'} |`)
