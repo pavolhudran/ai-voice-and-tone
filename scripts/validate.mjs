@@ -3,7 +3,7 @@ import {
   loadKb, STATES, CONTEXTS, DIALS, CONFIDENCE_LEVELS, EVIDENCE_TYPES, ID_PREFIXES,
   HUMOR_ZERO_STATES, cellId
 } from './lib/kb.mjs'
-import { parseCliArgs, resolveRoots, die, printHelp } from './lib/cli.mjs'
+import { parseCliArgs, resolveRoots, die, printHelp, writeOut } from './lib/cli.mjs'
 
 export function validateKb (kb = {}) {
   const rules = kb.rules ?? []
@@ -152,7 +152,7 @@ function main (argv) {
   const report = validateKb(loadKb(kbRoot))
 
   if (values.json) {
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+    writeOut(`${JSON.stringify(report, null, 2)}\n`)
   } else {
     const lines = report.findings.map(
       (f) => `validate: ${f.severity.toUpperCase()} ${f.code} ${f.file}:${f.line} ${f.message}`
@@ -162,7 +162,7 @@ function main (argv) {
       `${report.counts.possibleCells}, ${report.counts.evidence} evidence entries`
     )
     lines.push(`validate: ${report.errors} errors, ${report.warnings} warnings`)
-    process.stdout.write(`${lines.join('\n')}\n`)
+    writeOut(`${lines.join('\n')}\n`)
   }
 
   if (report.errors > 0) process.exit(2)

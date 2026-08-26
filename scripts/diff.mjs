@@ -2,7 +2,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
 import { splitWords, splitSentences } from './lib/text.mjs'
-import { parseCliArgs, resolveRoots, nowIso, die, printHelp } from './lib/cli.mjs'
+import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 /** Longest common subsequence over word tokens. O(n*m); drafts are short. */
 function lcsTable (a, b) {
@@ -109,7 +109,7 @@ function main (argv) {
   result.generated = nowIso(values)
 
   if (values.json) {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+    writeOut(`${JSON.stringify(result, null, 2)}\n`)
     return
   }
 
@@ -118,7 +118,7 @@ function main (argv) {
   const out = values.out ? path.resolve(values.out) : path.join(kbRoot, '.drafts', `${base}.diff.json`)
   writeTextFile(out, `${JSON.stringify(result, null, 2)}\n`)
 
-  process.stdout.write(
+  writeOut(
     `diff: +${result.summary.added} -${result.summary.removed} words, ` +
     `length ${result.summary.wordDelta >= 0 ? '+' : ''}${result.summary.wordDelta} ` +
     `(${result.summary.wordDeltaPct ?? 'n/a'}%)\n` +

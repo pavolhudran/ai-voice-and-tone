@@ -5,7 +5,7 @@ import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
 import { loadConfig } from './lib/config.mjs'
 import { gatherCorpus, byLocale } from './lib/corpus.mjs'
 import { computeFingerprint } from './lib/metrics.mjs'
-import { parseCliArgs, resolveRoots, nowIso, die, printHelp } from './lib/cli.mjs'
+import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 export function buildFingerprint (projectRoot, config, { generated, source = 'measured', profileName = 'default' }) {
   const buckets = byLocale(gatherCorpus(projectRoot, config, profileName))
@@ -65,7 +65,7 @@ function main (argv) {
   writeTextFile(out, `${JSON.stringify(fingerprint, null, 2)}\n`)
 
   if (values.json) {
-    process.stdout.write(`${JSON.stringify({ source, locales: Object.keys(fingerprint.byLocale) })}\n`)
+    writeOut(`${JSON.stringify({ source, locales: Object.keys(fingerprint.byLocale) })}\n`)
     return
   }
   const lines = [`fingerprint: source=${source}`]
@@ -78,7 +78,7 @@ function main (argv) {
   if (Object.keys(fingerprint.byLocale).length === 0) lines.push('fingerprint: no copy found; check scan.include')
   if (fingerprint.baseline) lines.push(`fingerprint: baseline ${fingerprint.baseline.generated}`)
   lines.push(`fingerprint: wrote ${toPosix(path.relative(projectRoot, out))}`)
-  process.stdout.write(`${lines.join('\n')}\n`)
+  writeOut(`${lines.join('\n')}\n`)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

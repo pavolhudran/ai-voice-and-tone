@@ -5,7 +5,7 @@ import { loadConfig, activeProfile } from './lib/config.mjs'
 import { gatherCorpus } from './lib/corpus.mjs'
 import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
 import { countHits, rankRules } from './lib/hits.mjs'
-import { parseCliArgs, resolveRoots, nowIso, die, printHelp } from './lib/cli.mjs'
+import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 const ATTRIBUTION =
   'Built on Mailchimp\'s Voice and Tone framework (CC BY-NC 4.0). ' +
@@ -145,12 +145,12 @@ function main (argv) {
 
   const tokens = estimateTokens(md)
   if (values.json) {
-    process.stdout.write(`${JSON.stringify({ tokens, bytes: md.length })}\n`)
+    writeOut(`${JSON.stringify({ tokens, bytes: md.length })}\n`)
     return
   }
   const lines = [`compile-context: wrote ${toPosix(path.relative(projectRoot, out))} (~${tokens} tokens)`]
   if (tokens > 900) lines.push('compile-context: WARNING over the ~600 token target; trim rules or shorten Means lines')
-  process.stdout.write(`${lines.join('\n')}\n`)
+  writeOut(`${lines.join('\n')}\n`)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

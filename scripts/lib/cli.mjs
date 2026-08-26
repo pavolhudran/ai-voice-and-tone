@@ -29,12 +29,37 @@ export function nowIso (values) {
   return values.now ?? new Date().toISOString()
 }
 
+const TYPOGRAPHIC = [
+  [/[‘’‚‛]/g, "'"],
+  [/[“”„‟]/g, '"'],
+  [/[–—]/g, '-'],
+  [/…/g, '...'],
+  [/·/g, '*'],
+  [/ /g, ' ']
+]
+
+/**
+ * Spec section 9: scripts write UTF-8 files but print only ASCII. Windows
+ * console codepages mangle anything else, and a knowledge base can legitimately
+ * contain diacritics that end up interpolated into a status line.
+ */
+export function toAscii (text) {
+  let out = String(text)
+  for (const [pattern, replacement] of TYPOGRAPHIC) out = out.replace(pattern, replacement)
+  // eslint-disable-next-line no-control-regex
+  return out.replace(/[^\x00-\x7F]/g, '?')
+}
+
+export function writeOut (text) {
+  process.stdout.write(toAscii(text))
+}
+
 /** Spec section 9: stdout and stderr stay ASCII. */
 export function die (message) {
-  process.stderr.write(`error: ${message}\n`)
+  process.stderr.write(toAscii(`error: ${message}\n`))
   process.exit(1)
 }
 
 export function printHelp (name, lines) {
-  process.stdout.write([`usage: node ${name} [options]`, '', ...lines, ''].join('\n'))
+  writeOut([`usage: node ${name} [options]`, '', ...lines, ''].join('\n'))
 }

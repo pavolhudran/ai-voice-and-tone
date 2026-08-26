@@ -1,93 +1,141 @@
-# AI Voice and Tone
+# Voice & Tone
 
+A Claude Code plugin that builds, maintains, and applies a brand's voice and tone
+on any project - an application codebase, a marketing site, a documentation repo,
+or a bare folder of text with no code in it at all.
 
+Built on Mailchimp's Voice and Tone framework: **voice is constant, tone flexes
+with the reader's emotional state.**
 
-## Getting started
+## The idea
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+A voice guide the plugin can prove, not just recite.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Every rule in the knowledge base carries **where it came from** (evidence) and
+**how sure we are** (confidence). That one decision drives three systems that are
+otherwise separate:
 
-## Add your files
+- **Interview priority** - unconfirmed rules become the next questions
+- **Review severity** - `confirmed` rules block, `assumed` rules are nits,
+  `disputed` rules are never enforced at all
+- **Maintenance** - rules with stale or contradicted evidence surface for retirement
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Install
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/pavol.hudran/ai-voice-and-tone.git
-git branch -M main
-git push -uf origin main
+/plugin install voice-and-tone
 ```
 
-## Integrate with your tools
+Requires **Node 18 or newer** for the measurement scripts. Without Node the plugin
+still works: the model estimates the same metrics and marks them `estimated`, and
+an estimated fingerprint may only ever produce `assumed` rules, never `derived`.
+Missing runtime degrades precision, never function.
 
-* [Set up project integrations](https://gitlab.com/pavol.hudran/ai-voice-and-tone/-/settings/integrations)
+Zero npm dependencies. Nothing to install beyond the plugin itself.
 
-## Collaborate with your team
+## Start here
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```
+/voice-and-tone:init
+```
 
-## Test and Deploy
+Scans your project for copy, measures a corpus fingerprint, drafts a knowledge
+base, works out what it still does not know, and asks you - mostly by showing you
+rewrites of your **own** strings and asking which one sounds like you.
 
-Use the built-in continuous integration in GitLab.
+Creates `.voice-and-tone/` in your project root.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Commands
 
-***
+| Command | What it does |
+|---|---|
+| `/voice-and-tone:init` | discover, measure, interview, canonize |
+| `/voice-and-tone:write` | draft for a context and a reader state |
+| `/voice-and-tone:review` | critique with severities and `file:line` anchors |
+| `/voice-and-tone:rewrite` | off-brand text to on-brand text |
+| `/voice-and-tone:learn` | turn your corrections into rules, once corroborated |
+| `/voice-and-tone:audit` | coverage, drift, rule health, scored inventory |
+| `/voice-and-tone:sync` | validate and recompile the card |
+| `/voice-and-tone:localize` | apply a locale pack |
 
-# Editing this README
+Skills trigger on their own too - ask for a button label or say "make this sound
+like us" and the right one loads without a command.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## The knowledge base
 
-## Suggestions for a good README
+Lives in your project, in markdown, under version control:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```
+.voice-and-tone/
+  config.yml         profiles, locales, scan paths, thresholds
+  CONTEXT.md         GENERATED digest, ~600 tokens - the always-loaded card
+  voice.md           characteristics (constant) + persona rules
+  tone.md            authored cells + state vectors + context offsets
+  audience.md        who we write for, and the states they arrive in
+  lexicon.md         love / use carefully / avoid / never say
+  mechanics.md       grammar, casing, punctuation, web elements
+  channels/          per-channel playbooks
+  locales/           per-language packs
+  examples/          approved, rejected, and before/after pairs
+  evidence/          the numbered ledger, the fingerprint, the conflicts
+  CHANGELOG.md
+```
 
-## Name
-Choose a self-explaining name for your project.
+`CONTEXT.md` is generated and never hand-edited. A hand-maintained digest drifts
+from its source - the plugin is designed around that specific failure.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## The tone model
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Ten contexts by eight reader states is eighty cells, which nobody authors. So the
+knowledge base stores **eight state vectors** and **ten context offsets** and
+computes the rest:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+```
+cell(context, state) = clamp(state_vector[state] + context_offset[context], 0, 4)
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Authored cells override completely, and computed cells get promoted to authored
+on first real use - the matrix fills itself along the paths you actually write.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Six dials, 0-4: `warmth` `humor` `directness` `detail` `urgency` `formality`.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+**Two humor gates, both hard:**
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+1. Humor requires an authored cell. A computed cell never produces humor.
+2. `frustrated`, `anxious-at-risk`, and `disappointed-leaving` force `humor 0` -
+   in authored cells too.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+The failure mode of a computed cell must be "a bit flat", never "joked at someone
+whose payment just failed".
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Always on
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Applied to every draft and every review, not as a checklist at the end:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- **Accessibility** - no directional language, links that name their destination,
+  plain words, acronyms defined, headings nested, alt text, most important thing first
+- **Translation-readiness** - active voice, no double negatives, no idioms, one
+  term per concept, spelled-out units, ISO currency codes
 
-## License
-For open source projects, say how it is licensed.
+Accessibility violations and non-inclusive language are **always** blockers,
+whatever confidence any rule carries.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Development
+
+```
+node --test test/
+```
+
+Zero dependencies. Node 18+. The scripts run identically on macOS, Windows, and
+Linux - `test/conformance.test.mjs` enforces that rather than trusting it.
+
+## Attribution and license
+
+Built on [Mailchimp's Content Style Guide](https://styleguide.mailchimp.com/),
+published under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+**Not affiliated with or endorsed by Mailchimp.** This plugin encodes method and
+structure and carries no substantial verbatim prose from that guide - see
+[ATTRIBUTION.md](ATTRIBUTION.md).
+
+Dual licensed: **MIT** for `scripts/` and `test/`, **CC BY-NC 4.0** for the method
+documentation. See [LICENSE](LICENSE).

@@ -4,7 +4,7 @@ import { writeTextFile, toPosix } from './lib/fsx.mjs'
 import { splitSentences, splitWords } from './lib/text.mjs'
 import { loadConfig } from './lib/config.mjs'
 import { gatherCorpus } from './lib/corpus.mjs'
-import { parseCliArgs, resolveRoots, nowIso, die, printHelp } from './lib/cli.mjs'
+import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 export function buildManifest (projectRoot, config, generated, profileName = 'default') {
   const files = []
@@ -75,14 +75,14 @@ function main (argv) {
     // Paths in manifest.unreadable.paths are real on-disk paths and may carry
     // non-ASCII bytes; only the manifest file (UTF-8) is the right home for
     // them. stdout stays ASCII-safe with a count alone.
-    process.stdout.write(`${JSON.stringify({
+    writeOut(`${JSON.stringify({
       totals: manifest.totals,
       byLocale: manifest.byLocale,
       unreadable: { count: manifest.unreadable.count }
     })}\n`)
     return
   }
-  process.stdout.write(
+  writeOut(
     `scan: ${manifest.totals.files} files, ${manifest.totals.strings} strings, ` +
     `${manifest.totals.words} words, ${manifest.totals.sentences} sentences\n` +
     `scan: locales ${Object.keys(manifest.byLocale).join(', ') || 'none'}\n` +
