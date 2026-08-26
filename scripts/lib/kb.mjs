@@ -1,0 +1,330 @@
+import { existsSync, readdirSync } from 'node:fs'
+import path from 'node:path'
+import { readTextFile } from './fsx.mjs'
+import { loadConfig } from './config.mjs'
+
+export const STATES = [
+  'delighted', 'curious', 'focused', 'uncertain',
+  'confused', 'frustrated', 'anxious-at-risk', 'disappointed-leaving'
+]
+
+export const CONTEXTS = [
+  'marketing-page', 'product-ui', 'system-error', 'help-doc', 'email',
+  'social', 'legal-policy', 'notification', 'support-reply', 'release-notes'
+]
+
+export const DIALS = ['warmth', 'humor', 'directness', 'detail', 'urgency', 'formality']
+
+/** Spec section 6.6, gate 2. Not configurable. */
+export const HUMOR_ZERO_STATES = ['frustrated', 'anxious-at-risk', 'disappointed-leaving']
+
+export const CONFIDENCE_LEVELS = ['confirmed', 'derived', 'assumed', 'disputed']
+export const EVIDENCE_TYPES = ['source', 'corpus', 'interview', 'correction', 'decision']
+export const ID_PREFIXES = {
+  V: 'voice', T: 'tone', L: 'lexicon', M: 'mechanics', C: 'channel', A: 'audience', X: 'locale'
+}
+
+/**
+ * Templates and real knowledge bases keep their example rules inside HTML
+ * comments. Those are documentation, not rules - parsing them would enter
+ * phantom rules citing evidence that does not exist, and would let a user's
+ * commented-out rule silently enforce in review. Blank the comment body but
+ * keep the newlines, so reported line numbers still anchor to the file.
+ */
+function maskComments (md) {
+  return String(md).replace(/<!--[\s\S]*?-->/g, (block) => block.replace(/[^\n]/g, ' '))
+}
+
+const HEADING = /^#{2,4}\s+([A-Z][\w./-]*)\s*(?:·\s*([^`]*?))?\s*`([a-z]+)`(?:\s*ev:\s*([^`]+?))?\s*$/
+const FIELD = /^\*\*([^:*]+):\*\*\s*(.*)$/
+const EVIDENCE_HEADING = /^#{2,4}\s+(e\d+)\s*[—-]\s*(\d{4}-\d{2}-\d{2})\s*[—-]\s*([a-z-]+)\s*$/
+const LIST_SEPARATOR = /\s*·\s*/
+
+export function cellId (context, state) {
+  return `T-${context}/${state}`
+}
+
+function parseRefs (raw) {
+  if (!raw) return []
+  return raw.split(/[,\s]+/).map((r) => r.trim()).filter(Boolean)
+}
+
+export function parseRuleHeading (line) {
+  const match = HEADING.exec(String(line))
+  if (!match) return null
+  return {
+    id: match[1],
+    name: match[2] ? match[2].trim() : null,
+    confidence: match[3],
+    evidence: parseRefs(match[4])
+  }
+}
+
+function collectFields (lines, from, to) {
+  const fields = {}
+  for (let i = from; i < to; i++) {
+    const match = FIELD.exec(lines[i].trim())
+    if (match) fields[match[1].trim()] = match[2].trim()
+  }
+  return fields
+}
+
+function blockBoundaries (lines) {
+  // Every heading line index, plus a sentinel so the last block has an end.
+  const starts = []
+  lines.forEach((line, index) => {
+    if (/^#{1,6}\s/.test(line)) starts.push(index)
+  })
+  starts.push(lines.length)
+  return starts
+}
+
+export function parseProseRules (md) {
+  const lines = maskComments(md).split('\n')
+  const bounds = blockBoundaries(lines)
+  const rules = []
+  for (let b = 0; b < bounds.length - 1; b++) {
+    const start = bounds[b]
+    const heading = parseRuleHeading(lines[start])
+    if (!heading) continue
+    rules.push({ ...heading, fields: collectFields(lines, start + 1, bounds[b + 1]), line: start + 1 })
+  }
+  return rules
+}
+
+function currentSection (lines, upto) {
+  for (let i = upto; i >= 0; i--) {
+    const match = /^#{1,6}\s+(.+?)\s*$/.exec(lines[i])
+    if (match) return match[1].replace(/`[a-z]+`.*$/, '').trim()
+  }
+  return null
+}
+
+function splitRow (line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+}
+
+export function parseTables (md) {
+  const lines = maskComments(md).split('\n')
+  const tables = []
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!lines[i].trim().startsWith('|')) continue
+    if (!/^\s*\|?[\s:-]*-{2,}[\s:|-]*$/.test(lines[i + 1])) continue
+
+    const headers = splitRow(lines[i])
+    const rows = []
+    let r = i + 2
+    for (; r < lines.length && lines[r].trim().startsWith('|'); r++) {
+      const cells = splitRow(lines[r])
+      const row = {}
+      headers.forEach((header, index) => { row[header] = cells[index] ?? '' })
+      rows.push({ row, line: r + 1 })
+    }
+    tables.push({ section: currentSection(lines, i), headers, rows })
+    i = r - 1
+  }
+  return tables
+}
+
+export function parseTableRules (md) {
+  const out = []
+  for (const table of parseTables(md)) {
+    if (!table.headers.includes('ID')) continue
+    for (const { row, line } of table.rows) {
+      const id = (row.ID || '').trim()
+      if (!id || /^-+$/.test(id)) continue
+      const cells = { ...row }
+      delete cells.ID
+      delete cells.Conf
+      delete cells.Ev
+      out.push({
+        id,
+        confidence: (row.Conf || '').trim() || null,
+        evidence: parseRefs(row.Ev),
+        cells,
+        section: table.section,
+        line
+      })
+    }
+  }
+  return out
+}
+
+export function parseDials (raw) {
+  const dials = {}
+  for (const match of String(raw).matchAll(/([a-z]+)\s*([+-]?\d+)/gi)) {
+    const name = match[1].toLowerCase()
+    if (DIALS.includes(name)) dials[name] = Number(match[2])
+  }
+  return dials
+}
+
+function parseList (raw) {
+  if (!raw) return []
+  return String(raw).split(LIST_SEPARATOR).map((item) => item.trim()).filter(Boolean)
+}
+
+export function parseToneCells (md) {
+  const cells = []
+  for (const rule of parseProseRules(md)) {
+    const match = /^T-([a-z-]+)\/([a-z-]+)$/.exec(rule.id)
+    if (!match) continue
+    cells.push({
+      id: rule.id,
+      context: match[1],
+      state: match[2],
+      confidence: rule.confidence,
+      evidence: rule.evidence,
+      dials: parseDials(rule.fields.Dials || ''),
+      feeling: rule.fields['Reader is feeling'] || null,
+      do: parseList(rule.fields.Do),
+      dont: parseList(rule.fields["Don't"]),
+      example: (rule.fields.Example || '').replace(/^\*?"?|"?\*?$/g, '').trim() || null,
+      line: rule.line
+    })
+  }
+  return cells
+}
+
+function vectorsFromTable (table) {
+  const out = {}
+  const keyColumn = table.headers[0]
+  for (const { row } of table.rows) {
+    const key = (row[keyColumn] || '').trim()
+    if (!key || /^-+$/.test(key)) continue
+    const dials = {}
+    for (const dial of DIALS) {
+      if (row[dial] !== undefined && row[dial] !== '') dials[dial] = Number(row[dial])
+    }
+    out[key] = dials
+  }
+  return out
+}
+
+export function parseVectors (md) {
+  const result = { states: {}, contexts: {} }
+  for (const table of parseTables(md)) {
+    const first = (table.headers[0] || '').toLowerCase()
+    if (first === 'state') Object.assign(result.states, vectorsFromTable(table))
+    if (first === 'context') Object.assign(result.contexts, vectorsFromTable(table))
+  }
+  return result
+}
+
+export function parseEvidence (md) {
+  const lines = maskComments(md).split('\n')
+  const bounds = blockBoundaries(lines)
+  const entries = []
+  for (let b = 0; b < bounds.length - 1; b++) {
+    const start = bounds[b]
+    const match = EVIDENCE_HEADING.exec(lines[start])
+    if (!match) continue
+    const fields = collectFields(lines, start + 1, bounds[b + 1])
+    entries.push({
+      id: match[1],
+      date: match[2],
+      type: match[3],
+      fields,
+      produced: parseRefs(fields.Produced),
+      line: start + 1
+    })
+  }
+  return entries
+}
+
+const clamp = (n) => Math.max(0, Math.min(4, n))
+
+/** Spec 6.5 arithmetic, plus gate 1: computed cells never carry humor. */
+export function interpolate (stateVector = {}, contextOffset = {}) {
+  const dials = {}
+  for (const dial of DIALS) {
+    dials[dial] = clamp(Number(stateVector[dial] ?? 2) + Number(contextOffset[dial] ?? 0))
+  }
+  dials.humor = 0
+  return dials
+}
+
+/** Spec 6.6 gate 2. Applies to authored cells too. */
+export function applyHumorGates (dials, state) {
+  const out = { ...dials }
+  if (HUMOR_ZERO_STATES.includes(state)) out.humor = 0
+  return out
+}
+
+export function resolveCell (context, state, { cells = [], vectors = { states: {}, contexts: {} } } = {}) {
+  const id = cellId(context, state)
+  const authored = cells.find((cell) => cell.id === id)
+
+  if (authored) {
+    return {
+      id,
+      context,
+      state,
+      dials: applyHumorGates({ ...authored.dials }, state),
+      source: 'authored',
+      confidence: authored.confidence,
+      cell: authored
+    }
+  }
+
+  return {
+    id,
+    context,
+    state,
+    dials: applyHumorGates(interpolate(vectors.states[state], vectors.contexts[context]), state),
+    source: 'interpolated',
+    confidence: 'interpolated',
+    cell: null
+  }
+}
+
+function readIfPresent (file) {
+  return existsSync(file) ? readTextFile(file) : ''
+}
+
+function readDirectory (dir) {
+  if (!existsSync(dir)) return {}
+  const out = {}
+  for (const name of readdirSync(dir).sort()) {
+    if (!name.toLowerCase().endsWith('.md')) continue
+    if (name.startsWith('_')) continue // _template.md is a skeleton, not content
+    out[name.replace(/\.md$/i, '')] = readTextFile(path.join(dir, name))
+  }
+  return out
+}
+
+export function loadKb (kbRoot) {
+  const files = {
+    voice: readIfPresent(path.join(kbRoot, 'voice.md')),
+    tone: readIfPresent(path.join(kbRoot, 'tone.md')),
+    audience: readIfPresent(path.join(kbRoot, 'audience.md')),
+    lexicon: readIfPresent(path.join(kbRoot, 'lexicon.md')),
+    mechanics: readIfPresent(path.join(kbRoot, 'mechanics.md')),
+    ledger: readIfPresent(path.join(kbRoot, 'evidence', 'ledger.md')),
+    conflicts: readIfPresent(path.join(kbRoot, 'evidence', 'conflicts.md')),
+    context: readIfPresent(path.join(kbRoot, 'CONTEXT.md'))
+  }
+  const channels = readDirectory(path.join(kbRoot, 'channels'))
+  const locales = readDirectory(path.join(kbRoot, 'locales'))
+
+  const proseSources = { ...files, ...channels, ...locales }
+  const rules = []
+  for (const [name, body] of Object.entries(proseSources)) {
+    if (name === 'ledger' || name === 'context') continue
+    for (const rule of parseProseRules(body)) rules.push({ ...rule, file: name, kind: 'prose' })
+    for (const rule of parseTableRules(body)) rules.push({ ...rule, file: name, kind: 'table' })
+  }
+
+  return {
+    kbRoot,
+    config: loadConfig(kbRoot),
+    ...files,
+    channels,
+    locales,
+    files,
+    rules,
+    cells: parseToneCells(files.tone),
+    vectors: parseVectors(files.tone),
+    evidence: parseEvidence(files.ledger)
+  }
+}
