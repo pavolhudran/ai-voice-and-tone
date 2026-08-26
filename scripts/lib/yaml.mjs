@@ -3,12 +3,14 @@
  * Zero dependencies by design (see spec section 9).
  *
  * Supported: nested block maps (2-space indent), block sequences of scalars,
- * inline flow sequences [a, b], block scalars (| literal, > folded),
+ * inline flow sequences [a, b], block scalars with optional chomping
+ * indicators (| literal, |- strip, |+ keep, > folded, >- strip, >+ keep),
  * single/double-quoted strings, integers, true/false, null (~ or empty),
  * # comments, blank lines.
  *
  * Block scalars are in the subset because Claude Code skill and agent
- * frontmatter uses `description: >`, and this plugin parses its own frontmatter.
+ * frontmatter uses `description: >` (and sometimes `description: >-`), and
+ * this plugin parses its own frontmatter.
  *
  * Unsupported and rejected with a line number: anchors and aliases, multiple
  * documents, sequences of maps, tab indentation.
@@ -41,6 +43,23 @@ function stripComment (raw) {
     out += ch
   }
   return out.replace(/\s+$/, '')
+}
+
+// True if text contains a colon-space pair outside of quotes - the marker of
+// a "- key: value" sequence-of-maps item, which this subset does not support.
+// A quoted scalar like "note: important" must not trip this.
+function hasUnquotedColonSpace (text) {
+  let quote = null
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (quote) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue }
+    if (ch === ':' && /\s/.test(text[i + 1] || '')) return true
+  }
+  return false
 }
 
 function parseScalar (raw, lineNo) {
@@ -91,7 +110,7 @@ export function parseYaml (source) {
     if (body.startsWith('- ') || body === '-') {
       if (!Array.isArray(parent)) fail(lineNo, 'sequence item outside a sequence')
       const item = body === '-' ? null : body.slice(2)
-      if (item !== null && /:\s/.test(item)) fail(lineNo, 'sequences of maps are not supported')
+      if (item !== null && hasUnquotedColonSpace(item)) fail(lineNo, 'sequences of maps are not supported')
       parent.push(parseScalar(item ?? '', lineNo))
       return
     }

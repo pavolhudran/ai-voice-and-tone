@@ -81,6 +81,25 @@ test('throws with a line number on unsupported syntax', () => {
   assert.throws(() => parseYaml('a: 1\n--- \nb: 2'), /line 2/)
 })
 
+test('sequence-of-maps guard is quote-aware', () => {
+  const got = parseYaml('items:\n  - "note: important"\n  - plain\n')
+  assert.deepEqual(got.items, ['note: important', 'plain'])
+
+  assert.throws(() => parseYaml('items:\n  - key: value\n'), /line 2/)
+  assert.throws(() => parseYaml('items:\n  - "quoted" then: value\n'), /line 2/)
+})
+
+test('block scalars support chomping indicators', () => {
+  const clip = parseYaml('a: |\n  one\n  two\n')
+  assert.equal(clip.a, 'one\ntwo', '| clips: single trailing newline is absent')
+
+  const keep = parseYaml('a: |+\n  one\n  two\n')
+  assert.equal(keep.a, 'one\ntwo\n', '|+ keeps the trailing newline')
+
+  const strip = parseYaml('a: >-\n  one\n  two\n')
+  assert.equal(strip.a, 'one two', '>- strips the trailing newline')
+})
+
 test('round-trips through stringify', () => {
   const value = {
     version: 1,
