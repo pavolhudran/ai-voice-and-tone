@@ -364,7 +364,13 @@ export function loadKb (kbRoot) {
   const rules = []
   const unparsedHeadings = []
   for (const [name, body] of Object.entries(proseSources)) {
-    if (name === 'ledger' || name === 'context') continue
+    // conflicts.md joins ledger and context as a non-rule-bearing file. Its
+    // entries are `### D<n> - <date>`, which matches RULE_ID_HEADING's letter-
+    // then-digit shape but is a conflict record, not a rule - `D` is not one of
+    // ID_PREFIXES. Scanning it warned every user with a real recorded conflict
+    // that their conflict was a malformed rule: the cry-wolf failure this
+    // check's own comment warns against, one file over.
+    if (name === 'ledger' || name === 'context' || name === 'conflicts') continue
     for (const rule of parseProseRules(body)) rules.push({ ...rule, file: name, kind: 'prose' })
     for (const rule of parseTableRules(body)) rules.push({ ...rule, file: name, kind: 'table' })
     for (const heading of findUnparsedRuleHeadings(body)) unparsedHeadings.push({ ...heading, file: name })

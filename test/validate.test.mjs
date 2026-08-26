@@ -380,6 +380,39 @@ test('ordinary section headings never trip the unparsed-rule warning', () => {
   }
 })
 
+test('a recorded conflict never trips the unparsed-rule warning', () => {
+  // F63: conflicts.md's spec'd entry heading is `### D1 - <date>`, which matches
+  // the rule-ID shape but is a conflict record, not a rule. The shipped template
+  // keeps its example inside an HTML comment, so only a KB with a REAL conflict
+  // exposed this - which is exactly the user who least deserves a bogus warning.
+  const { dir, kb } = kbFrom({
+    'kb/evidence/conflicts.md': [
+      '# Unresolved conflicts', '',
+      '### D1 - 2026-08-26', '',
+      '**About:** contraction use',
+      '**Side A:** marketing site, 0 contractions in 240 sentences (`source`, e04)',
+      '**Side B:** app UI strings, 61% contraction rate (`corpus`, e05)',
+      '**Asked?** not yet', ''
+    ].join('\n')
+  })
+  try {
+    assert.deepEqual(codesOf(validateKb(kb)).filter((c) => c === 'W_UNPARSED_RULE_HEADING'), [])
+    // The premise: D1 is genuinely heading-shaped, so this passes because
+    // conflicts.md is excluded - not because the heading failed to match.
+    assert.match(kb.conflicts || '', /### D1 - 2026-08-26/)
+    // And the exclusion is scoped: a real unparsable rule elsewhere still warns.
+    const { dir: dir2, kb: kb2 } = kbFrom({ 'kb/voice.md': '### V1 - Plainspoken\n' })
+    try {
+      assert.deepEqual(codesOf(validateKb(kb2)).filter((c) => c === 'W_UNPARSED_RULE_HEADING'),
+        ['W_UNPARSED_RULE_HEADING'])
+    } finally {
+      cleanup(dir2)
+    }
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('validateKb returns a report rather than throwing on a half-built vectors object', () => {
   // D3: reading vectors.contexts off {states:{}} used to throw a TypeError,
   // turning a validation call into an unexpected-error exit 1.
