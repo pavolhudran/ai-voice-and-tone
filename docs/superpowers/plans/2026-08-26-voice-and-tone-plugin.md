@@ -1492,7 +1492,7 @@ export function extractHeadings (absPath, raw) {
 export function extractStrings (absPath, raw) {
   const format = formatFor(absPath)
   if (!format) return { format: null, strings: [] }
-  const text = String(raw).replace(/^﻿/, '').replace(/\r\n?/g, '\n')
+  const text = String(raw).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
 
   switch (format) {
     case 'markdown': return { format, strings: extractMarkdown(text) }
