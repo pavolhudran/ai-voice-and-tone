@@ -137,6 +137,18 @@ export function diffIndex (index, resolved, hashOf) {
   return { fresh, known, stale, missing, skipped }
 }
 
+// Only these statuses genuinely imply a measured stats block. `new` is
+// deliberately absent: the index is the record of what has been analysed,
+// so a registered-but-not-yet-ingested file has no business being an index
+// entry at all - diffIndex() returns it as `fresh`, and it only gains an
+// entry (as `used` or `skipped`) once ingestion actually runs. `new` should
+// therefore never be persisted to evidence/sources.json. Tolerating it below
+// anyway - excluding it rather than throwing - is not an endorsement of it
+// appearing; it is a guard against a future producer's typo, or a status
+// string this index has not been taught about yet, becoming a hard runtime
+// failure two tasks downstream instead of a harmless no-op.
+const STATS_REQUIRED = new Set(['used', 'missing', 'stale'])
+
 /**
  * Per-locale merged statistics, computed from the index alone - no source
  * text anywhere.
@@ -145,31 +157,37 @@ export function diffIndex (index, resolved, hashOf) {
  * source absent from this machine still contributes, because its statistics
  * were recorded when it was analysed. Setting it false would make a fresh
  * clone report every metric as changed, which :audit would then present as
- * drift in the brand's writing.
+ * drift in the brand's writing. It also answers a real diagnostic question -
+ * "what does the fingerprint look like from only what is actually on this
+ * machine?" - which is why the option exists rather than being removed.
  *
  * A `skipped` entry contributes nothing, full stop - even one that somehow
  * carries a `stats` block (a hand-edited index, a bug upstream) is excluded
  * on `status` alone rather than on whether `stats` looks usable, because
  * `skipped` means the quality gate rejected the extraction and its numbers
- * were never trustworthy to begin with.
+ * were never trustworthy to begin with. A status outside `STATS_REQUIRED`
+ * (this always includes `new`, and anything this index has not been taught
+ * about) is excluded the same way, without contributing and without being
+ * fatal - see the comment on `STATS_REQUIRED` above.
  *
- * Any other status (`used`, `stale`, `missing`, `new`) is expected to carry
- * real statistics - that is the entire premise this index exists to serve.
- * A `stats: null` on one of those is not a quiet corpus gap, it is
- * corruption: silently dropping it would silently shrink the aggregate with
- * nothing to say why, which is exactly the confidently-reported-fiction
- * failure mode mergeStats() already refuses to produce for a mismatched
- * locale. This throws for the same reason. Likewise every contributing
- * entry must carry its own `locale` - a Stats block has no locale of its
- * own, so a missing one cannot be coerced to a guessed default (e.g. 'en')
- * without risking silently folding a foreign-locale block into the English
- * bucket it was never measured against.
+ * `used`, `missing`, and `stale` are expected to carry real statistics -
+ * that is the entire premise this index exists to serve. A `stats: null` on
+ * one of those is not a quiet corpus gap, it is corruption: silently
+ * dropping it would silently shrink the aggregate with nothing to say why,
+ * which is exactly the confidently-reported-fiction failure mode
+ * mergeStats() already refuses to produce for a mismatched locale. This
+ * throws for the same reason. Likewise every contributing entry must carry
+ * its own `locale` - a Stats block has no locale of its own, so a missing
+ * one cannot be coerced to a guessed default (e.g. 'en') without risking
+ * silently folding a foreign-locale block into the English bucket it was
+ * never measured against.
  */
 export function statsByLocale (index, { includeMissing = true } = {}) {
   const buckets = new Map()
   for (const source of index.sources ?? []) {
     if (source.status === 'skipped') continue
     if (!includeMissing && source.status === 'missing') continue
+    if (!STATS_REQUIRED.has(source.status)) continue
 
     if (!source.stats) {
       throw new Error(

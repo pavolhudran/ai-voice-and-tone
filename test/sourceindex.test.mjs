@@ -2,12 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { statsFor, mergeStats, fingerprintFromStats } from '../scripts/lib/metrics.mjs'
+import { readTextFile } from '../scripts/lib/fsx.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, bySha, diffIndex, statsByLocale, indexPathFor,
   staleByExtractor
 } from '../scripts/lib/sourceindex.mjs'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const entry = (over = {}) => ({
   id: 'f001',
@@ -188,7 +192,7 @@ test('a skipped entry that somehow carries a stats block is still excluded', () 
   assert.equal(buckets.get('en').words, good.stats.words, 'the skipped entry\'s stats leaked into the aggregate')
 })
 
-test('a non-skipped entry with no stats block is corruption, and statsByLocale throws rather than silently shrinking the aggregate', () => {
+test('a used entry with no stats block is corruption, and statsByLocale throws rather than silently shrinking the aggregate', () => {
   const index = {
     sources: [
       entry({ id: 'f001', sha256: '1'.repeat(64) }),
@@ -198,9 +202,61 @@ test('a non-skipped entry with no stats block is corruption, and statsByLocale t
   assert.throws(() => statsByLocale(index), /f002/)
 })
 
+test('a missing or stale entry with no stats block is corruption too - the fix for "new" must not weaken this guard', () => {
+  for (const status of ['missing', 'stale']) {
+    const index = { sources: [entry({ id: 'f001', sha256: '1'.repeat(64), status, stats: null })] }
+    assert.throws(() => statsByLocale(index), /f001/, `status '${status}' should still throw on a null stats block`)
+  }
+})
+
 test('an entry with no locale throws rather than being coerced into the wrong bucket', () => {
   const index = { sources: [entry({ id: 'f001', sha256: '1'.repeat(64), locale: undefined })] }
   assert.throws(() => statsByLocale(index), /f001/)
+})
+
+// --- 'new' is a diff-level word, never an index status - tolerated, ------
+// --- but not fatal, and never mistaken for corruption ---------------------
+
+test('a status of "new" is excluded without contributing and without throwing, even with no stats block', () => {
+  // The index is the record of what has been analysed; a registered-but-
+  // not-yet-ingested file has no business being an entry at all (diffIndex
+  // returns it as `fresh`). If one ever landed here anyway - a future bug -
+  // excluding it is the right behaviour, not raising the corruption alarm
+  // reserved for used/missing/stale.
+  const good = entry({ id: 'f001', sha256: '1'.repeat(64) })
+  const notYetAnalysed = entry({ id: 'f002', sha256: '2'.repeat(64), status: 'new', stats: null })
+  const index = { sources: [good, notYetAnalysed] }
+  const buckets = statsByLocale(index)
+  assert.equal(buckets.get('en').words, good.stats.words)
+})
+
+test('an unrecognised status string is excluded without contributing and without throwing', () => {
+  const good = entry({ id: 'f001', sha256: '1'.repeat(64) })
+  const unknown = entry({ id: 'f002', sha256: '2'.repeat(64), status: 'quarantined', stats: null })
+  const index = { sources: [good, unknown] }
+  const buckets = statsByLocale(index)
+  assert.equal(buckets.get('en').words, good.stats.words)
+})
+
+// --- includeMissing: pinned so the flag cannot go dead again --------------
+
+test('includeMissing:false excludes absent sources, unlike the true default', () => {
+  const present = entry({ id: 'f001', sha256: '1'.repeat(64) })
+  const absent = entry({
+    id: 'f002', sha256: '2'.repeat(64), status: 'missing',
+    stats: statsFor({ strings: ['We were here once, on someone else\'s machine.'], headings: [], locale: 'en' })
+  })
+  const index = { sources: [present, absent] }
+
+  const withMissing = statsByLocale(index, { includeMissing: true })
+  const withoutMissing = statsByLocale(index, { includeMissing: false })
+
+  assert.equal(withMissing.get('en').words, mergeStats([present.stats, absent.stats]).words)
+  assert.equal(withoutMissing.get('en').words, present.stats.words)
+  assert.notEqual(
+    withMissing.get('en').words, withoutMissing.get('en').words,
+    'includeMissing:false must change the result, or the flag is dead'
+  )
 })
 
 // --- staleByExtractor: a version bump must not shift numbers silently -----
@@ -220,4 +276,21 @@ test('an entry with no extractor stamp never goes stale', () => {
   const index = { sources: [entry({ id: 'f001', sha256: '1'.repeat(64), extractor: null, format: 'markdown' })] }
   const current = { libraries: { officeparser: { version: '9.9.9' } } }
   assert.deepEqual(staleByExtractor(index, current), [])
+})
+
+test('staleByExtractor is checked against the real vendor/manifest.json, not just a fixture shape', () => {
+  // Pins the assumption (documented in sourceindex.mjs and inferred from
+  // office.mjs/pdf.mjs/vendor.test.mjs, since no call site was given for
+  // this function) that `current` is the parsed contents of the real
+  // manifest file: { libraries: { <name>: { version } } }. A future
+  // reshape of vendor/manifest.json fails loudly here rather than only in
+  // whichever CLI eventually calls this.
+  const manifest = JSON.parse(readTextFile(path.join(ROOT, 'vendor', 'manifest.json')))
+  const [name, info] = Object.entries(manifest.libraries)[0]
+
+  const current = entry({ id: 'f001', sha256: '1'.repeat(64), extractor: { name, version: info.version } })
+  const stale = entry({ id: 'f002', sha256: '2'.repeat(64), extractor: { name, version: '0.0.0-not-real' } })
+  const index = { sources: [current, stale] }
+
+  assert.deepEqual(staleByExtractor(index, manifest).map((e) => e.id), ['f002'])
 })
