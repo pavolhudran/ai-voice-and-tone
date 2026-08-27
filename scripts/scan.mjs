@@ -12,7 +12,8 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
   const totals = { files: 0, strings: 0, words: 0, sentences: 0 }
 
   const unreadablePaths = []
-  const corpus = gatherCorpus(projectRoot, config, profileName, unreadablePaths)
+  const skippedFiles = []
+  const corpus = gatherCorpus(projectRoot, config, profileName, unreadablePaths, skippedFiles)
 
   for (const file of corpus) {
     const joined = file.strings.join('\n')
@@ -44,7 +45,13 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
     totals,
     byLocale,
     files,
-    unreadable: { count: unreadablePaths.length, paths: unreadablePaths }
+    unreadable: { count: unreadablePaths.length, paths: unreadablePaths },
+    skipped: {
+      count: skippedFiles.length,
+      files: [...skippedFiles]
+        .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+        .map((f) => ({ path: f.rel, ext: f.ext }))
+    }
   }
 }
 
@@ -78,7 +85,8 @@ function main (argv) {
     writeOut(`${JSON.stringify({
       totals: manifest.totals,
       byLocale: manifest.byLocale,
-      unreadable: { count: manifest.unreadable.count }
+      unreadable: { count: manifest.unreadable.count },
+      skipped: { count: manifest.skipped.count }
     })}\n`)
     return
   }
@@ -87,6 +95,10 @@ function main (argv) {
     `${manifest.totals.words} words, ${manifest.totals.sentences} sentences\n` +
     `scan: locales ${Object.keys(manifest.byLocale).join(', ') || 'none'}\n` +
     `scan: ${manifest.unreadable.count} unreadable json file(s)\n` +
+    (manifest.skipped.count
+      ? `scan: ${manifest.skipped.count} file(s) skipped (unsupported: ` +
+        `${[...new Set(manifest.skipped.files.map((f) => f.ext))].sort().join(', ')})\n`
+      : '') +
     `scan: wrote ${toPosix(path.relative(projectRoot, out))}\n`
   )
 }

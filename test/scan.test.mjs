@@ -61,6 +61,29 @@ test('paths in the manifest are POSIX on every platform', () => {
   }
 })
 
+test('the manifest reports skipped files with their extension', () => {
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/logo.fig': 'placeholder',
+    'content/mock.sketch': 'placeholder'
+  })
+  try {
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z')
+
+    assert.equal(manifest.totals.files, 1)
+    assert.equal(manifest.skipped.count, 2)
+    assert.deepEqual(manifest.skipped.files.map((f) => f.ext).sort(), ['.fig', '.sketch'])
+    assert.deepEqual(
+      manifest.skipped.files.map((f) => f.path),
+      ['content/logo.fig', 'content/mock.sketch'],
+      'sorted, so the artifact diffs cleanly'
+    )
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('a malformed JSON file is surfaced as unreadable, not silently dropped', () => {
   const jsonConfig = {
     ...config,

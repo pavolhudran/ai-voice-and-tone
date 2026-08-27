@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { walk, readTextFile, toPosix } from './fsx.mjs'
-import { extractStrings, extractHeadings } from './extract.mjs'
+import { extractStrings, extractHeadings, formatFor } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
 
 /**
@@ -22,19 +22,35 @@ import { activeProfile, localeOf } from './config.mjs'
  *   returns - so a plain property would work only for a caller holding the
  *   exact original reference. This one is visible in the signature and
  *   passes through untouched by construction.
+ * @param {Array<{rel:string,ext:string}>} [skipped] - out-parameter, same
+ *   rationale as `unreadable`. A file matched by an include glob whose
+ *   extension has no extractor used to vanish without trace: absent from the
+ *   manifest's `files` AND from `unreadable`, which only ever covered
+ *   malformed JSON. A user pointing scan.include at a folder of PDFs saw
+ *   "0 files" with nothing to act on. Recording the extension - not merely a
+ *   count - is what makes the resulting message actionable.
  */
-export function gatherCorpus (projectRoot, config, profileName = 'default', unreadable = []) {
+export function gatherCorpus (projectRoot, config, profileName = 'default', unreadable = [], skipped = []) {
   const profile = activeProfile(config, profileName)
   const primary = profile.primary_locale ?? 'en'
   const locales = profile.locales ?? [primary]
   const out = []
 
   for (const abs of walk(projectRoot, config.scan)) {
+    const rel = toPosix(path.relative(projectRoot, abs))
+
+    // The format gate is decided by the path alone, so it must run BEFORE the
+    // read. Otherwise a glob pointing at a directory of large binaries slurps
+    // every one of them into memory only to discard it at the extension check.
+    const format = formatFor(abs)
+    if (!format) {
+      skipped.push({ rel, ext: path.extname(abs).toLowerCase() })
+      continue
+    }
+
     let raw
     try { raw = readTextFile(abs) } catch { continue } // unreadable file is skipped, not fatal
-    const rel = toPosix(path.relative(projectRoot, abs))
-    const { format, strings } = extractStrings(abs, raw)
-    if (!format) continue
+    const { strings } = extractStrings(abs, raw)
     if (strings.length === 0) {
       if (format === 'json') unreadable.push(rel)
       continue
