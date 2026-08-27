@@ -52,6 +52,12 @@ export async function extractSource ({ abs, format, buf }) {
     return { strings, headings, glyphRecall: null, note, extractor: OFFICE_EXTRACTOR }
   }
 
+  // Unreachable today: isBinaryFormat is exactly the union of the pdf check
+  // and OFFICE_FORMATS above, so every format it recognizes is already
+  // dispatched. Kept as a guard against a future format landing in
+  // BINARY_EXTENSIONS (extract.mjs) without a matching branch here, which
+  // would otherwise fall through to the text path below and decode raw
+  // container bytes as UTF-8.
   if (isBinaryFormat(format)) {
     throw new Error(`no extractor for container format ${format}`)
   }
@@ -77,13 +83,22 @@ function entryFrom ({
   // longTokenShare, replShare, novowelShare, glyphRecall - zeroed or null,
   // never absent), so a downstream reader can access e.g.
   // quality.longTokenShare with no guard regardless of which branch
-  // produced this entry. Only `reasons` is replaced, with the extractor's
-  // own note (no-text-layer, encrypted, unreadable, ...) rather than
+  // produced this entry. `reasons` is replaced with the extractor's own
+  // note (no-text-layer, encrypted, unreadable, ...) rather than
   // scoreExtraction's generic "no tokens recovered" - strictly more
-  // informative about WHY nothing came out.
+  // informative about WHY nothing came out, for a human reading the index.
+  //
+  // `note` itself is also carried as its own field (in both branches, not
+  // just this one), rather than left embedded only in that reason string.
+  // needsModelTier below used to distinguish cases by testing whether a
+  // composed reason string started with a given prefix - fragile, and it
+  // is exactly what let a blank source ("empty: ok") and a scanned PDF
+  // ("empty: no-text-layer") escalate identically despite needing opposite
+  // answers. A real field lets it branch on a value instead of parsing
+  // prose.
   const quality = strings.length === 0
-    ? { ...scoreExtraction('', { locale, glyphRecall }), reasons: [...reasons, `empty: ${note}`] }
-    : scoreExtraction(text, { locale, glyphRecall })
+    ? { ...scoreExtraction('', { locale, glyphRecall }), reasons: [...reasons, `empty: ${note}`], note }
+    : { ...scoreExtraction(text, { locale, glyphRecall }), note }
 
   if (quality.passed) writeTextFile(cachePathFor(kbRoot, sha256), `${text}\n`)
 
@@ -174,13 +189,30 @@ export function ingestText (source, { kbRoot, now, id, from, tier = 'model' }) {
 
 /**
  * True when the script tier failed on something the model might still read:
- * a scanned page, an image, a JS-rendered shell. An entry that failed because
- * it is genuinely empty, or because the container itself was unreadable
- * (corrupt bytes, not merely absent of text), is not worth spending tokens
- * on - the model cannot repair bytes any better than the script tier could.
+ * a scanned page, an image, a JS-rendered shell. An entry that failed
+ * because it is genuinely empty, or because the container itself was
+ * unreadable (corrupt bytes, not merely absent of text), is not worth
+ * spending tokens on - the model cannot repair bytes any better than the
+ * script tier could.
+ *
+ * Two distinct "nothing recoverable" shapes both land here as `skipped`,
+ * and they must NOT be treated alike:
+ *   - real text came out, but the gate rejected its SHAPE (merged or split
+ *     words, decoding artefacts) - `quality.tokens > 0`. That is the script
+ *     parser's own heuristics failing on the source, not the source itself
+ *     being empty, and it is exactly the case this whole tier exists for.
+ *   - nothing came out at all - `quality.tokens === 0` - and here the
+ *     extractor's own `note` is what decides: 'unreadable' (the container
+ *     would not even open) and 'ok' (it opened fine and simply held no
+ *     copy - a blank file) both mean there is nothing left to find.
+ *     Anything else ('no-text-layer', 'encrypted', ...) means there IS
+ *     something there, just not text this tier can read - the scanned-page
+ *     case a model with vision can still read - so it stays worth
+ *     escalating.
  */
 export function needsModelTier (entry) {
   if (entry.tier === 'model') return false
   if (entry.status !== 'skipped') return false
-  return !entry.quality.reasons.some((reason) => reason.startsWith('unreadable:'))
+  if (entry.quality.tokens > 0) return true
+  return entry.quality.note !== 'unreadable' && entry.quality.note !== 'ok'
 }

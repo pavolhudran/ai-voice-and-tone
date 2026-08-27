@@ -15,6 +15,33 @@ function fileIn (dir, rel, contents) {
   return { abs, rel, origin: rel, format: rel.endsWith('.md') ? 'markdown' : 'text', locale: 'en' }
 }
 
+/**
+ * A syntactically valid, minimal PDF with a Catalog/Pages/Page and no
+ * /Contents key at all - the "scanned page" shape pdf.mjs reports as
+ * no-text-layer. Purpose-built for this one case (no encryption, no
+ * content streams), not a general PDF builder - see test/pdf.test.mjs's
+ * own `makePdf` for that.
+ */
+function minimalPdfWithNoTextLayer () {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>'
+  ]
+  let body = '%PDF-1.4\n'
+  const offsets = []
+  objects.forEach((obj, i) => {
+    offsets.push(body.length)
+    body += `${i + 1} 0 obj\n${obj}\nendobj\n`
+  })
+  const xref = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const off of offsets) body += `${String(off).padStart(10, '0')} 00000 n \n`
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`
+  body += `startxref\n${xref}\n%%EOF\n`
+  return Buffer.from(body, 'latin1')
+}
+
 test('a text source produces a complete, measured index entry', async () => {
   const dir = makeTmpProject({ 'a.txt': 'x' })
   const kb = path.join(dir, '.voice-and-tone')
@@ -69,6 +96,30 @@ test('a source yielding no text is skipped with a reason, not silently dropped',
     assert.equal(entry.quality.passed, false)
     assert.ok(entry.quality.reasons.length > 0)
     assert.equal(entry.stats, null, 'a skipped source contributes nothing')
+    // Fix round 2: a blank source decoded fine and genuinely held nothing -
+    // the extractor's own note is 'ok', not a missing text layer. There is
+    // nothing left for the model to find, so it must not escalate.
+    assert.equal(needsModelTier(entry), false)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a scanned PDF with no text layer is skipped, but still needs the model tier', async () => {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const abs = path.join(dir, 'scan.pdf')
+    writeFileSync(abs, minimalPdfWithNoTextLayer())
+    const file = { abs, origin: 'scan.pdf', format: 'pdf', locale: 'en' }
+    const entry = await ingestFile(file, { kbRoot: kb, now: NOW, id: 'f001', from: 's02' })
+
+    assert.equal(entry.status, 'skipped')
+    assert.equal(entry.quality.note, 'no-text-layer')
+    // Unlike a blank text file, this source has content - just not a text
+    // layer the script tier can read. A model with vision still can, which
+    // is the headline case the whole model tier exists for.
+    assert.equal(needsModelTier(entry), true)
   } finally {
     cleanup(dir)
   }
@@ -165,6 +216,9 @@ test('an unreadable container is skipped with the reason recorded', async () => 
 
     assert.equal(entry.status, 'skipped')
     assert.ok(entry.quality.reasons.join(' ').match(/not a zip|unreadable/i), entry.quality.reasons.join('; '))
+    // A corrupt container cannot be repaired by the model any better than
+    // by the script tier - escalating would spend tokens on nothing.
+    assert.equal(needsModelTier(entry), false)
   } finally {
     cleanup(dir)
   }
