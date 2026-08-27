@@ -1,6 +1,8 @@
 import path from 'node:path'
 import { parseYaml } from './yaml.mjs'
 import { splitParagraphs } from './text.mjs'
+import { extractRtf, extractSubtitles, extractDelimited } from './textish.mjs'
+import { OFFICE_FORMATS } from './office.mjs'
 
 export const COPY_EXTENSIONS = {
   '.md': 'markdown',
@@ -13,11 +15,40 @@ export const COPY_EXTENSIONS = {
   '.pot': 'po',
   '.html': 'html',
   '.htm': 'html',
-  '.txt': 'text'
+  '.txt': 'text',
+  '.rtf': 'rtf',
+  '.vtt': 'subtitles',
+  '.srt': 'subtitles',
+  '.csv': 'csv',
+  '.tsv': 'tsv'
+}
+
+/**
+ * Container formats. These hold bytes, not text, so a caller must read them
+ * with readFileSync and no encoding and hand the Buffer to office.mjs or
+ * pdf.mjs - never to extractStrings, which takes decoded text.
+ *
+ * The office half of this table is derived from office.mjs's own
+ * OFFICE_FORMATS rather than repeated by hand: the two lists drifting apart
+ * would resolve a real file's extension to a format neither table's caller
+ * can act on, and nothing would say why. Every office format string happens
+ * to equal its extension without the leading dot, so the derivation is
+ * exact, not a heuristic.
+ */
+export const BINARY_EXTENSIONS = Object.fromEntries([
+  ...[...OFFICE_FORMATS].map((format) => [`.${format}`, format]),
+  ['.pdf', 'pdf']
+])
+
+const BINARY_FORMATS = new Set(Object.values(BINARY_EXTENSIONS))
+
+export function isBinaryFormat (format) {
+  return BINARY_FORMATS.has(format)
 }
 
 export function formatFor (absPath) {
-  return COPY_EXTENSIONS[path.extname(String(absPath)).toLowerCase()] || null
+  const ext = path.extname(String(absPath)).toLowerCase()
+  return COPY_EXTENSIONS[ext] || BINARY_EXTENSIONS[ext] || null
 }
 
 // A value that carries no brand voice: URLs, tokens, colors, bare numbers,
@@ -193,6 +224,19 @@ export function extractHeadings (absPath, raw) {
 export function extractStrings (absPath, raw) {
   const format = formatFor(absPath)
   if (!format) return { format: null, strings: [] }
+  // A container format never reaches here with usable input: its bytes are
+  // not text, so a caller that got this far read a PDF or an Office file as
+  // UTF-8 - a caller bug, not a normal outcome. office.mjs's extractOffice
+  // throws on the mirror-image mistake (an unsupported format string), and
+  // this does the same rather than returning the mojibake that would
+  // otherwise poison every metric downstream while looking like real,
+  // if sparse, copy.
+  if (isBinaryFormat(format)) {
+    throw new Error(
+      `extractStrings cannot read container format "${format}" as text; ` +
+      'read it with readFileSync (no encoding) and hand the buffer to extractOffice or extractPdf instead'
+    )
+  }
   const text = String(raw).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
 
   switch (format) {
@@ -210,6 +254,10 @@ export function extractStrings (absPath, raw) {
       for (const block of splitParagraphs(text)) pushCopy(out, block)
       return { format, strings: out }
     }
+    case 'rtf': return { format, strings: extractRtf(text) }
+    case 'subtitles': return { format, strings: extractSubtitles(text) }
+    case 'csv': return { format, strings: extractDelimited(text, ',') }
+    case 'tsv': return { format, strings: extractDelimited(text, '\t') }
     default: return { format: null, strings: [] }
   }
 }

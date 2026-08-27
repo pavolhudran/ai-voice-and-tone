@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractStrings, extractHeadings, formatFor } from '../scripts/lib/extract.mjs'
+import { extractStrings, extractHeadings, formatFor, isBinaryFormat, BINARY_EXTENSIONS } from '../scripts/lib/extract.mjs'
+import { OFFICE_FORMATS } from '../scripts/lib/office.mjs'
 
 test('markdown drops code and frontmatter, keeps prose, alt text, and link text', () => {
   const md = [
@@ -159,4 +160,62 @@ test('html captures single-quoted alt attributes as well as double-quoted', () =
 test('extractHeadings strips a BOM before matching the first heading', () => {
   const md = '\uFEFF# Schedule a campaign\n'
   assert.deepEqual(extractHeadings('/x/a.md', md), ['Schedule a campaign'])
+})
+
+// --- Task 7: RTF, subtitles, CSV/TSV, and the format registry ---
+
+test('BINARY_EXTENSIONS agrees exactly with office.mjs OFFICE_FORMATS, plus pdf', () => {
+  // office.mjs and extract.mjs are maintained separately; nothing else forces
+  // their two format lists to stay in sync. If they drift, a real file
+  // resolves to a format neither table's caller can act on.
+  const entries = Object.entries(BINARY_EXTENSIONS)
+  const officeEntries = entries.filter(([ext]) => ext !== '.pdf')
+  assert.deepEqual(new Set(officeEntries.map(([, format]) => format)), OFFICE_FORMATS)
+  assert.equal(officeEntries.length, OFFICE_FORMATS.size)
+  for (const [ext, format] of officeEntries) assert.equal(ext, `.${format}`)
+  assert.equal(BINARY_EXTENSIONS['.pdf'], 'pdf')
+})
+
+test('the format registry resolves container formats and marks them binary', () => {
+  for (const [file, format] of [
+    ['/a/b/guide.docx', 'docx'], ['/a/b/deck.PPTX', 'pptx'], ['/a/b/data.xlsx', 'xlsx'],
+    ['/a/b/notes.odt', 'odt'], ['/a/b/slides.odp', 'odp'], ['/a/b/sheet.ods', 'ods'],
+    ['/a/b/brand.pdf', 'pdf']
+  ]) {
+    assert.equal(formatFor(file), format, file)
+    assert.equal(isBinaryFormat(formatFor(file)), true, file)
+  }
+})
+
+test('the new text formats resolve and are not binary', () => {
+  for (const [file, format] of [
+    ['/a/b/notes.rtf', 'rtf'], ['/a/b/talk.vtt', 'subtitles'], ['/a/b/talk.srt', 'subtitles'],
+    ['/a/b/strings.csv', 'csv'], ['/a/b/strings.tsv', 'tsv']
+  ]) {
+    assert.equal(formatFor(file), format, file)
+    assert.equal(isBinaryFormat(formatFor(file)), false, file)
+  }
+})
+
+test('a container extension never reaches the text extractor', () => {
+  // extractStrings takes decoded text. A container format reaching it means
+  // the caller already read a PDF or an Office file as UTF-8 - a caller bug,
+  // not a normal outcome - so it throws rather than returning the mojibake
+  // that would silently poison every metric downstream while looking like
+  // real, if sparse, copy. This also keeps such a bug loud: a corpus walker
+  // that let one through would otherwise see an empty strings array and drop
+  // the file with no trace, the exact silent-vanish failure the `skipped`
+  // out-parameter exists to prevent.
+  assert.throws(() => extractStrings('/a/b/guide.pdf', 'whatever'), /container format/)
+})
+
+test('rtf, subtitles and csv route through extractStrings', () => {
+  assert.deepEqual(
+    extractStrings('/a/b/x.csv', 'label,value\nSave changes,1\n').strings,
+    ['label', 'value', 'Save changes']
+  )
+  assert.deepEqual(
+    extractStrings('/a/b/x.srt', '1\n00:00:01,000 --> 00:00:02,000\nHello.\n').strings,
+    ['Hello.']
+  )
 })
