@@ -1,14 +1,20 @@
 /**
- * Minimal, hand-built .docx and .odt fixtures for exercising the vendored
- * officeparser bundle in tests, without depending on a real file on disk or
- * a platform tool (e.g. macOS's `textutil`) to produce one.
+ * Minimal, hand-built docx/pptx/xlsx/odt/odp/ods fixtures for exercising the
+ * vendored officeparser bundle in tests, without depending on a real file on
+ * disk or a platform tool (e.g. macOS's `textutil`) to produce one.
  *
- * Both formats are ZIP archives. This writes the smallest ZIP officeparser
- * will actually recognise and parse:
- *  - docx: a `[Content_Types].xml` declaring the WordprocessingML main part,
- *    plus `word/document.xml` holding one paragraph of text.
- *  - odt: a `mimetype` entry declaring the ODF text package, plus
- *    `content.xml` holding one paragraph of text.
+ * All six formats are ZIP archives. This writes the smallest ZIP
+ * officeparser will actually recognise and parse for each - officeparser
+ * sniffs `[Content_Types].xml` content (OOXML) or the `mimetype` entry
+ * (ODF), never a filename, so a single-part archive suffices:
+ *  - docx: `[Content_Types].xml` declaring the WordprocessingML main part,
+ *    plus `word/document.xml`.
+ *  - pptx: `[Content_Types].xml` declaring the presentation main part, plus
+ *    `ppt/presentation.xml` and one `ppt/slides/slide1.xml`.
+ *  - xlsx: `[Content_Types].xml` declaring the spreadsheet main part, plus
+ *    `xl/workbook.xml` and one `xl/worksheets/sheet1.xml`.
+ *  - odt/odp/ods: a `mimetype` entry declaring the ODF package, plus
+ *    `content.xml`.
  *
  * Entries are stored uncompressed (ZIP method 0), so no deflate
  * implementation is needed - just a correct CRC-32 of the raw bytes.
@@ -112,18 +118,26 @@ export function makeMinimalDocx (text = DOCX_FIXTURE_TEXT) {
   return makeDocxFromBody(`<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`)
 }
 
-export function makeMinimalOdt (text = ODT_FIXTURE_TEXT) {
+/**
+ * Builds a minimal odt from raw `<office:text>` inner XML, so a caller can
+ * mix `text:h` headings with `text:p` body paragraphs directly.
+ */
+export function makeOdtFromBody (officeTextXml) {
   const content = '<?xml version="1.0" encoding="UTF-8"?>' +
     '<office:document-content ' +
     'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
     'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">' +
-    `<office:body><office:text><text:p>${text}</text:p></office:text></office:body>` +
+    `<office:body><office:text>${officeTextXml}</office:text></office:body>` +
     '</office:document-content>'
 
   return makeZip([
     { name: 'mimetype', data: Buffer.from('application/vnd.oasis.opendocument.text', 'utf8') },
     { name: 'content.xml', data: Buffer.from(content, 'utf8') }
   ])
+}
+
+export function makeMinimalOdt (text = ODT_FIXTURE_TEXT) {
+  return makeOdtFromBody(`<text:p>${text}</text:p>`)
 }
 
 export function makeMinimalXlsx (text = XLSX_FIXTURE_TEXT) {
@@ -149,7 +163,11 @@ export function makeMinimalXlsx (text = XLSX_FIXTURE_TEXT) {
   ])
 }
 
-export function makeMinimalPptx (text = PPTX_FIXTURE_TEXT) {
+/**
+ * Builds a minimal pptx from raw `<p:spTree>` inner XML, so a caller can
+ * shape a title placeholder (`p:ph type="title"`) alongside a plain shape.
+ */
+export function makePptxFromSpTree (spTreeXml) {
   const contentTypes = '<?xml version="1.0" encoding="UTF-8"?>' +
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
     '<Override PartName="/ppt/presentation.xml" ' +
@@ -162,7 +180,7 @@ export function makeMinimalPptx (text = PPTX_FIXTURE_TEXT) {
   const slide1 = '<?xml version="1.0" encoding="UTF-8"?>' +
     '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" ' +
     'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
-    `<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>` +
+    `<p:cSld><p:spTree>${spTreeXml}</p:spTree></p:cSld>` +
     '</p:sld>'
 
   return makeZip([
@@ -170,6 +188,10 @@ export function makeMinimalPptx (text = PPTX_FIXTURE_TEXT) {
     { name: 'ppt/presentation.xml', data: Buffer.from(presentation, 'utf8') },
     { name: 'ppt/slides/slide1.xml', data: Buffer.from(slide1, 'utf8') }
   ])
+}
+
+export function makeMinimalPptx (text = PPTX_FIXTURE_TEXT) {
+  return makePptxFromSpTree(`<p:sp><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`)
 }
 
 export function makeMinimalOds (text = ODS_FIXTURE_TEXT) {

@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { extractOffice, OFFICE_FORMATS, OFFICE_EXTRACTOR } from '../scripts/lib/office.mjs'
 import {
-  makeDocxFromBody, makeMinimalOdt, ODT_FIXTURE_TEXT,
+  makeDocxFromBody, makeMinimalOdt, makeOdtFromBody, ODT_FIXTURE_TEXT,
   makeMinimalXlsx, XLSX_FIXTURE_TEXT,
-  makeMinimalPptx, PPTX_FIXTURE_TEXT,
+  makeMinimalPptx, makePptxFromSpTree, PPTX_FIXTURE_TEXT,
   makeMinimalOds, ODS_FIXTURE_TEXT,
   makeMinimalOdp, ODP_FIXTURE_TEXT
 } from './helpers/officeFixtures.mjs'
@@ -87,4 +87,33 @@ test('odp slide text extracts', async () => {
   const out = await extractOffice(makeMinimalOdp(), 'odp')
   assert.deepEqual(out.strings, [ODP_FIXTURE_TEXT])
   assert.equal(out.note, 'ok')
+})
+
+test('a docx Heading1 paragraph is surfaced as a heading, and stays in strings too', async () => {
+  const buf = docx(
+    '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Section One</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t>Body text.</w:t></w:r></w:p>')
+  const out = await extractOffice(buf, 'docx')
+
+  assert.deepEqual(out.headings, ['Section One'])
+  assert.deepEqual(out.strings, ['Section One', 'Body text.'])
+})
+
+test('an odt text:h is a structural heading, not a style-name guess', async () => {
+  const buf = makeOdtFromBody('<text:h text:outline-level="1">Section One</text:h><text:p>Body text.</text:p>')
+  const out = await extractOffice(buf, 'odt')
+
+  assert.deepEqual(out.headings, ['Section One'])
+  assert.deepEqual(out.strings, ['Section One', 'Body text.'])
+})
+
+test('a pptx title placeholder is surfaced as a heading', async () => {
+  const buf = makePptxFromSpTree(
+    '<p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>' +
+    '<p:txBody><a:p><a:r><a:t>Section One</a:t></a:r></a:p></p:txBody></p:sp>' +
+    '<p:sp><p:txBody><a:p><a:r><a:t>Body text.</a:t></a:r></a:p></p:txBody></p:sp>')
+  const out = await extractOffice(buf, 'pptx')
+
+  assert.deepEqual(out.headings, ['Section One'])
+  assert.deepEqual(out.strings, ['Section One', 'Body text.'])
 })

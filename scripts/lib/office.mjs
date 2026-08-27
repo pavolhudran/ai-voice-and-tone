@@ -30,12 +30,41 @@ export const OFFICE_EXTRACTOR = Object.freeze({
 // recovers exactly the paragraph boundaries it was asked to mark. Written as
 // an escape, never a literal control character - a literal byte here makes
 // grep treat this file as binary and is invisible in every editor.
-const PARAGRAPH = ''
+const PARAGRAPH = '\u0001'
+
+const clean = (text) => String(text).replace(/\s+/g, ' ').trim()
 
 let cached = null
 function officeparser () {
   if (!cached) cached = require(path.join(VENDOR, 'officeparser', 'officeparser.cjs'))
   return cached
+}
+
+// officeparser's `content` is a single cross-format AST - the same object
+// this function already holds before it ever calls toText() - whose nodes
+// are tagged `type: "heading"` uniformly across docx, pptx and odt, each
+// with the node's own flattened text already sitting on `.text`. Recovering
+// headings is a document-order filter over that tree, not a second parser:
+//  - odt tags a real structural element, `text:h` - a genuine heading, not a
+//    heuristic.
+//  - pptx tags a slide's title placeholder (`p:ph type="title"` or
+//    "ctrTitle") - positional, but a real placeholder role, not a guess.
+//  - docx tags whichever paragraph's `w:pStyle` starts with "Heading" or
+//    equals "Title" - a user-editable style id, so this signal is real but
+//    weaker than the other two.
+// toText() itself never exposes any of this: its flattener recurses every
+// node's text by type-agnostic recursion, so a heading and a body paragraph
+// are already indistinguishable in the string it returns - which is exactly
+// why this walks `content` directly instead of toText()'s output.
+function collectHeadings (nodes, out = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (node && node.type === 'heading' && typeof node.text === 'string') {
+      const text = clean(node.text)
+      if (text) out.push(text)
+    }
+    if (node && Array.isArray(node.children)) collectHeadings(node.children, out)
+  }
+  return out
 }
 
 export async function extractOffice (buf, format) {
@@ -48,28 +77,18 @@ export async function extractOffice (buf, format) {
   })
   const raw = await parsed.toText()
 
+  // A heading is body copy too - the fingerprint's paragraph/word metrics
+  // still need to see it - so it stays in `strings` exactly as toText()
+  // already produced it. `headings` below is additive, not a filtered
+  // subset of it.
   const strings = String(raw)
     .split(PARAGRAPH)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .map(clean)
     .filter(Boolean)
 
   return {
     strings,
-    // No container format carries a heading concept this plugin can trust:
-    // a docx style name is editable and a pptx title placeholder is
-    // positional. Guessing would feed headingTitleCaseRatio a guess.
-    //
-    // Verified against the vendored bundle itself, not just argued from
-    // principle: officeparser's own docx heading detection derives from the
-    // paragraph's w:pStyle value via `W.startsWith("Heading")||W==="Title"` -
-    // exactly the editable style-name heuristic this adapter is refusing to
-    // trust. And that "heading" node distinction never survives into
-    // toText() anyway - its flattener concatenates every node's text by
-    // type-agnostic recursion, so a heading paragraph and a body paragraph
-    // are already indistinguishable in the string this adapter consumes.
-    // pptx parsing has no title-placeholder detection at all. There is
-    // nothing reliable to surface, through this API, for any format.
-    headings: [],
+    headings: collectHeadings(parsed.content),
     note: strings.length ? 'ok' : 'no-text-layer'
   }
 }

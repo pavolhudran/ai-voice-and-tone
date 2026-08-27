@@ -116,6 +116,27 @@ test('no file in the plugin tree carries a literal byte-order mark', () => {
   }
 })
 
+test('no file in the plugin tree carries a literal control character', () => {
+  // The same defect class as the BOM guard above, and it has landed in this
+  // project three times: a source line needs a non-printable sentinel (a
+  // delimiter no real text will contain), someone's editor or shell
+  // collapses the intended \u00XX escape into the raw byte, and it is
+  // invisible in review - a diff shows nothing, and it's invisible in every
+  // editor, because it renders exactly one narrow control-picture glyph
+  // wide either way. Tab, LF and CR are legitimate file content and are
+  // covered by the CRLF test above, so they are excluded here.
+  for (const abs of walkPlugin()) {
+    if (lstatSync(abs).isDirectory()) continue
+    if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
+    const bytes = readFileSync(abs)
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i]
+      const isControl = byte < 0x20 && byte !== 0x09 && byte !== 0x0A && byte !== 0x0D
+      assert.ok(!isControl, `${path.relative(root, abs)} contains a literal control byte (0x${byte.toString(16).padStart(2, '0')}) at byte ${i}`)
+    }
+  }
+})
+
 test('every script prints ASCII-only help', () => {
   for (const name of SCRIPTS) {
     const out = execFileSync(process.execPath, [path.join(root, 'scripts', name), '--help'], { encoding: 'utf8' })
