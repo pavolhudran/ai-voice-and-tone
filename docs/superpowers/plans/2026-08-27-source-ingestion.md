@@ -2545,7 +2545,7 @@ Today `walk()` is rooted at `projectRoot` and config globs are relative to it, s
 **Interfaces:**
 - Consumes: `walk`, `toPosix` from `fsx.mjs`; `formatFor` from `extract.mjs`; `activeProfile`, `localeOf` from `config.mjs`.
 - Produces:
-  - `loadRegister(config, projectRoot, kbRoot) -> Entry[]` — synthesises a `project` entry from `scan` when `sources` is absent.
+  - `loadRegister(config) -> Entry[]` — synthesises a `project` entry from `scan` when `sources` is absent.
   - `expandHome(p) -> string` — `~` via `os.homedir()`, never a shell.
   - `resolveEntry(entry, { projectRoot, kbRoot, config, profileName }) -> Resolved` where `Resolved` is `{ id, kind, files: [{ abs, rel, origin, format, locale }], url, missing, skipped }`.
   - `resolveRegister(register, ctx) -> Resolved[]`
@@ -2751,7 +2751,7 @@ test('resolveRegister returns one resolution per entry, in register order', () =
         { id: 's02', kind: 'inbox', path: 'sources/' }
       ]
     }
-    const resolved = resolveRegister(loadRegister(config, dir, path.join(dir, '.voice-and-tone')), ctxFor(dir, config))
+    const resolved = resolveRegister(loadRegister(config), ctxFor(dir, config))
     assert.deepEqual(resolved.map((r) => r.id), ['s01', 's02'])
     assert.deepEqual(resolved.map((r) => r.files.length), [1, 1])
   } finally {
@@ -3933,7 +3933,7 @@ function hasher () {
 }
 
 export function runCheck (ctx) {
-  const register = loadRegister(ctx.config, ctx.projectRoot, ctx.kbRoot)
+  const register = loadRegister(ctx.config)
   const resolved = resolveRegister(register, ctx)
   const index = loadIndex(ctx.kbRoot)
   const diff = diffIndex(index, resolved, hasher())
@@ -3983,7 +3983,7 @@ export async function runIngest (ctx, { only = null } = {}) {
 }
 
 export function runAdd (ctx, { target, label = null }) {
-  const register = loadRegister(ctx.config, ctx.projectRoot, ctx.kbRoot)
+  const register = loadRegister(ctx.config)
   const id = nextRegisterId(register)
 
   const entry = isUrl(target)
@@ -4227,7 +4227,7 @@ import { loadIndex, statsByLocale } from './sourceindex.mjs'
  * make an ordinary scan slow. Ingest is /connect's job alone.
  */
 export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default' }) {
-  const register = loadRegister(config, projectRoot, kbRoot)
+  const register = loadRegister(config)
   const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
   const index = loadIndex(kbRoot)
 
