@@ -81,12 +81,53 @@ test('throws with a line number on unsupported syntax', () => {
   assert.throws(() => parseYaml('a: 1\n--- \nb: 2'), /line 2/)
 })
 
-test('sequence-of-maps guard is quote-aware', () => {
+test('a quoted plain scalar sequence item is not mistaken for a map', () => {
   const got = parseYaml('items:\n  - "note: important"\n  - plain\n')
   assert.deepEqual(got.items, ['note: important', 'plain'])
+})
 
-  assert.throws(() => parseYaml('items:\n  - key: value\n'), /line 2/)
-  assert.throws(() => parseYaml('items:\n  - "quoted" then: value\n'), /line 2/)
+test('a sequence of block maps parses each dash into its own object, fields aligned under it', () => {
+  const src = [
+    'sources:',
+    '  - id: s02',
+    '    kind: inbox',
+    '    path: sources/',
+    '    label: Inbox',
+    '  - id: s03',
+    '    kind: url',
+    '    url: https://acme.com/about',
+    '    label: ~'
+  ].join('\n')
+  const got = parseYaml(src)
+  assert.deepEqual(got.sources, [
+    { id: 's02', kind: 'inbox', path: 'sources/', label: 'Inbox' },
+    { id: 's03', kind: 'url', url: 'https://acme.com/about', label: null }
+  ])
+})
+
+test('a sequence-of-maps item may itself carry a nested sequence field', () => {
+  const src = [
+    'sources:',
+    '  - id: s01',
+    '    kind: project',
+    '    include:',
+    '      - "README.md"',
+    '    exclude: []'
+  ].join('\n')
+  const got = parseYaml(src)
+  assert.deepEqual(got.sources, [
+    { id: 's01', kind: 'project', include: ['README.md'], exclude: [] }
+  ])
+})
+
+test('stringifyYaml round-trips a sequence of maps through parseYaml', () => {
+  const value = {
+    sources: [
+      { id: 's02', kind: 'inbox', path: 'sources/', label: 'Inbox' },
+      { id: 's03', kind: 'url', url: 'https://acme.com/about', label: null, retain: 'none' }
+    ]
+  }
+  assert.deepEqual(parseYaml(stringifyYaml(value)), value)
 })
 
 test('block scalars support chomping indicators', () => {
