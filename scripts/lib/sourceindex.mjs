@@ -115,30 +115,42 @@ export function upsertEntry (index, entry) {
  * index, and an edited source would count twice - once under each of its
  * versions - forever.
  *
- * The replacement is written under `oldId`, not whatever id `newEntry`
- * happened to carry: this is the same document, edited, not an unrelated
- * new one, and anything that cites this source by index id (a rule's
- * `source`-type evidence) should keep resolving to "this document, now
- * current" rather than dangling the moment someone fixes a typo in it.
- * This is continuity of an id still in service, not the reuse of a
- * retired one, so it does not conflict with ids otherwise never being
- * reused.
+ * The replacement gets a NEW id from `nextEntryId`, never `oldId`. This
+ * module's identity rule is the hash, not the path, applied consistently
+ * everywhere else (`upsertEntry` matches on hash; the same bytes at a new
+ * path are a no-op) - different bytes are a different source, full stop,
+ * and superseding is not a carve-out from that. Handing the new bytes the
+ * old id would let a rule that cites this source by index id keep
+ * resolving after the edit, but resolving to text that did not exist when
+ * that rule was derived: the citation would look intact while silently
+ * pointing at prose nobody has read. A visibly broken link is safer than
+ * that, and re-deriving is what `id` continuity would have quietly
+ * skipped.
+ *
+ * For the same reason, the replacement's `produced` list always starts
+ * empty, regardless of what `newEntry.produced` was built with - rule
+ * attribution is never inherited across a rewrite. The displaced entry is
+ * returned (with its own `produced` intact) precisely so a caller can
+ * report and re-derive whatever it had produced, the same "name what is
+ * lost so it can be reopened" shape the design already uses for a source
+ * retracted outright (`--forget`). An edited source is that same event,
+ * with a replacement attached.
  *
  * If `oldId` is not present (already removed, or called out of order),
- * this degrades to a plain insert rather than throwing - the end state
- * (`newEntry` present under `oldId`, nothing superseded left behind) is
- * the same either way.
+ * this degrades to a plain insert and returns `null` - nothing was
+ * displaced, so there is nothing to report.
  */
 export function supersedeEntry (index, oldId, newEntry) {
   index.sources = index.sources ?? []
   const at = index.sources.findIndex((s) => s.id === oldId)
-  const replacement = { ...newEntry, id: oldId }
+  const displaced = at === -1 ? null : index.sources[at]
+  const replacement = { ...newEntry, id: nextEntryId(index), produced: [] }
   if (at === -1) {
     index.sources.push(replacement)
   } else {
     index.sources[at] = replacement
   }
-  return replacement
+  return displaced
 }
 
 /**

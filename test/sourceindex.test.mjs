@@ -112,7 +112,6 @@ test('supersedeEntry replaces the old entry rather than adding alongside it', ()
   supersedeEntry(index, 'f001', replacement)
 
   assert.equal(index.sources.length, 1, 'the old version must not survive alongside the new one')
-  assert.equal(index.sources[0].id, 'f001', 'the replacement keeps the superseded id, not its own')
   assert.equal(index.sources[0].sha256, 'z'.repeat(64))
 })
 
@@ -125,6 +124,42 @@ test('superseding removes the old version\'s statistics from the recomputed fing
 
   const buckets = statsByLocale(index)
   assert.equal(buckets.get('en').words, newStats.words, 'the superseded version is still contributing its old word count')
+})
+
+test('the replacement gets a new id and starts with an empty produced list, never inherited', () => {
+  // Identity is the hash everywhere else in this module (upsertEntry matches
+  // on hash; the same bytes at a new path are a no-op) - different bytes
+  // are a different source, and superseding does not carve out an
+  // exception. Rule attribution ('produced') is likewise never inherited:
+  // a rule citing the old id would otherwise keep resolving after the
+  // edit, but to text that did not exist when it was derived.
+  const index = {
+    sources: [entry({ id: 'f001', sha256: 'a'.repeat(64), produced: ['V3', 'L07'] })]
+  }
+
+  supersedeEntry(index, 'f001', entry({ id: 'f999', sha256: 'z'.repeat(64), produced: ['V3', 'L07'] }))
+
+  assert.equal(index.sources.length, 1)
+  assert.notEqual(index.sources[0].id, 'f001', 'the replacement must not keep the superseded id')
+  assert.deepEqual(index.sources[0].produced, [], 'produced must not be inherited from the superseded entry')
+})
+
+test('supersedeEntry returns the displaced entry, produced list intact, so a caller can report and re-derive it', () => {
+  const index = {
+    sources: [entry({ id: 'f001', sha256: 'a'.repeat(64), produced: ['V3', 'L07'] })]
+  }
+
+  const displaced = supersedeEntry(index, 'f001', entry({ id: 'f999', sha256: 'z'.repeat(64) }))
+
+  assert.equal(displaced.id, 'f001')
+  assert.deepEqual(displaced.produced, ['V3', 'L07'], 'the caller needs the old produced list to reopen/re-derive those rules')
+})
+
+test('supersedeEntry returns null when there is nothing to displace', () => {
+  const index = { sources: [] }
+  const displaced = supersedeEntry(index, 'f001', entry({ id: 'f999', sha256: 'z'.repeat(64) }))
+  assert.equal(displaced, null)
+  assert.equal(index.sources.length, 1, 'still inserts the replacement')
 })
 
 test('bySha indexes every entry by its hash', () => {
