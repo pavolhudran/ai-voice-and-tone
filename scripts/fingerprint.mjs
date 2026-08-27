@@ -2,28 +2,38 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
-import { loadConfig } from './lib/config.mjs'
-import { gatherCorpus } from './lib/corpus.mjs'
+import { loadConfig, kbRootFor } from './lib/config.mjs'
+import { gatherAll } from './lib/corpus.mjs'
 import { statsFor, mergeStats, fingerprintFromStats } from './lib/metrics.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
-export function buildFingerprint (projectRoot, config, { generated, source = 'measured', profileName = 'default' }) {
-  const corpus = gatherCorpus(projectRoot, config, profileName)
-  const perLocale = new Map()
+export function buildFingerprint (projectRoot, config, { generated, source = 'measured', profileName = 'default', kbRoot = null }) {
+  const root = kbRoot ?? kbRootFor(projectRoot)
+  const { files, estimatedLocales } = gatherAll({ projectRoot, kbRoot: root, config, profileName })
 
-  // Statistics are computed per FILE and merged, never over a joined blob.
-  // Joining lets a text-level pattern match across the seam between two
-  // unrelated documents, and it breaks the merge invariant in metrics.mjs.
-  for (const file of corpus) {
+  const perLocale = new Map()
+  for (const file of files) {
+    // A live project file is measured here; an indexed source already carries
+    // its counts, recorded when it was analysed. Both are Stats blocks, so
+    // they merge without either caring which it was.
+    //
+    // Statistics are computed per FILE and merged, never over a joined blob.
+    // Joining lets a text-level pattern match across the seam between two
+    // unrelated documents, and it breaks the merge invariant in metrics.mjs.
+    const stats = file.stats ?? statsFor({ strings: file.strings, headings: file.headings, locale: file.locale })
     const bucket = perLocale.get(file.locale) ?? []
-    bucket.push(statsFor({ strings: file.strings, headings: file.headings, locale: file.locale }))
+    bucket.push(stats)
     perLocale.set(file.locale, bucket)
   }
 
   const out = {}
   // Sorted so the artifact is stable across runs and diffs cleanly in git.
   for (const locale of [...perLocale.keys()].sort()) {
-    out[locale] = fingerprintFromStats(mergeStats(perLocale.get(locale)), locale)
+    out[locale] = {
+      ...fingerprintFromStats(mergeStats(perLocale.get(locale)), locale),
+      // Parent spec 5.4: one estimated contributor caps the whole locale.
+      fidelity: estimatedLocales.has(locale) ? 'estimated' : 'measured'
+    }
   }
   return { generated, source, byLocale: out, baseline: null }
 }
@@ -57,7 +67,7 @@ function main (argv) {
   const config = loadConfig(kbRoot)
   const generated = nowIso(values)
   const fingerprint = buildFingerprint(projectRoot, config, {
-    generated, source, profileName: values.profile ?? 'default'
+    generated, source, profileName: values.profile ?? 'default', kbRoot
   })
 
   const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'evidence', 'fingerprint.json')

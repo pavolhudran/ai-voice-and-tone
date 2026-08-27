@@ -148,3 +148,58 @@ test('--source rejects an invalid value instead of writing a bogus fingerprint',
     cleanup(dir)
   }
 })
+
+// --- Task 12: registered sources fold into the fingerprint via the index ---
+
+test('index statistics are folded into the fingerprint alongside live project files', async () => {
+  const dir = makeTmpProject({ 'content/a.md': 'We write plainly. We keep it short.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    // A source that is NOT present locally, but whose statistics are recorded.
+    const { statsFor } = await import('../scripts/lib/metrics.mjs')
+    const { saveIndex } = await import('../scripts/lib/sourceindex.mjs')
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'a'.repeat(64), kind: 'file', from: 's02',
+        origin: 'sources/gone.pdf', format: 'pdf', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['A missing document still counts.'], headings: [], locale: 'en' }),
+        status: 'missing', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const fp = buildFingerprint(dir, config, { ...opts, kbRoot: kb })
+    assert.ok(
+      fp.byLocale.en.universal.wordCount > 7,
+      'the absent source contributed its words'
+    )
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a locale whose only sources are estimated reports an estimated fingerprint', async () => {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const { statsFor } = await import('../scripts/lib/metrics.mjs')
+    const { saveIndex } = await import('../scripts/lib/sourceindex.mjs')
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'b'.repeat(64), kind: 'file', from: 's02',
+        origin: 'sources/scan.pdf', format: 'pdf', locale: 'en',
+        tier: 'model', fidelity: 'estimated', quality: { passed: true },
+        stats: statsFor({ strings: ['Transcribed by the model.'], headings: [], locale: 'en' }),
+        status: 'used', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const fp = buildFingerprint(dir, config, { ...opts, kbRoot: kb })
+    assert.equal(
+      fp.byLocale.en.fidelity, 'estimated',
+      'parent spec 5.4: this locale may only ever produce assumed rules'
+    )
+  } finally {
+    cleanup(dir)
+  }
+})

@@ -2,6 +2,8 @@ import path from 'node:path'
 import { walk, readTextFile, toPosix } from './fsx.mjs'
 import { extractStrings, extractHeadings, formatFor, isBinaryFormat } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
+import { loadRegister, resolveRegister } from './register.mjs'
+import { loadIndex, statsByLocale } from './sourceindex.mjs'
 
 /**
  * Read every copy-bearing file the config points at, in a stable order.
@@ -101,4 +103,102 @@ export function byLocale (corpus) {
     buckets.set(file.locale, bucket)
   }
   return buckets
+}
+
+/**
+ * Everything the corpus is made of, from the two places it can come from.
+ *
+ * Project files are read LIVE: they are committed, always present, and cheap.
+ * Everything else comes from the INDEX, never from re-extracting the source.
+ *
+ * That split is deliberate. Spec 8.1 keeps URL fetching out of scan so the
+ * fingerprint cannot depend on someone else's web server; the same argument
+ * applies to extraction. Re-parsing a folder of PDFs on every scan would make
+ * the fingerprint depend on whether anyone had run --ingest first, and would
+ * make an ordinary scan slow. Ingest is /connect's job alone.
+ *
+ * @param {string[]} [unreadable] - the same out-parameter gatherCorpus takes,
+ *   threaded through so the malformed-JSON signal is not lost when a caller
+ *   moves from gatherCorpus to gatherAll. Only a live project file can land
+ *   here: an indexed source's text is gone by design, so there is nothing
+ *   left to fail to parse.
+ */
+export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default', unreadable = [] }) {
+  const register = loadRegister(config)
+  const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
+  const index = loadIndex(kbRoot)
+
+  const files = []
+  const skipped = []
+
+  for (const entry of resolved) {
+    // The register's own vocabulary is a strict subset of gatherCorpus's -
+    // see resolveEntry's comment - so `reason` here is always 'no-extractor',
+    // but it is still carried through rather than assumed, exactly as the
+    // container branch below carries its own reason explicitly.
+    for (const item of entry.skipped) skipped.push({ rel: item.origin, ext: item.ext, reason: item.reason })
+    if (entry.kind !== 'project') continue
+
+    for (const file of entry.files) {
+      // A container format (.pdf, .docx, ...) is a resolvable file to the
+      // register - it may be ingested - but it is not text. extractStrings
+      // refuses it (extract.mjs), and that refusal must never be reached
+      // from a live read: route it to `skipped` exactly like gatherCorpus
+      // does, so a PDF sitting inside a project scan glob does not crash
+      // the scan (the R23 regression test/scan.test.mjs and
+      // test/corpus.test.mjs guard against).
+      if (isBinaryFormat(file.format)) {
+        skipped.push({ rel: file.origin, ext: path.extname(file.abs).toLowerCase(), reason: 'container' })
+        continue
+      }
+
+      let raw
+      try { raw = readTextFile(file.abs) } catch { continue } // unreadable file is skipped, not fatal
+      const { strings } = extractStrings(file.abs, raw)
+      if (strings.length === 0) {
+        if (file.format === 'json') unreadable.push(file.origin)
+        continue
+      }
+      files.push({
+        rel: file.origin,
+        abs: file.abs,
+        format: file.format,
+        locale: file.locale,
+        strings,
+        headings: extractHeadings(file.abs, raw),
+        sourceId: entry.id,
+        tier: 'script',
+        fidelity: 'measured'
+      })
+    }
+  }
+
+  // The text is gone by design once a source is indexed; the counts remain.
+  // A `skipped` index entry contributes nothing (the quality gate rejected
+  // it), same rule statsByLocale enforces below.
+  const indexed = (index.sources ?? []).filter((s) => s.stats && s.status !== 'skipped')
+  for (const source of indexed) {
+    files.push({
+      rel: source.origin,
+      abs: null,
+      format: source.format,
+      locale: source.locale ?? 'en',
+      strings: [],                 // the text is gone by design; the counts remain
+      headings: [],
+      stats: source.stats,
+      sourceId: source.from ?? null,
+      entryId: source.id,
+      tier: source.tier,
+      fidelity: source.fidelity,
+      status: source.status
+    })
+  }
+
+  return {
+    files,
+    skipped,
+    indexStats: statsByLocale(index),
+    missing: indexed.filter((s) => s.status === 'missing').length,
+    estimatedLocales: new Set(indexed.filter((s) => s.fidelity === 'estimated').map((s) => s.locale ?? 'en'))
+  }
 }

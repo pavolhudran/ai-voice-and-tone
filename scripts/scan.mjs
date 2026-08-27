@@ -2,29 +2,48 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { writeTextFile, toPosix } from './lib/fsx.mjs'
 import { splitSentences, splitWords } from './lib/text.mjs'
-import { loadConfig } from './lib/config.mjs'
-import { gatherCorpus } from './lib/corpus.mjs'
+import { loadConfig, kbRootFor } from './lib/config.mjs'
+import { gatherAll } from './lib/corpus.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
-export function buildManifest (projectRoot, config, generated, profileName = 'default') {
+export function buildManifest (projectRoot, config, generated, profileName = 'default', kbRoot = null) {
+  const root = kbRoot ?? kbRootFor(projectRoot)
+  const unreadablePaths = []
+  const { files: gathered, skipped, missing } = gatherAll({
+    projectRoot, kbRoot: root, config, profileName, unreadable: unreadablePaths
+  })
+
   const files = []
   const byLocale = {}
   const totals = { files: 0, strings: 0, words: 0, sentences: 0 }
 
-  const unreadablePaths = []
-  const skippedFiles = []
-  const corpus = gatherCorpus(projectRoot, config, profileName, unreadablePaths, skippedFiles)
-
-  for (const file of corpus) {
+  for (const file of gathered) {
+    // A live project file is counted here. An indexed source arrives with its
+    // counts already recorded, and its text deliberately absent - so read the
+    // numbers from the stats block rather than recomputing from nothing.
+    const stats = file.stats
     const joined = file.strings.join('\n')
     const entry = {
       path: file.rel,
       format: file.format,
       locale: file.locale,
-      strings: file.strings.length,
-      words: splitWords(joined).length,
-      sentences: file.strings.reduce((sum, s) => sum + splitSentences(s).length, 0)
+      source: file.sourceId ?? null,
+      tier: file.tier,
+      fidelity: file.fidelity,
+      // null for a live project file; the recorded index status
+      // ('used'/'missing'/'stale') for an indexed source. This is the one
+      // field that lets a consumer of manifest.files tell a live
+      // measurement apart from a recorded one, rather than guessing from
+      // tier/fidelity alone (a script-tier, measured-fidelity indexed
+      // source would otherwise look identical to a live file).
+      status: file.status ?? null,
+      strings: stats ? stats.strings : file.strings.length,
+      words: stats ? stats.words : splitWords(joined).length,
+      sentences: stats
+        ? stats.sentences
+        : file.strings.reduce((sum, s) => sum + splitSentences(s).length, 0)
     }
+    if (entry.strings === 0) continue
     files.push(entry)
 
     totals.files += 1
@@ -38,6 +57,8 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
     bucket.words += entry.words
   }
 
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+
   return {
     generated,
     projectRoot: toPosix(projectRoot),
@@ -47,11 +68,12 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
     files,
     unreadable: { count: unreadablePaths.length, paths: unreadablePaths },
     skipped: {
-      count: skippedFiles.length,
-      files: [...skippedFiles]
+      count: skipped.length,
+      files: [...skipped]
         .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
         .map((f) => ({ path: f.rel, ext: f.ext, reason: f.reason }))
-    }
+    },
+    missing
   }
 }
 
@@ -73,7 +95,7 @@ function main (argv) {
 
   const { projectRoot, kbRoot } = resolveRoots(values)
   const config = loadConfig(kbRoot)
-  const manifest = buildManifest(projectRoot, config, nowIso(values), values.profile ?? 'default')
+  const manifest = buildManifest(projectRoot, config, nowIso(values), values.profile ?? 'default', kbRoot)
 
   const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'evidence', 'manifest.json')
   writeTextFile(out, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -104,6 +126,9 @@ function main (argv) {
       : '') +
     (containers.length
       ? `scan: ${containers.length} file(s) need ingest, not scan (run /voice-and-tone:connect: ${extsOf(containers)})\n`
+      : '') +
+    (manifest.missing
+      ? `scan: ${manifest.missing} source(s) not present locally; statistics intact\n`
       : '') +
     `scan: wrote ${toPosix(path.relative(projectRoot, out))}\n`
   )
