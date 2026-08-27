@@ -50,7 +50,7 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
       count: skippedFiles.length,
       files: [...skippedFiles]
         .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
-        .map((f) => ({ path: f.rel, ext: f.ext }))
+        .map((f) => ({ path: f.rel, ext: f.ext, reason: f.reason }))
     }
   }
 }
@@ -90,14 +90,20 @@ function main (argv) {
     })}\n`)
     return
   }
+  const noExtractor = manifest.skipped.files.filter((f) => f.reason === 'no-extractor')
+  const containers = manifest.skipped.files.filter((f) => f.reason === 'container')
+  const extsOf = (files) => [...new Set(files.map((f) => f.ext))].sort().join(', ')
+
   writeOut(
     `scan: ${manifest.totals.files} files, ${manifest.totals.strings} strings, ` +
     `${manifest.totals.words} words, ${manifest.totals.sentences} sentences\n` +
     `scan: locales ${Object.keys(manifest.byLocale).join(', ') || 'none'}\n` +
     `scan: ${manifest.unreadable.count} unreadable json file(s)\n` +
-    (manifest.skipped.count
-      ? `scan: ${manifest.skipped.count} file(s) skipped (unsupported: ` +
-        `${[...new Set(manifest.skipped.files.map((f) => f.ext))].sort().join(', ')})\n`
+    (noExtractor.length
+      ? `scan: ${noExtractor.length} file(s) skipped (no extractor: ${extsOf(noExtractor)})\n`
+      : '') +
+    (containers.length
+      ? `scan: ${containers.length} file(s) need ingest, not scan (run /voice-and-tone:connect: ${extsOf(containers)})\n`
       : '') +
     `scan: wrote ${toPosix(path.relative(projectRoot, out))}\n`
   )

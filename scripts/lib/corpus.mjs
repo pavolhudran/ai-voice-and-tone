@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { walk, readTextFile, toPosix } from './fsx.mjs'
-import { extractStrings, extractHeadings, formatFor } from './extract.mjs'
+import { extractStrings, extractHeadings, formatFor, isBinaryFormat } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
 
 /**
@@ -22,13 +22,25 @@ import { activeProfile, localeOf } from './config.mjs'
  *   returns - so a plain property would work only for a caller holding the
  *   exact original reference. This one is visible in the signature and
  *   passes through untouched by construction.
- * @param {Array<{rel:string,ext:string}>} [skipped] - out-parameter, same
- *   rationale as `unreadable`. A file matched by an include glob whose
- *   extension has no extractor used to vanish without trace: absent from the
- *   manifest's `files` AND from `unreadable`, which only ever covered
- *   malformed JSON. A user pointing scan.include at a folder of PDFs saw
- *   "0 files" with nothing to act on. Recording the extension - not merely a
- *   count - is what makes the resulting message actionable.
+ * @param {Array<{rel:string,ext:string,reason:string}>} [skipped] -
+ *   out-parameter, same rationale as `unreadable`. A file matched by an
+ *   include glob whose extension has no extractor used to vanish without
+ *   trace: absent from the manifest's `files` AND from `unreadable`, which
+ *   only ever covered malformed JSON. A user pointing scan.include at a
+ *   folder of PDFs saw "0 files" with nothing to act on. Recording the
+ *   extension - not merely a count - is what makes the resulting message
+ *   actionable.
+ *
+ *   `reason` distinguishes the two ways a file lands here, because they call
+ *   for different action from the reader:
+ *     - 'no-extractor': the extension has no extractor at all (.fig, .sketch).
+ *     - 'container': the extension is a supported container format (.pdf,
+ *       .docx, ...) that gatherCorpus deliberately does not read. This is the
+ *       TEXT path - it hands extractStrings only decoded text - and a
+ *       container's bytes belong to the ingest ladder (`/connect`), not
+ *       here. Collapsing both into one count would tell a reader their PDFs
+ *       "were skipped" without saying they are supported and simply need
+ *       ingesting.
  */
 export function gatherCorpus (projectRoot, config, profileName = 'default', unreadable = [], skipped = []) {
   const profile = activeProfile(config, profileName)
@@ -38,13 +50,24 @@ export function gatherCorpus (projectRoot, config, profileName = 'default', unre
 
   for (const abs of walk(projectRoot, config.scan)) {
     const rel = toPosix(path.relative(projectRoot, abs))
+    const ext = path.extname(abs).toLowerCase()
 
-    // The format gate is decided by the path alone, so it must run BEFORE the
-    // read. Otherwise a glob pointing at a directory of large binaries slurps
-    // every one of them into memory only to discard it at the extension check.
+    // Both gates below are decided by the path alone, so they must run
+    // BEFORE the read. Otherwise a glob pointing at a directory of large
+    // binaries slurps every one of them into memory only to discard it at
+    // the extension check.
     const format = formatFor(abs)
     if (!format) {
-      skipped.push({ rel, ext: path.extname(abs).toLowerCase() })
+      skipped.push({ rel, ext, reason: 'no-extractor' })
+      continue
+    }
+    // A container format's bytes are not text: extractStrings refuses them
+    // (see extract.mjs), and rightly so - but that refusal must never be
+    // reached from here. Route it to `skipped` instead, exactly like an
+    // unknown extension, so a PDF or an Office file next to a glob of
+    // markdown does not crash the whole scan.
+    if (isBinaryFormat(format)) {
+      skipped.push({ rel, ext, reason: 'container' })
       continue
     }
 

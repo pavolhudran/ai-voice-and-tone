@@ -1,9 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { buildManifest } from '../scripts/scan.mjs'
+
+const SCAN_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'scan.mjs')
 
 const config = {
   ...DEFAULT_CONFIG,
@@ -61,7 +65,7 @@ test('paths in the manifest are POSIX on every platform', () => {
   }
 })
 
-test('the manifest reports skipped files with their extension', () => {
+test('the manifest reports skipped files with their extension and reason', () => {
   const dir = makeTmpProject({
     'content/a.md': 'Copy here.\n',
     'content/logo.fig': 'placeholder',
@@ -79,6 +83,63 @@ test('the manifest reports skipped files with their extension', () => {
       ['content/logo.fig', 'content/mock.sketch'],
       'sorted, so the artifact diffs cleanly'
     )
+    // R23 regression net: no-extractor files must keep this reason, not the
+    // 'container' reason a supported-but-unread format gets below.
+    assert.deepEqual(manifest.skipped.files.map((f) => f.reason), ['no-extractor', 'no-extractor'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a container format in the scan glob is reported as needing ingest, not scanned inline', () => {
+  // R23 (Task 7 fix round 1): before this fix, a supported container format
+  // (.pdf, .docx, ...) resolved to a truthy `format` from formatFor, so
+  // gatherCorpus's `if (!format)` skip gate no longer caught it; the file
+  // was read as text and extractStrings threw, uncaught, killing the scan.
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/brand.pdf': 'not real pdf bytes'
+  })
+  try {
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z')
+
+    assert.equal(manifest.totals.files, 1, 'the markdown file is still scanned')
+    assert.deepEqual(manifest.files.map((f) => f.path), ['content/a.md'])
+    assert.equal(manifest.skipped.count, 1)
+    assert.deepEqual(manifest.skipped.files, [{ path: 'content/brand.pdf', ext: '.pdf', reason: 'container' }])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('the CLI summary distinguishes files with no extractor from containers that need ingest', () => {
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/logo.fig': 'placeholder',
+    'content/brand.pdf': 'not real pdf bytes',
+    '.voice-and-tone/config.yml': [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      'scan:',
+      '  include:',
+      '    - "content/**/*"',
+      '  exclude:',
+      '    - "node_modules/**"'
+    ].join('\n')
+  })
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [SCAN_SCRIPT, '--root', dir, '--now', '2026-08-27T00:00:00.000Z'],
+      { encoding: 'utf8' }
+    )
+    assert.match(out, /scan: 1 file\(s\) skipped \(no extractor: \.fig\)/)
+    assert.match(out, /scan: 1 file\(s\) need ingest, not scan \(run \/voice-and-tone:connect: \.pdf\)/)
   } finally {
     cleanup(dir)
   }

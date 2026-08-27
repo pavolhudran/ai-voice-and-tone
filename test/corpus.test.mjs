@@ -69,8 +69,67 @@ test('an unsupported extension is recorded as skipped, not dropped silently', ()
       skipped.map((s) => s.rel).sort(),
       ['content/logo.fig', 'content/logo.sketch']
     )
+    // R23 regression net: an extension with no extractor at all must keep
+    // carrying the 'no-extractor' reason, not collapse into the reason a
+    // supported-but-unread container format gets below.
+    assert.deepEqual(skipped.map((s) => s.reason), ['no-extractor', 'no-extractor'])
     assert.deepEqual(unreadable, [], 'skipped is a separate channel from unreadable')
   } finally {
+    cleanup(dir)
+  }
+})
+
+// --- R23 (Task 7 fix round 1): a container format must never reach the text
+// path. Before this fix, formatFor resolving .pdf/.docx to a truthy format
+// made gatherCorpus's `if (!format)` gate a no-op for them, so the file was
+// read as text and extractStrings threw, uncaught, killing the whole scan.
+
+test('a container format beside ordinary text files is skipped, not read, and does not crash the scan', () => {
+  const dir = makeTmpProject({
+    'content/notes.md': 'We write like humans.\n',
+    'content/brand.pdf': 'not real pdf bytes, but the extension is what gates this',
+    'content/guide.docx': 'not a real docx either'
+  })
+  try {
+    const config = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const skipped = []
+
+    // If gatherCorpus ever again hands a container format to extractStrings,
+    // this call throws and the test fails right here - the exact repro the
+    // coordinator reproduced deterministically before dispatching review.
+    const corpus = gatherCorpus(dir, config, 'default', [], skipped)
+
+    assert.deepEqual(corpus.map((f) => f.rel), ['content/notes.md'])
+    assert.deepEqual(skipped.map((s) => s.rel).sort(), ['content/brand.pdf', 'content/guide.docx'])
+    assert.deepEqual(skipped.map((s) => s.ext).sort(), ['.docx', '.pdf'])
+    assert.deepEqual(skipped.map((s) => s.reason), ['container', 'container'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a container format is never read into memory before being skipped', () => {
+  // Same technique as the "format gate runs before the file is read" test
+  // below: chmod 000 after creation, so if the container gate ran after (or
+  // was skipped by) the read, readTextFile's EACCES would be caught by the
+  // existing "unreadable file is skipped, not fatal" handler and the file
+  // would vanish into no channel at all - a regression indistinguishable
+  // from the pre-fix crash except in how loudly it fails.
+  const dir = makeTmpProject({ 'content/brand.pdf': 'placeholder' })
+  const pdf = path.join(dir, 'content', 'brand.pdf')
+  try {
+    chmodSync(pdf, 0o000)
+
+    const config = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const skipped = []
+    const corpus = gatherCorpus(dir, config, 'default', [], skipped)
+
+    assert.deepEqual(corpus, [])
+    assert.equal(skipped.length, 1)
+    assert.equal(skipped[0].rel, 'content/brand.pdf')
+    assert.equal(skipped[0].reason, 'container')
+  } finally {
+    chmodSync(pdf, 0o644) // restore so cleanup's rmSync can remove it
     cleanup(dir)
   }
 })
