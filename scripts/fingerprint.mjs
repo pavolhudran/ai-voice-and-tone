@@ -3,17 +3,27 @@ import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
 import { loadConfig } from './lib/config.mjs'
-import { gatherCorpus, byLocale } from './lib/corpus.mjs'
-import { computeFingerprint } from './lib/metrics.mjs'
+import { gatherCorpus } from './lib/corpus.mjs'
+import { statsFor, mergeStats, fingerprintFromStats } from './lib/metrics.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
 export function buildFingerprint (projectRoot, config, { generated, source = 'measured', profileName = 'default' }) {
-  const buckets = byLocale(gatherCorpus(projectRoot, config, profileName))
+  const corpus = gatherCorpus(projectRoot, config, profileName)
+  const perLocale = new Map()
+
+  // Statistics are computed per FILE and merged, never over a joined blob.
+  // Joining lets a text-level pattern match across the seam between two
+  // unrelated documents, and it breaks the merge invariant in metrics.mjs.
+  for (const file of corpus) {
+    const bucket = perLocale.get(file.locale) ?? []
+    bucket.push(statsFor({ strings: file.strings, headings: file.headings, locale: file.locale }))
+    perLocale.set(file.locale, bucket)
+  }
+
   const out = {}
   // Sorted so the artifact is stable across runs and diffs cleanly in git.
-  for (const locale of [...buckets.keys()].sort()) {
-    const { strings, headings } = buckets.get(locale)
-    out[locale] = computeFingerprint({ strings, headings, locale })
+  for (const locale of [...perLocale.keys()].sort()) {
+    out[locale] = fingerprintFromStats(mergeStats(perLocale.get(locale)), locale)
   }
   return { generated, source, byLocale: out, baseline: null }
 }
