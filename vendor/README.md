@@ -24,7 +24,6 @@ match the manifest's hashes.
 stale** so its numbers are recomputed rather than silently shifting. Each index
 entry records which extractor and version produced it for exactly this reason.
 
-Note: `scripts/vendor.mjs` deletes and rebuilds this entire `vendor/` directory
-on every run, since it does not know which files are generated and which are
-hand-authored. This file is hand-authored - if it goes missing after
-`npm run vendor`, restore it from git before committing.
+`scripts/vendor.mjs` only ever removes what it owns - the `pdfjs/` and
+`officeparser/` subdirectories and `manifest.json` - so this file and anything
+else placed directly under `vendor/` survive a rebuild untouched.

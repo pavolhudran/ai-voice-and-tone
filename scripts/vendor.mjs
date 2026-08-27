@@ -71,7 +71,13 @@ function main (argv) {
     return
   }
 
-  rmSync(VENDOR, { recursive: true, force: true })
+  // Remove only what this script owns and regenerates. vendor/ can hold
+  // hand-authored files (vendor/README.md) that are not this script's to
+  // delete, so a full rmSync(VENDOR, ...) is deliberately not used here.
+  for (const owned of ['pdfjs', 'officeparser', 'manifest.json']) {
+    rmSync(path.join(VENDOR, owned), { recursive: true, force: true })
+  }
+  rmSync(WORK, { recursive: true, force: true })
   mkdirSync(VENDOR, { recursive: true })
   const libraries = {}
 
