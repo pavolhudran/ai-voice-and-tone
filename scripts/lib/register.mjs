@@ -27,7 +27,7 @@ export function expandHome (p) {
   return raw
 }
 
-export function loadRegister (config, projectRoot, kbRoot) {
+export function loadRegister (config) {
   const declared = Array.isArray(config?.sources) ? config.sources : null
   if (declared && declared.length > 0) {
     return declared.map((entry, i) => ({ id: entry.id ?? `s${String(i + 1).padStart(2, '0')}`, ...entry }))
@@ -111,10 +111,14 @@ export function resolveEntry (entry, ctx) {
     // format string too, so a source pointing at an Office deck or a PDF is
     // a resolvable file here, not a skip - unlike gatherCorpus's text-only
     // path (corpus.mjs), which cannot read container bytes as text and
-    // routes them to its own `skipped` with reason 'container'. The only
-    // way a file lands in THIS `skipped` is the other half of that
-    // vocabulary: an extension nothing handles at all ('no-extractor'),
-    // e.g. .fig or .sketch.
+    // routes them to its own `skipped` with reason 'container'. A file can
+    // only ever land in THIS `skipped` for the other half of that same
+    // vocabulary - an extension nothing handles at all, e.g. .fig or
+    // .sketch - so `reason` below is always the constant 'no-extractor',
+    // never computed. It is still carried on every entry, not omitted,
+    // so this shape stays a strict subset of gatherCorpus's and the two
+    // producers can be merged into one list without losing the
+    // no-extractor/container distinction Tasks 1 and 7 established.
     const format = formatFor(abs)
     const relToRoot = toPosix(path.relative(relativeTo, abs))
     // A project entry keeps project-relative paths, so nothing about today's
@@ -126,7 +130,7 @@ export function resolveEntry (entry, ctx) {
         : `${prefix}${relToRoot}`
 
     if (!format) {
-      base.skipped.push({ origin, ext: path.extname(abs).toLowerCase() })
+      base.skipped.push({ origin, ext: path.extname(abs).toLowerCase(), reason: 'no-extractor' })
       continue
     }
     base.files.push({

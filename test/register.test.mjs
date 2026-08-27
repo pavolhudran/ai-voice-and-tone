@@ -4,6 +4,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
+import { gatherCorpus } from '../scripts/lib/corpus.mjs'
 import {
   loadRegister, resolveEntry, resolveRegister, expandHome, nextRegisterId
 } from '../scripts/lib/register.mjs'
@@ -17,7 +18,7 @@ const ctxFor = (dir, config = DEFAULT_CONFIG) => ({
 
 test('a config with no sources key synthesises a project entry from scan', () => {
   const config = { ...DEFAULT_CONFIG, scan: { include: ['docs/**/*.md'], exclude: ['dist/**'] } }
-  const register = loadRegister(config, '/proj', '/proj/.voice-and-tone')
+  const register = loadRegister(config)
 
   assert.equal(register.length, 1)
   assert.equal(register[0].kind, 'project')
@@ -36,7 +37,7 @@ test('an explicit register is returned as written, in order', () => {
     ]
   }
   assert.deepEqual(
-    loadRegister(config, '/proj', '/proj/.voice-and-tone').map((e) => e.kind),
+    loadRegister(config).map((e) => e.kind),
     ['project', 'inbox', 'url']
   )
 })
@@ -127,7 +128,7 @@ test('unsupported extensions under a source are skipped with their extension', (
   try {
     const resolved = resolveEntry({ id: 's02', kind: 'inbox', path: 'sources/' }, ctxFor(dir))
     assert.deepEqual(resolved.files.map((f) => f.origin), ['sources/a.md'])
-    assert.deepEqual(resolved.skipped, [{ origin: 'sources/logo.sketch', ext: '.sketch' }])
+    assert.deepEqual(resolved.skipped, [{ origin: 'sources/logo.sketch', ext: '.sketch', reason: 'no-extractor' }])
   } finally {
     cleanup(dir)
   }
@@ -193,7 +194,7 @@ test('resolveRegister returns one resolution per entry, in register order', () =
         { id: 's02', kind: 'inbox', path: 'sources/' }
       ]
     }
-    const resolved = resolveRegister(loadRegister(config, dir, path.join(dir, '.voice-and-tone')), ctxFor(dir, config))
+    const resolved = resolveRegister(loadRegister(config), ctxFor(dir, config))
     assert.deepEqual(resolved.map((r) => r.id), ['s01', 's02'])
     assert.deepEqual(resolved.map((r) => r.files.length), [1, 1])
   } finally {
@@ -219,6 +220,40 @@ test('missing distinguishes an absent path from one that exists but is empty', (
     )
     assert.equal(emptyProject.missing, false)
     assert.equal(emptyProject.empty, true)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// A later task folds register skips into the same manifest.skipped array
+// gatherCorpus populates. That only works if the two producers agree on the
+// vocabulary word for "no extractor at all" - this test pins the agreement
+// between the two producers directly, on the very same file, rather than
+// each asserting its own shape in isolation (which is exactly what let the
+// two shapes drift apart in the first place).
+test('a register skip and a gatherCorpus skip agree on the no-extractor reason', () => {
+  const dir = makeTmpProject({
+    'content/notes.md': 'We write like humans.',
+    'content/logo.fig': 'the extension is what matters here'
+  })
+  try {
+    const config = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+
+    const corpusSkipped = []
+    gatherCorpus(dir, config, 'default', [], corpusSkipped)
+    const corpusSkip = corpusSkipped.find((s) => s.rel === 'content/logo.fig')
+
+    const registerResolved = resolveEntry(
+      { id: 's01', kind: 'project', include: config.scan.include, exclude: config.scan.exclude },
+      ctxFor(dir, config)
+    )
+    const registerSkip = registerResolved.skipped.find((s) => s.origin === 'content/logo.fig')
+
+    assert.ok(corpusSkip, 'gatherCorpus must have skipped the .fig file')
+    assert.ok(registerSkip, 'the register must have skipped the .fig file')
+    assert.equal(registerSkip.reason, corpusSkip.reason)
+    assert.equal(registerSkip.reason, 'no-extractor')
+    assert.equal(registerSkip.ext, corpusSkip.ext)
   } finally {
     cleanup(dir)
   }
