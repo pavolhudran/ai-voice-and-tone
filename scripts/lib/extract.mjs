@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { parseYaml } from './yaml.mjs'
-import { splitParagraphs } from './text.mjs'
+import { splitParagraphs, stripControlChars } from './text.mjs'
 import { extractRtf, extractSubtitles, extractDelimited } from './textish.mjs'
 import { OFFICE_FORMATS } from './office.mjs'
 
@@ -66,7 +66,11 @@ function isCopy (value) {
 }
 
 function pushCopy (out, value) {
-  const text = String(value).replace(/\s+/g, ' ').trim()
+  // stripControlChars first: a source with a stray C0/C1 byte next to real
+  // words (a malformed JSON escape, a translator's pasted byte in a .po
+  // file) must not carry that byte into the corpus even though the string
+  // around it still passes isCopy's "has a letter" check.
+  const text = stripControlChars(String(value)).replace(/\s+/g, ' ').trim()
   if (isCopy(text)) out.push(text)
 }
 

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { extractStrings, extractHeadings, formatFor, isBinaryFormat, BINARY_EXTENSIONS } from '../scripts/lib/extract.mjs'
 import { OFFICE_FORMATS } from '../scripts/lib/office.mjs'
+import { stripControlChars } from '../scripts/lib/text.mjs'
 
 test('markdown drops code and frontmatter, keeps prose, alt text, and link text', () => {
   const md = [
@@ -194,6 +195,40 @@ test('the new text formats resolve and are not binary', () => {
   ]) {
     assert.equal(formatFor(file), format, file)
     assert.equal(isBinaryFormat(formatFor(file)), false, file)
+  }
+})
+
+test('no extractor ever emits a C0 or C1 control character in its output strings', () => {
+  // Fix round 2 (Important 1's closing instruction): the RTF cp1252 table
+  // fix patches one source of control-character leakage; this guards the
+  // class itself, across every extractor extractStrings can dispatch to.
+  // Each input is built specifically to try to provoke a raw control byte
+  // in the output - a malformed hex escape, a low-codepoint \u escape, and
+  // (for every format with no escape syntax of its own) a control byte
+  // already sitting in the decoded text, exactly as it would if pasted in.
+  const bel = String.fromCharCode(0x07) // BEL - not a defined cp1252 escape target
+
+  const cases = [
+    ['/x/a.rtf', String.raw`{\rtf1 A\'` + '99' + String.raw`B\par}`], // maps cleanly - sanity check
+    ['/x/a.rtf', String.raw`{\rtf1 A\'` + '81' + String.raw`B\par}`], // cp1252-undefined byte
+    ['/x/a.rtf', '{\\rtf1 A\\u1?B\\par}'], // \u escape to a low control codepoint
+    ['/x/a.vtt', `WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nSave ${bel}now.\n`],
+    ['/x/a.srt', `1\n00:00:01,000 --> 00:00:02,000\nSave ${bel}now.\n`],
+    ['/x/a.csv', `label,value\nSave ${bel}now,1\n`],
+    ['/x/a.tsv', `label\tvalue\nSave ${bel}now\t1\n`],
+    ['/x/a.md', `Save ${bel}now.\n`],
+    ['/x/en.json', JSON.stringify({ a: `Save ${bel}now` })],
+    ['/x/en.yml', `save: "Save ${bel}now"\n`],
+    ['/x/cs.po', `msgid "x"\nmsgstr "Save ${bel}now"\n`],
+    ['/x/a.html', `<p>Save ${bel}now.</p>`],
+    ['/x/a.txt', `Save ${bel}now.\n`]
+  ]
+
+  for (const [file, input] of cases) {
+    const { strings } = extractStrings(file, input)
+    for (const s of strings) {
+      assert.equal(stripControlChars(s), s, `${file} emitted a control character in ${JSON.stringify(s)}`)
+    }
   }
 })
 
