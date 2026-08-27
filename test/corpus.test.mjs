@@ -4,8 +4,10 @@ import { writeFileSync, chmodSync } from 'node:fs'
 import path from 'node:path'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
-import { gatherCorpus } from '../scripts/lib/corpus.mjs'
+import { gatherCorpus, gatherAll } from '../scripts/lib/corpus.mjs'
 import { formatFor } from '../scripts/lib/extract.mjs'
+import { saveIndex } from '../scripts/lib/sourceindex.mjs'
+import { statsFor } from '../scripts/lib/metrics.mjs'
 
 const config = {
   ...DEFAULT_CONFIG,
@@ -163,6 +165,62 @@ test('the format gate runs before the file is read', () => {
     assert.equal(skipped[0].ext, '.bin')
   } finally {
     chmodSync(bigFile, 0o644) // restore so cleanup's rmSync can remove it
+    cleanup(dir)
+  }
+})
+
+// --- Task 12 fix round 1: the live project loop and the index must never
+// both contribute the same origin. The project loop runs first and wins;
+// a pre-corrupted (or hand-edited) index entry sharing its origin is healed
+// away, never merged or double-counted.
+
+test('gatherAll drops an indexed entry whose origin the live project loop already emitted', () => {
+  const dir = makeTmpProject({ 'content/a.md': 'We write plainly. We keep it short.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    // Simulates a sources.json corrupted by the pre-fix bug: an ordinary
+    // project text file got ingested and indexed under its own origin.
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'c'.repeat(64), kind: 'file', from: 's01',
+        origin: 'content/a.md', format: 'markdown', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['We write plainly. We keep it short.'], headings: [], locale: 'en' }),
+        status: 'used', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const cfg = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*.md'], exclude: [] } }
+    const { files, missing } = gatherAll({ projectRoot: dir, kbRoot: kb, config: cfg, profileName: 'default' })
+
+    const rows = files.filter((f) => f.rel === 'content/a.md')
+    assert.equal(rows.length, 1, 'the live copy wins; the corrupted index entry must not also appear')
+    assert.equal(rows[0].status, undefined, 'the surviving row is the live one, not the indexed one')
+    assert.equal(missing, 0, 'the healed-away entry must not be counted anywhere else either')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an indexed source with a different origin from any live file is not affected by the healing', () => {
+  const dir = makeTmpProject({ 'content/a.md': 'We write plainly. We keep it short.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'd'.repeat(64), kind: 'file', from: 's02',
+        origin: 'sources/gone.pdf', format: 'pdf', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['A missing document still counts.'], headings: [], locale: 'en' }),
+        status: 'missing', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const cfg = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*.md'], exclude: [] } }
+    const { files } = gatherAll({ projectRoot: dir, kbRoot: kb, config: cfg, profileName: 'default' })
+
+    assert.deepEqual(files.map((f) => f.rel).sort(), ['content/a.md', 'sources/gone.pdf'])
+  } finally {
     cleanup(dir)
   }
 })

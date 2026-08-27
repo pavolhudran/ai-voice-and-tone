@@ -226,7 +226,10 @@ export function diffIndex (index, resolved, hashOf) {
 // appearing; it is a guard against a future producer's typo, or a status
 // string this index has not been taught about yet, becoming a hard runtime
 // failure two tasks downstream instead of a harmless no-op.
-const STATS_REQUIRED = new Set(['used', 'missing', 'stale'])
+// Exported so gatherAll (corpus.mjs) can admit index entries by the same
+// whitelist statsByLocale enforces below, rather than by a separately
+// maintained blacklist that can silently drift from this one.
+export const STATS_REQUIRED = new Set(['used', 'missing', 'stale'])
 
 /**
  * Per-locale merged statistics, computed from the index alone - no source

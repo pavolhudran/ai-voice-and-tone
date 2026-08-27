@@ -2,6 +2,7 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { loadConfig, saveConfig } from './lib/config.mjs'
+import { isBinaryFormat } from './lib/extract.mjs'
 import { loadRegister, resolveRegister, nextRegisterId, expandHome } from './lib/register.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale
@@ -74,9 +75,33 @@ export function filterVanished (resolved) {
   return errors
 }
 
+/**
+ * A `project` entry's text files (.md, .json, ...) are already read LIVE by
+ * gatherAll (scripts/lib/corpus.mjs) - that is the whole model scan and
+ * fingerprint rely on: project text is live, everything else is indexed.
+ * Only a project file the live text path cannot read - a container format
+ * such as .pdf or .docx - is actually a candidate for ingestion; that is
+ * exactly what the scan summary's "N file(s) need ingest, not scan" line
+ * tells a user to run --ingest for.
+ *
+ * Without this filter, an ordinary `--ingest` on an ordinary project would
+ * add every project text file to the index too, and gatherAll would then
+ * count it twice - once live, once from the index - forever, since the
+ * index is committed. Other entry kinds (`inbox`, `local`, `url`) are never
+ * read live regardless of format, so every one of their files stays a
+ * candidate here; this filter is deliberately scoped to `project` alone.
+ */
+function restrictProjectFilesToIngestible (resolved) {
+  for (const entry of resolved) {
+    if (entry.kind !== 'project') continue
+    entry.files = entry.files.filter((file) => isBinaryFormat(file.format))
+  }
+}
+
 export function runCheck (ctx) {
   const register = loadRegister(ctx.config)
   const resolved = resolveRegister(register, ctx)
+  restrictProjectFilesToIngestible(resolved)
   const index = loadIndex(ctx.kbRoot)
   const errors = filterVanished(resolved)
   const diff = diffIndex(index, resolved, hasher())

@@ -293,3 +293,83 @@ test('runIngest with { only } analyses just the named file, leaving its sibling 
     cleanup(dir)
   }
 })
+
+// --- Task 12 fix round 1: a project entry's own text files must never
+// become ingest candidates - gatherAll already reads them live, and
+// gatherCorpus's live path and the index are not supposed to overlap.
+
+/**
+ * A syntactically valid PDF with a real, extractable content stream (no
+ * compression, so no zlib dependency), built the same way test/pdf.test.mjs
+ * and test/ingest.test.mjs build their fixtures. Passes the quality gate
+ * with ordinary English prose, so ingesting it actually produces a `used`
+ * entry with real stats - unlike a placeholder buffer of arbitrary bytes.
+ */
+function textPdf (text) {
+  const content = `BT /F1 12 Tf 72 700 Td (${text}) Tj ET`
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R ' +
+      '/Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+  ]
+  let body = '%PDF-1.4\n'
+  const offsets = []
+  objects.forEach((obj, i) => {
+    offsets.push(body.length)
+    body += `${i + 1} 0 obj\n${obj}\nendobj\n`
+  })
+  const xref = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const off of offsets) body += `${String(off).padStart(10, '0')} 00000 n \n`
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`
+  body += `startxref\n${xref}\n%%EOF\n`
+  return Buffer.from(body, 'latin1')
+}
+
+function projectWithGlob (files, scan = { include: ['content/**/*'], exclude: [] }) {
+  const dir = makeTmpProject(files)
+  const kb = path.join(dir, '.voice-and-tone')
+  const config = { ...DEFAULT_CONFIG, scan } // sources: [] (the default) -> loadRegister synthesises `project`
+  saveConfig(kb, config)
+  return { dir, kb, ctx: { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW } }
+}
+
+test('a project entry never offers its own text files for ingestion, only files the live path cannot read', async () => {
+  const { dir, kb, ctx } = projectWithGlob({
+    'content/a.md': 'We write plainly. We keep it short.\n'
+  })
+  writeFileSync(path.join(dir, 'content', 'g.pdf'), textPdf('A missing document still counts.'))
+  try {
+    const check = runCheck({ ...ctx, config: loadConfig(kb) })
+    assert.deepEqual(
+      check.fresh.map((f) => f.origin), ['content/g.pdf'],
+      'the project text file is never even offered as a candidate - only the container is'
+    )
+
+    const result = await runIngest({ ...ctx, config: loadConfig(kb) }, {})
+    assert.deepEqual(result.ingested.map((e) => e.origin), ['content/g.pdf'])
+
+    const index = loadIndex(kb)
+    assert.deepEqual(index.sources.map((s) => s.origin), ['content/g.pdf'], 'no entry was ever created for the .md file')
+    assert.equal(index.sources[0].status, 'used')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a project-folder container file is still ingestible and contributes real stats', async () => {
+  const { dir, kb, ctx } = projectWithGlob({})
+  mkdirSync(path.join(dir, 'content'), { recursive: true })
+  writeFileSync(path.join(dir, 'content', 'brand.pdf'), textPdf('The model tier is never needed for this one.'))
+  try {
+    const result = await runIngest({ ...ctx, config: loadConfig(kb) }, {})
+    assert.equal(result.ingested.length, 1)
+    assert.equal(result.ingested[0].status, 'used')
+    assert.ok(result.ingested[0].stats.words > 0, 'the PDF was actually read, not just registered')
+  } finally {
+    cleanup(dir)
+  }
+})

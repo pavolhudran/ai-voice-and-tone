@@ -3,7 +3,7 @@ import { walk, readTextFile, toPosix } from './fsx.mjs'
 import { extractStrings, extractHeadings, formatFor, isBinaryFormat } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
 import { loadRegister, resolveRegister } from './register.mjs'
-import { loadIndex, statsByLocale } from './sourceindex.mjs'
+import { loadIndex, statsByLocale, STATS_REQUIRED } from './sourceindex.mjs'
 
 /**
  * Read every copy-bearing file the config points at, in a stable order.
@@ -122,6 +122,17 @@ export function byLocale (corpus) {
  *   moves from gatherCorpus to gatherAll. Only a live project file can land
  *   here: an indexed source's text is gone by design, so there is nothing
  *   left to fail to parse.
+ *
+ * A file is read live if the text path can read it; it is ingested only if
+ * it cannot. That is `isBinaryFormat(format)`, and sources.mjs applies it to
+ * a `project` entry's files before anything is ever ingested, so an ordinary
+ * project text file should never make it into the index in the first place.
+ * But the index is a persisted file a stale binary or a hand edit can still
+ * disagree with, and double-counting a source once live and once from the
+ * index is a worse failure than a corrupt index entry sitting there unused
+ * - so this function heals rather than trusts: the live project loop runs
+ * FIRST and wins, and any index entry sharing its origin is dropped rather
+ * than merged, unconditionally, regardless of how it got there.
  */
 export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default', unreadable = [] }) {
   const register = loadRegister(config)
@@ -130,6 +141,7 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
 
   const files = []
   const skipped = []
+  const liveOrigins = new Set()
 
   for (const entry of resolved) {
     // The register's own vocabulary is a strict subset of gatherCorpus's -
@@ -159,6 +171,7 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
         if (file.format === 'json') unreadable.push(file.origin)
         continue
       }
+      liveOrigins.add(file.origin)
       files.push({
         rel: file.origin,
         abs: file.abs,
@@ -174,9 +187,16 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
   }
 
   // The text is gone by design once a source is indexed; the counts remain.
-  // A `skipped` index entry contributes nothing (the quality gate rejected
-  // it), same rule statsByLocale enforces below.
-  const indexed = (index.sources ?? []).filter((s) => s.stats && s.status !== 'skipped')
+  // Admitted by the same whitelist statsByLocale enforces (`used`, `missing`,
+  // `stale` genuinely imply a measured stats block) rather than a separately
+  // maintained blacklist that can silently drift from it. `liveOrigins`
+  // excludes any entry the live project loop above already emitted: sources.mjs
+  // keeps a project's text files out of the index going forward, but a
+  // sources.json written before that fix - or hand-edited - can still hold
+  // one, and it must not double the fingerprint forever just because it is
+  // sitting there.
+  const indexed = (index.sources ?? []).filter((s) =>
+    s.stats && STATS_REQUIRED.has(s.status) && !liveOrigins.has(s.origin))
   for (const source of indexed) {
     files.push({
       rel: source.origin,
@@ -197,7 +217,10 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
   return {
     files,
     skipped,
-    indexStats: statsByLocale(index),
+    indexStats: statsByLocale({
+      generated: index.generated,
+      sources: (index.sources ?? []).filter((s) => !liveOrigins.has(s.origin))
+    }),
     missing: indexed.filter((s) => s.status === 'missing').length,
     estimatedLocales: new Set(indexed.filter((s) => s.fidelity === 'estimated').map((s) => s.locale ?? 'en'))
   }

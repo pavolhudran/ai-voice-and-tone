@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { buildManifest } from '../scripts/scan.mjs'
+import { saveIndex } from '../scripts/lib/sourceindex.mjs'
+import { statsFor } from '../scripts/lib/metrics.mjs'
 
 const SCAN_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'scan.mjs')
 
@@ -161,6 +163,36 @@ test('a malformed JSON file is surfaced as unreadable, not silently dropped', ()
     // The malformed file contributes no data point: it is absent from files/totals.
     assert.equal(manifest.totals.files, 1)
     assert.deepEqual(manifest.files.map((f) => f.path), ['locales/cs/common.json'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- Task 12 fix round 1: manifest.files must never list the same path
+// twice, even when a stale/hand-edited index still holds an entry for a
+// file the live project loop also emits.
+
+test('manifest.files lists a path only once, even when the index also holds an entry for it', () => {
+  const dir = makeTmpProject({ 'content/a.md': 'We write plainly. We keep it short.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'e'.repeat(64), kind: 'file', from: 's01',
+        origin: 'content/a.md', format: 'markdown', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['We write plainly. We keep it short.'], headings: [], locale: 'en' }),
+        status: 'used', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*.md'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z', 'default', kb)
+
+    const paths = manifest.files.map((f) => f.path)
+    assert.deepEqual(paths, ['content/a.md'])
+    assert.equal(new Set(paths).size, paths.length, 'no path appears twice')
+    assert.equal(manifest.files[0].status, null, 'the surviving row is the live measurement, not the indexed one')
   } finally {
     cleanup(dir)
   }
