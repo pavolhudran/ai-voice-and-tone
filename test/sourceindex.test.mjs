@@ -7,7 +7,7 @@ import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { statsFor, mergeStats, fingerprintFromStats } from '../scripts/lib/metrics.mjs'
 import { readTextFile } from '../scripts/lib/fsx.mjs'
 import {
-  loadIndex, saveIndex, nextEntryId, upsertEntry, bySha, diffIndex, statsByLocale, indexPathFor,
+  loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, bySha, diffIndex, statsByLocale, indexPathFor,
   staleByExtractor
 } from '../scripts/lib/sourceindex.mjs'
 
@@ -67,6 +67,27 @@ test('entry ids are monotonic and zero-padded', () => {
   assert.equal(nextEntryId({ sources: [{ id: 'f999' }] }), 'f1000')
 })
 
+test('saveIndex sorts ids numerically, not lexicographically, past 1000', () => {
+  // 'f1000' < 'f999' as strings ('f1' < 'f9'), which is the wrong order once
+  // the index passes 1000 entries and undercuts the stable-diff guarantee
+  // the sort exists to provide.
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    saveIndex(kb, {
+      sources: [
+        entry({ id: 'f1000', sha256: '3'.repeat(64) }),
+        entry({ id: 'f050', sha256: '1'.repeat(64) }),
+        entry({ id: 'f999', sha256: '2'.repeat(64) })
+      ]
+    }, '2026-08-27T00:00:00.000Z')
+
+    assert.deepEqual(loadIndex(kb).sources.map((s) => s.id), ['f050', 'f999', 'f1000'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('identity is the hash, so the same bytes at a new path update rather than duplicate', () => {
   const index = { sources: [entry({ origin: 'sources/a.txt' })] }
   const updated = upsertEntry(index, entry({ id: 'f002', origin: '/Users/other/Downloads/a.txt' }))
@@ -80,6 +101,30 @@ test('different bytes create a separate entry', () => {
   const index = { sources: [entry()] }
   upsertEntry(index, entry({ id: 'f002', sha256: 'c'.repeat(64) }))
   assert.equal(index.sources.length, 2)
+})
+
+// --- supersedeEntry: the fix for a stale source, so it is not double-counted
+
+test('supersedeEntry replaces the old entry rather than adding alongside it', () => {
+  const index = { sources: [entry({ id: 'f001', sha256: 'a'.repeat(64) })] }
+  const replacement = entry({ id: 'f077', sha256: 'z'.repeat(64) })
+
+  supersedeEntry(index, 'f001', replacement)
+
+  assert.equal(index.sources.length, 1, 'the old version must not survive alongside the new one')
+  assert.equal(index.sources[0].id, 'f001', 'the replacement keeps the superseded id, not its own')
+  assert.equal(index.sources[0].sha256, 'z'.repeat(64))
+})
+
+test('superseding removes the old version\'s statistics from the recomputed fingerprint', () => {
+  const oldStats = statsFor({ strings: ['We write plainly. We keep it short.'], headings: [], locale: 'en' })
+  const newStats = statsFor({ strings: ['We changed our minds entirely and rewrote it.'], headings: [], locale: 'en' })
+  const index = { sources: [entry({ id: 'f001', sha256: 'a'.repeat(64), stats: oldStats })] }
+
+  supersedeEntry(index, 'f001', entry({ id: 'f001', sha256: 'z'.repeat(64), stats: newStats }))
+
+  const buckets = statsByLocale(index)
+  assert.equal(buckets.get('en').words, newStats.words, 'the superseded version is still contributing its old word count')
 })
 
 test('bySha indexes every entry by its hash', () => {
@@ -131,6 +176,53 @@ test('an entry whose origin still resolves but whose bytes changed is stale, not
 
   assert.deepEqual(diff.stale.map((s) => s.entry.origin), ['sources/a.txt'])
   assert.deepEqual(diff.missing, [], 'a stale entry is not also reported missing')
+  assert.deepEqual(diff.fresh, [], 'an edited file must not also be reported fresh - it would be double-processed')
+})
+
+test('fresh and stale partition the resolved files disjointly - no origin appears in both', () => {
+  // The regression this pins: the 'stale' branch used to fall through into
+  // pushing the same file onto 'fresh' too, with no `continue`. Sweep every
+  // diffIndex scenario exercised above rather than trusting one example.
+  const scenarios = [
+    {
+      index: { sources: [entry({ origin: 'sources/a.txt', sha256: 'a'.repeat(64) })] },
+      resolved: [{
+        id: 's02', kind: 'inbox', missing: false, skipped: [],
+        files: [{ abs: '/tmp/a.txt', origin: 'sources/a.txt', format: 'text', locale: 'en' }]
+      }],
+      hashOf: () => 'z'.repeat(64)
+    },
+    {
+      index: {
+        sources: [
+          entry({ sha256: 'a'.repeat(64), origin: 'sources/known.txt' }),
+          entry({ id: 'f002', sha256: 'b'.repeat(64), origin: 'sources/gone.txt' })
+        ]
+      },
+      resolved: [{
+        id: 's02', kind: 'inbox', missing: false, skipped: [],
+        files: [
+          { abs: '/tmp/known.txt', origin: 'sources/known.txt', format: 'text', locale: 'en' },
+          { abs: '/tmp/changed.txt', origin: 'sources/changed.txt', format: 'text', locale: 'en' },
+          { abs: '/tmp/new.txt', origin: 'sources/new.txt', format: 'text', locale: 'en' }
+        ]
+      }],
+      hashOf: (abs) => ({
+        '/tmp/known.txt': 'a'.repeat(64),
+        '/tmp/changed.txt': 'e'.repeat(64),
+        '/tmp/new.txt': 'f'.repeat(64)
+      })[abs]
+    }
+  ]
+
+  for (const { index, resolved, hashOf } of scenarios) {
+    const diff = diffIndex(index, resolved, hashOf)
+    const freshOrigins = new Set(diff.fresh.map((f) => f.origin))
+    const staleOrigins = new Set(diff.stale.map((s) => s.file.origin))
+    for (const origin of staleOrigins) {
+      assert.ok(!freshOrigins.has(origin), `${origin} was reported in both fresh and stale`)
+    }
+  }
 })
 
 // --- the payoff: the fingerprint survives with no source text -------------

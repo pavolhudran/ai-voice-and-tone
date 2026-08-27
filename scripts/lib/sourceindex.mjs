@@ -39,8 +39,20 @@ export function loadIndex (kbRoot) {
   }
 }
 
+// The numeric part of an `f`-prefixed id, or 0 for anything that does not
+// parse. Shared by nextEntryId (find the highest) and saveIndex (sort by
+// it) so the two never drift apart on what counts as "the number".
+function idNum (id) {
+  return Number(/^f(\d+)$/.exec(String(id ?? ''))?.[1] ?? 0)
+}
+
 export function saveIndex (kbRoot, index, now) {
-  const sorted = [...(index.sources ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  // Sorted numerically, not lexicographically: ids are zero-padded only up
+  // to 3 digits ('f001'..'f999') and grow unpadded past that ('f1000'), so
+  // a plain string compare would put 'f1000' before 'f999' once the index
+  // passes 1000 entries - wrong order, and it defeats the whole reason this
+  // is sorted, which is a stable, reviewable git diff.
+  const sorted = [...(index.sources ?? [])].sort((a, b) => idNum(a.id) - idNum(b.id))
   const payload = { generated: now, sources: sorted }
   writeTextFile(indexPathFor(kbRoot), `${JSON.stringify(payload, null, 2)}\n`)
 }
@@ -48,7 +60,7 @@ export function saveIndex (kbRoot, index, now) {
 export function nextEntryId (index) {
   let highest = 0
   for (const source of index.sources ?? []) {
-    const n = Number(/^f(\d+)$/.exec(String(source?.id ?? ''))?.[1] ?? 0)
+    const n = idNum(source?.id)
     if (n > highest) highest = n
   }
   return `f${String(highest + 1).padStart(3, '0')}`
@@ -95,7 +107,57 @@ export function upsertEntry (index, entry) {
 }
 
 /**
+ * Replace the entry whose bytes have changed on disk (a `diffIndex` `stale`
+ * result) with the newly ingested version of the same document, so the
+ * superseded version's statistics stop contributing to the fingerprint.
+ * Without this, upserting the new bytes by their (necessarily different)
+ * hash would create a second entry while the old one kept sitting in the
+ * index, and an edited source would count twice - once under each of its
+ * versions - forever.
+ *
+ * The replacement is written under `oldId`, not whatever id `newEntry`
+ * happened to carry: this is the same document, edited, not an unrelated
+ * new one, and anything that cites this source by index id (a rule's
+ * `source`-type evidence) should keep resolving to "this document, now
+ * current" rather than dangling the moment someone fixes a typo in it.
+ * This is continuity of an id still in service, not the reuse of a
+ * retired one, so it does not conflict with ids otherwise never being
+ * reused.
+ *
+ * If `oldId` is not present (already removed, or called out of order),
+ * this degrades to a plain insert rather than throwing - the end state
+ * (`newEntry` present under `oldId`, nothing superseded left behind) is
+ * the same either way.
+ */
+export function supersedeEntry (index, oldId, newEntry) {
+  index.sources = index.sources ?? []
+  const at = index.sources.findIndex((s) => s.id === oldId)
+  const replacement = { ...newEntry, id: oldId }
+  if (at === -1) {
+    index.sources.push(replacement)
+  } else {
+    index.sources[at] = replacement
+  }
+  return replacement
+}
+
+/**
  * What is new, what is already analysed, what changed, what is not here.
+ *
+ * The five buckets are a strict partition: every resolved file lands in
+ * exactly one of `known`, `fresh`, or `stale` (a file also contributing to
+ * `stale` is never also counted in `fresh` - the two used to overlap on an
+ * edited file, which is the defect this comment now guards against). A
+ * consumer must process both `fresh` and `stale`, not just `fresh`:
+ *   - `fresh`  - no entry exists for this file yet. Ingest it and add a new
+ *                entry (e.g. via `upsertEntry`).
+ *   - `stale`  - an entry already exists for this origin, but the bytes
+ *                changed. Ingest it and supersede the old entry (via
+ *                `supersedeEntry`), never just add alongside it - the old
+ *                entry's statistics must stop contributing, or the source
+ *                is double-counted, once under each version of itself.
+ * Treating `stale` as informational and only acting on `fresh` silently
+ * stops re-reading any document that ever gets edited.
  *
  * `hashOf(abs)` is injected so the caller controls when bytes are read - the
  * CLI hashes lazily, and a test can supply a stub.
@@ -122,10 +184,15 @@ export function diffIndex (index, resolved, hashOf) {
         continue
       }
       // Same place, different bytes: the document was edited or replaced.
+      // This is stale, not fresh - it must land in exactly one bucket, or a
+      // consumer that only acts on `fresh` silently double-counts it once
+      // superseding runs, and a consumer that only acts on `stale` never
+      // notices a genuinely new file.
       const previous = byOrigin.get(file.origin)
       if (previous) {
         seen.add(previous.sha256)
         stale.push({ entry: previous, file: candidate })
+        continue
       }
       fresh.push(candidate)
     }
