@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { loadIndex } from '../scripts/lib/sourceindex.mjs'
@@ -237,6 +237,58 @@ test('every registered source missing at once is reported as an ordinary fresh c
     assert.equal(report.missing.length, report.index.sources.length, 'every known source is missing at once')
     assert.equal(report.errors.length, 0)
     assert.ok(report.statsIntact)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('runIngest supersedes every stale file in a single pass, not just the first', async () => {
+  const { dir, kb, ctx } = project({
+    'a.txt': 'We write plainly. We keep it short.\n',
+    'b.txt': 'We are direct and warm.\n'
+  })
+  try {
+    await runIngest(ctx, {})
+    const before = loadIndex(kb)
+    assert.equal(before.sources.length, 2)
+    const originalIds = before.sources.map((s) => s.id).sort()
+
+    writeFileSync(path.join(kb, 'sources', 'a.txt'), 'We write plainly. Something else now.\n')
+    writeFileSync(path.join(kb, 'sources', 'b.txt'), 'We are direct. Something else now too.\n')
+
+    const check = runCheck({ ...ctx, config: loadConfig(kb) })
+    assert.equal(check.stale.length, 2, 'both edited files are stale at once')
+    assert.equal(check.fresh.length, 0)
+
+    const result = await runIngest({ ...ctx, config: loadConfig(kb) }, {})
+    const after = loadIndex(kb)
+    assert.equal(after.sources.length, 2, 'still exactly two entries - superseded, not appended alongside')
+    for (const id of originalIds) {
+      assert.ok(!after.sources.some((s) => s.id === id), `original id ${id} must not survive a supersede`)
+    }
+    assert.equal(result.reopened.length, 2, 'both displaced entries are surfaced, not just the first')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('runIngest with { only } analyses just the named file, leaving its sibling fresh', async () => {
+  const { dir, kb, ctx } = project({
+    'a.txt': 'We write plainly. We keep it short.\n',
+    'b.txt': 'We are direct and warm.\n'
+  })
+  try {
+    const result = await runIngest(ctx, { only: 'sources/a.txt' })
+    assert.equal(result.ingested.length, 1)
+    assert.equal(result.ingested[0].origin, 'sources/a.txt')
+
+    const index = loadIndex(kb)
+    assert.equal(index.sources.length, 1)
+    assert.equal(index.sources[0].origin, 'sources/a.txt')
+
+    const after = runCheck({ ...ctx, config: loadConfig(kb) })
+    assert.equal(after.fresh.length, 1, 'the sibling file was never touched by --only')
+    assert.equal(after.fresh[0].origin, 'sources/b.txt')
   } finally {
     cleanup(dir)
   }
