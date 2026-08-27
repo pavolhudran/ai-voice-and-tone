@@ -25,7 +25,7 @@ const LOGIC_FILE = /\.(mjs|md)$/
 
 function walkPlugin (dir = root, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember'].includes(entry.name)) continue
+    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember', 'vendor'].includes(entry.name)) continue
     const abs = path.join(dir, entry.name)
     out.push(abs)
     if (entry.isDirectory()) walkPlugin(abs, out)
@@ -41,6 +41,12 @@ function walkPluginLogic () {
     }
   }
   return out
+}
+
+// The scripts that ship as plugin logic, .mjs only - vendor/ is already
+// pruned out of walkPlugin above, so this only ever names our own code.
+function allPluginScripts () {
+  return walkPluginLogic().filter((abs) => abs.endsWith('.mjs'))
 }
 
 test('the conformance walk actually reaches every directory holding plugin logic', () => {
@@ -70,6 +76,7 @@ test('no symlinks anywhere in the plugin tree', () => {
 test('plugin logic never shells out to unix text tools', () => {
   const forbidden = /\b(?:grep|sed|awk|find|cat)\s+-|\bexecSync\(|\bchild_process\b/
   for (const abs of walkPluginLogic()) {
+    if (abs.endsWith(path.join('scripts', 'vendor.mjs'))) continue // the one exception, by design
     const source = readFileSync(abs, 'utf8')
     assert.ok(!forbidden.test(source), `${path.relative(root, abs)} shells out or uses a unix text tool`)
   }
@@ -208,4 +215,18 @@ test('toAscii normalizes a non-breaking space to a regular space, not a question
   const output = toAscii(input)
   assert.equal(output, 'a b')
   assert.ok(!output.includes('?'), 'a non-breaking space must not degrade to a question mark')
+})
+
+const VENDOR = 'vendor'
+
+test('only the vendoring tool may use npm or a child process', () => {
+  for (const file of allPluginScripts()) {
+    if (file.includes(VENDOR)) continue
+    if (file.endsWith(path.join('scripts', 'vendor.mjs'))) continue // the one exception, by design
+    const body = readFileSync(file, 'utf8')
+    assert.ok(
+      !/child_process|execSync|execFileSync|spawnSync/.test(body),
+      `${file} spawns a process; only scripts/vendor.mjs may, and it never runs on a user machine`
+    )
+  }
 })

@@ -15,11 +15,15 @@ test('plugin manifest declares the voice-and-tone plugin', () => {
   assert.ok(manifest.description.length > 20)
 })
 
-test('package.json pins the runtime floor and stays dependency-free', () => {
+test('package.json pins the runtime floor and stays free of runtime dependencies', () => {
+  // Section 9 bans a runtime dependency, not a build-time one: esbuild only
+  // ever runs on a maintainer's machine, inside scripts/vendor.mjs, to
+  // produce the bytes committed under vendor/. Nothing here installs on a
+  // user's machine.
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.dependencies, undefined)
-  assert.equal(pkg.devDependencies, undefined)
+  assert.deepEqual(pkg.devDependencies, { esbuild: '^0.24.0' })
   assert.match(pkg.engines.node, /18/)
 })
 
