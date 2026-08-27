@@ -187,6 +187,22 @@ export function mergeStats (statsList) {
   const out = emptyStats()
   if (items.length === 0) return out
 
+  // english.* is summed only over items that carry an english block, but
+  // s.words / s.sentences sum over ALL items. A mixed merge would divide
+  // English-only sums by an inflated denominator and silently report a
+  // deflated, wrong (never null, never an error) rate. Refuse rather than
+  // guess: this is the load-bearing merge of a design whose stated failure
+  // mode is confidently-reported fictitious numbers.
+  //
+  // A unit with zero words (emptyStats(), or any other genuinely empty unit)
+  // is exempt: it is the merge identity and contributes nothing to either
+  // side of the ratio, so it cannot be the source of a mismatched
+  // denominator regardless of its own locale.
+  const withContent = items.filter((s) => s.words > 0)
+  if (withContent.some((s) => s.english) && withContent.some((s) => !s.english)) {
+    throw new Error('mergeStats: refusing to merge English and non-English units - rates would be silently deflated by the mismatched denominator')
+  }
+
   out.personMarkers = items.every((s) => s.personMarkers !== false)
   if (items.some((s) => s.english)) out.english = emptyEnglish()
 

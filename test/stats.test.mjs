@@ -26,30 +26,18 @@ const B = {
 // If this fails, sources cannot be discarded and the whole design is unsound.
 
 test('merged per-unit statistics reproduce the aggregate fingerprint exactly', () => {
-  const merged = fingerprintFromStats(
-    mergeStats([statsFor(A), statsFor(B)]),
-    'en'
+  const union = statsFor({
+    strings: [...A.strings, ...B.strings],
+    headings: [...A.headings, ...B.headings],
+    locale: 'en'
+  })
+  // Every stored field: merging per-unit statistics equals measuring the union.
+  assert.deepEqual(mergeStats([statsFor(A), statsFor(B)]), union)
+  // Every derived field: this is the disposability claim itself.
+  assert.deepEqual(
+    fingerprintFromStats(mergeStats([statsFor(A), statsFor(B)]), 'en'),
+    fingerprintFromStats(union, 'en')
   )
-  const direct = fingerprintFromStats(
-    mergeStats([statsFor({
-      strings: [...A.strings, ...B.strings],
-      headings: [...A.headings, ...B.headings],
-      locale: 'en'
-    })]),
-    'en'
-  )
-  // Measure-then-merge is the contract. Both sides use it; the point is that
-  // splitting the same corpus across two units changes nothing.
-  const split = fingerprintFromStats(
-    mergeStats([
-      statsFor({ strings: A.strings, headings: A.headings, locale: 'en' }),
-      statsFor({ strings: B.strings, headings: B.headings, locale: 'en' })
-    ]),
-    'en'
-  )
-  assert.deepEqual(split, merged)
-  assert.equal(split.universal.wordCount, direct.universal.wordCount)
-  assert.equal(split.universal.sentenceCount, direct.universal.sentenceCount)
 })
 
 test('mergeStats is commutative and associative', () => {
@@ -76,6 +64,25 @@ test('a source can be subtracted by re-merging the survivors', () => {
 
   assert.equal(all.words - statsFor(B).words, withoutB.words)
   assert.deepEqual(fingerprintFromStats(withoutB, 'en'), fingerprintFromStats(statsFor(A), 'en'))
+})
+
+test('mergeStats refuses to merge an English unit with a non-English unit', () => {
+  const en = statsFor(A)
+  const cs = statsFor({ strings: ['Vase kampan je naplanovana.'], headings: [], locale: 'cs' })
+
+  assert.throws(
+    () => mergeStats([en, cs]),
+    /refusing to merge English and non-English units/
+  )
+})
+
+test('mergeStats over units that are all non-English still succeeds, with english: null', () => {
+  const cs = statsFor({ strings: ['Vase kampan je naplanovana.'], headings: [], locale: 'cs' })
+  const de = statsFor({ strings: ['Ihre Kampagne ist geplant.'], headings: [], locale: 'de' })
+
+  const merged = mergeStats([cs, de])
+  assert.equal(merged.english, null)
+  assert.equal(merged.words, cs.words + de.words)
 })
 
 // --- shape and parity with the existing metrics ---------------------------
