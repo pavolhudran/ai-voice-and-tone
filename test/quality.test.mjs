@@ -17,7 +17,7 @@ const SOUND = [
 
 test('the thresholds are exactly the calibrated values from the spec', () => {
   assert.deepEqual(QUALITY_THRESHOLDS, {
-    long20Share: 0.015,
+    longTokenShare: 0.015,
     singleShare: 0.10,
     replShare: 0.005,
     glyphRecall: 0.5
@@ -28,13 +28,13 @@ test('a sound extraction passes', () => {
   const q = scoreExtraction(SOUND, { locale: 'en' })
   assert.equal(q.passed, true)
   assert.deepEqual(q.reasons, [])
-  assert.ok(q.long20Share <= QUALITY_THRESHOLDS.long20Share)
+  assert.ok(q.longTokenShare <= QUALITY_THRESHOLDS.longTokenShare)
 })
 
-test('merged words fail on long20Share', () => {
+test('merged words fail on longTokenShare', () => {
   const q = scoreExtraction(MERGED, { locale: 'en' })
   assert.equal(q.passed, false)
-  assert.ok(q.reasons.some((r) => r.startsWith('long20Share')), q.reasons.join('; '))
+  assert.ok(q.reasons.some((r) => r.startsWith('longTokenShare')), q.reasons.join('; '))
 })
 
 test('split words fail on singleShare', () => {
@@ -73,22 +73,35 @@ test('low glyph recall fails, and an absent recall figure is not held against a 
   assert.equal(scoreExtraction(SOUND, { locale: 'en' }).glyphRecall, null)
 })
 
-test('realistic German prose with compounds passes the gate', () => {
-  // Ordinary German business prose, with one compound word that exceeds 20 chars,
-  // should pass. The advisory signal (meanTokenLen) is recorded but does not fail.
-  const german = 'Unser Wohlbefinden und die Mitarbeiterzufriedenheit bestimmen unsere Unternehmenskultur'
+test('realistic German prose with legitimate compounds passes', () => {
+  // A realistic paragraph of German business prose with authentic compound words.
+  // At length 30, no token exceeds the boundary, so longTokenShare is 0.0 and
+  // passes easily. Advisory signals like meanTokenLen are still reported.
+  const german = 'Unser Wohlbefinden und die Mitarbeiterzufriedenheit sind zentral für unsere Unternehmenskultur und den langfristigen Erfolg. Ein modernes Gesundheitsprogramm unterstützt aktiv Prävention, Stressabbau und mentale Stabilität im täglichen Berufsalltag. Die komprehensive Krankenversicherung ist eine wesentliche Leistung für alle Mitarbeiter. Flexible Arbeitsplatzgestaltung und innovative Organisationskonzepte führen zu nachhaltiger Produktivität sowie erfolgreichen Geschäftsergebnissen und zufriedenen Kunden.'
   const q = scoreExtraction(german, { locale: 'de' })
   assert.equal(q.passed, true, q.reasons.join('; '))
-  assert.ok(q.meanTokenLen >= 9, 'the advisory signal is still recorded')
+  assert.ok(q.meanTokenLen > 8, 'the advisory signal is still recorded')
+  assert.ok(q.tokens >= 50, 'realistic paragraph has 50+ tokens')
 })
 
-test('genuinely merged German words still fail the gate', () => {
-  // When extraction genuinely loses spaces between words, long20Share rises
-  // sharply and should fail even with the higher German threshold.
-  const merged = 'UnserWohlbefindenunddieMitarbeiterzufriedenheitbestimmenunsereUnternehmenskultur'
-  const q = scoreExtraction(merged, { locale: 'de' })
+test('light merging (1 in 4 pairs) is not caught in German—a known limit', () => {
+  // Light merging where roughly one word pair in four is concatenated. At
+  // length 30, this produces no tokens exceeding the boundary, so it passes.
+  // This test documents that the gate catches only gross merging in German,
+  // not lighter degradation. This is a known limitation of the signal.
+  const oneInFour = 'Unser WohlbefindenundDie Mitarbeiterzufriedenheit sind zentral für unsere Unternehmenskultur. Ein modernes Gesundheitsprogramm unterstützt aktiv Prävention, Stressabbau und mentale Stabilitätim täglichen Berufsalltag. Die komprehensive Krankenversicherung ist eine wesentliche Leistung. Flexible ArbeitsplatzgestaltungUnd innovative Organisationskonzepte führen zu Produktivität sowie erfolgreichen Geschäftsergebnissen.'
+  const q = scoreExtraction(oneInFour, { locale: 'de' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+})
+
+test('heavy merging (1 in 2 pairs) fails the German gate', () => {
+  // Heavy merging where roughly one word pair in two is concatenated. This
+  // produces 3 tokens over 30 chars, giving longTokenShare 0.12, which far
+  // exceeds the 0.015 threshold. The gate catches gross merging.
+  const oneInTwo = 'UnserWohlbefindenund Die Mitarbeiterzufriedenheitsind zentral fürUnsere Unternehmenskultur. Ein modernesGesundheitsprogramm unterstützt aktivPrävention, Stressabbauund mentale Stabilitätimdeal Berufsalltag. Die komprehensiveKrankenversicherung ist eine wesentlicheLeistung. FlexibleArbeitsplatzgestaltung und innovativeOrganisationskonzepte führenzu produktivitätsowie erfolgreichenGeschäftsergebnissen.'
+  const q = scoreExtraction(oneInTwo, { locale: 'de' })
   assert.equal(q.passed, false, q.reasons.join('; '))
-  assert.ok(q.reasons.some((r) => r.startsWith('long20Share')), q.reasons.join('; '))
+  assert.ok(q.reasons.some((r) => r.startsWith('longTokenShare')), q.reasons.join('; '))
 })
 
 test('empty text fails rather than passing vacuously', () => {

@@ -11,21 +11,23 @@
  * Spec section 7.3 records the numbers. Do not adjust them without new
  * measurements.
  *
- *   signal          sound            broken           threshold
- *   long20Share     0.0034 - 0.0051  0.0284 - 0.0357  > 0.015 fails
- *   singleShare     0.000  - 0.006   0.191            > 0.10  fails
- *   meanTokenLen    5.46   - 6.12    3.47 / 7.19-7.62 advisory only
+ *   signal           sound            broken           threshold
+ *   longTokenShare   0.0034 - 0.0051  0.0284 - 0.0357  > 0.015 fails
+ *   singleShare      0.000  - 0.006   0.191            > 0.10  fails
+ *   meanTokenLen     5.46   - 6.12    3.47 / 7.19-7.62 advisory only
  *
- * What it catches: gross failure, in both directions. long20Share catches
+ * What it catches: gross failure, in both directions. longTokenShare catches
  * merged words ("Onlineexerciseandtherapylessons"), singleShare catches split
  * words ("I V A S TIH LA"). What it does NOT catch: subtle degradation, such
  * as an extraction losing five percent of its spaces. The remedy for that is a
  * better extractor - see the width-based spacing work in pdf.mjs - not a
- * tighter threshold here.
+ * tighter threshold here. Light merging (2-3 short words concatenated) may also
+ * escape detection in any language, as the original calibration measured
+ * real PDF output where long runs merged, not pairwise concatenation.
  */
 
 export const QUALITY_THRESHOLDS = Object.freeze({
-  long20Share: 0.015,
+  longTokenShare: 0.015,
   singleShare: 0.10,
   replShare: 0.005,
   glyphRecall: 0.5
@@ -49,33 +51,35 @@ export const SINGLE_LETTER_WORDS = Object.freeze({
 })
 
 /**
- * The share of tokens longer than 20 characters that still counts as sound.
+ * The character length that counts as "abnormally long" in a token.
  *
- * The default is CALIBRATED: 0.015 comes from eight real extractions of four
- * real PDFs in English and Czech, where sound output scored 0.0034-0.0051 and
- * merged output scored 0.0284-0.0357.
+ * The default 20 is CALIBRATED: measured on eight real extractions of four
+ * real PDFs in English and Czech, where this threshold separates sound output
+ * (0.0034-0.0051 of tokens) from merged output (0.0284-0.0357 of tokens).
  *
- * The compounding-language value is NOT calibrated. No German, Dutch, Finnish
- * or Hungarian corpus has been measured for this project. It is set
- * deliberately loose so it still catches gross merging while never firing on
- * ordinary compounds, and it should be replaced with a measured value the
- * first time such a corpus is available. Treat it as provisional.
+ * The compounding-language value 30 is NOT calibrated. German, Dutch, Finnish,
+ * Hungarian, Swedish, Danish, Norwegian, and Icelandic legitimately carry
+ * compound words that would trigger false positives at length 20. At length 30,
+ * the signal still catches heavily merged text (2 or more adjacent words
+ * concatenated) while allowing realistic prose through. This value is
+ * provisional and should be replaced with measured data once such corpora are
+ * available.
  */
-export const LONG_WORD_THRESHOLDS = Object.freeze({
-  en: 0.015,
-  cs: 0.015,
-  sk: 0.015,
-  de: 0.20,
-  nl: 0.20,
-  fi: 0.20,
-  hu: 0.20,
-  sv: 0.20,
-  da: 0.20,
-  no: 0.20,
-  is: 0.20,
-  fr: 0.015,
-  es: 0.015,
-  it: 0.015
+export const LONG_TOKEN_LENGTHS = Object.freeze({
+  en: 20,
+  cs: 20,
+  sk: 20,
+  de: 30,
+  nl: 30,
+  fi: 30,
+  hu: 30,
+  sv: 30,
+  da: 30,
+  no: 30,
+  is: 30,
+  fr: 20,
+  es: 20,
+  it: 20
 })
 
 const VOWELS = /[aeiouyáéíóúůýěäöüåøæàèìòùâêîôû]/i
@@ -98,7 +102,7 @@ export function scoreExtraction (text, { locale = 'en', glyphRecall = null } = {
     tokens: n,
     meanTokenLen: 0,
     singleShare: 0,
-    long20Share: 0,
+    longTokenShare: 0,
     replShare: 0,
     novowelShare: 0,
     glyphRecall: glyphRecall === null ? null : round(glyphRecall, 3)
@@ -108,9 +112,9 @@ export function scoreExtraction (text, { locale = 'en', glyphRecall = null } = {
 
   const localeKey = String(locale).slice(0, 2).toLowerCase()
   const allowed = SINGLE_LETTER_WORDS[localeKey] ?? new Set()
-  const long20Threshold = LONG_WORD_THRESHOLDS[localeKey] ?? QUALITY_THRESHOLDS.long20Share
+  const longTokenLength = LONG_TOKEN_LENGTHS[localeKey] ?? 20
   const singles = tokens.filter((t) => t.length === 1 && !allowed.has(t.toLowerCase())).length
-  const long20 = tokens.filter((t) => t.length > 20).length
+  const longTokens = tokens.filter((t) => t.length > longTokenLength).length
   const novowel = tokens.filter((t) => t.length > 3 && !VOWELS.test(t)).length
   const replacements = (source.match(/�/g) || []).length
 
@@ -118,15 +122,15 @@ export function scoreExtraction (text, { locale = 'en', glyphRecall = null } = {
     tokens: n,
     meanTokenLen: round(tokens.reduce((sum, t) => sum + t.length, 0) / n, 2),
     singleShare: round(singles / n, 3),
-    long20Share: round(long20 / n, 4),
+    longTokenShare: round(longTokens / n, 4),
     replShare: round(replacements / n, 4),
     novowelShare: round(novowel / n, 3),
     glyphRecall: base.glyphRecall
   }
 
   const reasons = []
-  if (scored.long20Share > long20Threshold) {
-    reasons.push(`long20Share ${scored.long20Share} exceeds ${long20Threshold} (words look merged)`)
+  if (scored.longTokenShare > QUALITY_THRESHOLDS.longTokenShare) {
+    reasons.push(`longTokenShare ${scored.longTokenShare} exceeds ${QUALITY_THRESHOLDS.longTokenShare} at length ${longTokenLength} (words look merged)`)
   }
   if (scored.singleShare > QUALITY_THRESHOLDS.singleShare) {
     reasons.push(`singleShare ${scored.singleShare} exceeds ${QUALITY_THRESHOLDS.singleShare} (words look split)`)
