@@ -17,27 +17,41 @@ import { readTextFile } from './fsx.mjs'
  * Spacing here is reconstructed from each item's x position against where the
  * previous item ended - pdfjs gives both, so no heuristic constant is needed
  * beyond "did the pen actually move further than the glyph was wide".
+ *
+ * This adapter never supplies `glyphRecall`. The vendored bundle's own text
+ * layer has no notion of an unresolved glyph - it never emits U+FFFD or a
+ * `notdef` marker, confirmed against the bundle itself - so an
+ * emitted-over-expected character ratio computed from its output can only
+ * ever be a constant 1.0. A signal pinned at a constant is worse than no
+ * signal at all: it would read as "no characters were lost" on every PDF
+ * without ever having checked. `null` is the honest answer; see
+ * quality.mjs's QUALITY_THRESHOLDS doc comment for how the gate treats it.
  */
 
-const VENDOR = path.resolve(import.meta.dirname, '..', '..', 'vendor', 'pdfjs')
+const VENDOR = path.resolve(import.meta.dirname, '..', '..', 'vendor')
 
 export const PDF_EXTRACTOR = Object.freeze({
   name: 'pdfjs-dist',
-  version: JSON.parse(
-    readTextFile(path.join(import.meta.dirname, '..', '..', 'vendor', 'manifest.json'))
-  ).libraries['pdfjs-dist'].version
+  version: JSON.parse(readTextFile(path.join(VENDOR, 'manifest.json'))).libraries['pdfjs-dist'].version
 })
 
 let cached = null
 async function pdfjs () {
   if (cached) return cached
-  const mod = await import(pathToFileURL(path.join(VENDOR, 'pdf.min.mjs')).href)
-  mod.GlobalWorkerOptions.workerSrc = fileURLToPath(pathToFileURL(path.join(VENDOR, 'pdf.worker.min.mjs')))
+  const mod = await import(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.min.mjs')).href)
+  mod.GlobalWorkerOptions.workerSrc = fileURLToPath(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.worker.min.mjs')))
   cached = mod
   return mod
 }
 
-/** pdfjs warns about fonts constantly; spec section 9 keeps stdout quiet. */
+/**
+ * pdfjs's legacy build runs outside a browser, so on every load it complains
+ * that it cannot load `@napi-rs/canvas` and cannot polyfill `DOMMatrix`,
+ * `ImageData`, or `Path2D` - none of which this adapter needs, since it only
+ * reads text content and never renders a page. Spec section 9 keeps stdout
+ * quiet and ASCII, so those complaints are suppressed rather than passed
+ * through.
+ */
 async function quietly (fn) {
   const outWrite = process.stdout.write.bind(process.stdout)
   const errWrite = process.stderr.write.bind(process.stderr)
@@ -54,7 +68,7 @@ async function quietly (fn) {
   }
 }
 
-const EMPTY = { strings: [], headings: [], glyphRecall: 0, note: 'no-text-layer' }
+const EMPTY = { strings: [], headings: [], glyphRecall: null, note: 'no-text-layer' }
 
 export async function extractPdf (buf) {
   if (!buf || buf.length === 0) return { ...EMPTY }
@@ -71,15 +85,19 @@ export async function extractPdf (buf) {
         stopAtErrors: false // a damaged page should not lose the whole document
       }).promise
     } catch (error) {
-      if (/password|encrypt/i.test(error?.message ?? '')) {
-        return { strings: [], headings: [], glyphRecall: 0, note: 'encrypted' }
+      // The vendored bundle's export surface has no Password* class to
+      // instanceof against (checked: no export name on the module matches
+      // /password/i), so detection falls back to the thrown instance's own
+      // `name`, which pdfjs sets to 'PasswordException' regardless of export
+      // visibility. The message regex stays only as a last-resort net for an
+      // encryption failure that somehow doesn't carry that name.
+      if (error?.name === 'PasswordException' || /password|encrypt/i.test(error?.message ?? '')) {
+        return { strings: [], headings: [], glyphRecall: null, note: 'encrypted' }
       }
       return { ...EMPTY }
     }
 
     const strings = []
-    let expected = 0
-    let emitted = 0
 
     for (let page = 1; page <= doc.numPages; page++) {
       let items
@@ -99,8 +117,6 @@ export async function extractPdf (buf) {
 
       for (const item of items) {
         if (typeof item.str !== 'string') continue
-        expected += item.str.length
-        emitted += item.str.replace(/�/g, '').length
 
         const x = item.transform?.[4] ?? 0
         // A gap beyond where the previous item ended is a word break. pdfjs
@@ -116,11 +132,6 @@ export async function extractPdf (buf) {
     await doc.destroy?.()
 
     if (strings.length === 0) return { ...EMPTY }
-    return {
-      strings,
-      headings: [],
-      glyphRecall: expected ? Number((emitted / expected).toFixed(3)) : 0,
-      note: 'ok'
-    }
+    return { strings, headings: [], glyphRecall: null, note: 'ok' }
   })
 }

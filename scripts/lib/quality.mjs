@@ -15,6 +15,7 @@
  *   longTokenShare   0.0034 - 0.0051  0.0284 - 0.0357  > 0.015 fails
  *   singleShare      0.000  - 0.006   0.191            > 0.10  fails
  *   meanTokenLen     5.46   - 6.12    3.47 / 7.19-7.62 advisory only
+ *   glyphRecall      -                -                > 0.5 passes, not measured
  *
  * What it catches: gross failure, in both directions. longTokenShare catches
  * merged words ("Onlineexerciseandtherapylessons"), singleShare catches split
@@ -24,6 +25,14 @@
  * tighter threshold here. Light merging (2-3 short words concatenated) may also
  * escape detection in any language, as the original calibration measured
  * real PDF output where long runs merged, not pairwise concatenation.
+ *
+ * glyphRecall has no calibration data behind it because no current extractor
+ * supplies a real value: pdf.mjs's own text layer never emits an unresolved-
+ * glyph marker, so an emitted-over-expected ratio computed from it would be a
+ * constant 1.0, and pdf.mjs returns `null` rather than fabricate that. office.mjs
+ * omits the field for the same reason - it cannot measure it either. `null`
+ * skips this check entirely (see below), so the 0.5 threshold is dormant
+ * until some extractor can supply a figure that actually varies.
  */
 
 export const QUALITY_THRESHOLDS = Object.freeze({

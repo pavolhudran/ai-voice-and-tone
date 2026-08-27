@@ -56,6 +56,16 @@ test('text is extracted from a compressed content stream', async () => {
   assert.deepEqual(out.headings, [], 'a PDF carries no heading concept worth trusting')
 })
 
+test('a successful extraction reports glyphRecall as null, not a fabricated 1.0', async () => {
+  // pdfjs's text layer never emits U+FFFD or a notdef marker, so an
+  // emitted-over-expected ratio computed from its output can only ever be a
+  // constant 1.0 - a signal pinned at a constant is worse than none, because
+  // it would read as "nothing was lost" without ever having checked.
+  const out = await extractPdf(onePage('BT /F1 12 Tf 72 700 Td (Your campaign is scheduled.) Tj ET'))
+  assert.equal(out.note, 'ok')
+  assert.equal(out.glyphRecall, null)
+})
+
 test('words separated on the page do not merge, and letters within a word do not split', async () => {
   // The failure mode that decided this task. Both directions must hold.
   const out = await extractPdf(onePage(
@@ -88,7 +98,7 @@ test('a pdf with no text layer reports no-text-layer, which is the scanned case'
   ]))
   assert.equal(out.note, 'no-text-layer')
   assert.deepEqual(out.strings, [])
-  assert.equal(out.glyphRecall, 0)
+  assert.equal(out.glyphRecall, null)
 })
 
 test('a truncated or malformed pdf resolves rather than throwing', async () => {
@@ -100,8 +110,9 @@ test('a truncated or malformed pdf resolves rather than throwing', async () => {
 })
 
 test('nothing is written to stdout or stderr while parsing', async () => {
-  // pdfjs warns liberally about fonts. Parent spec section 9 keeps stdout
-  // ASCII and quiet, and a scan printing font warnings would be unusable.
+  // pdfjs's legacy build warns about a missing @napi-rs/canvas and unpolyfilled
+  // DOMMatrix/ImageData/Path2D on every load. Parent spec section 9 keeps
+  // stdout ASCII and quiet, and a scan printing that noise would be unusable.
   const chunks = []
   const realOut = process.stdout.write.bind(process.stdout)
   const realErr = process.stderr.write.bind(process.stderr)
