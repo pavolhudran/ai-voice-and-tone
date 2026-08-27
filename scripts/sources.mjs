@@ -1,13 +1,14 @@
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, saveConfig } from './lib/config.mjs'
+import { loadConfig, saveConfig, activeProfile } from './lib/config.mjs'
 import { isBinaryFormat } from './lib/extract.mjs'
 import { loadRegister, resolveRegister, nextRegisterId, expandHome } from './lib/register.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
+import { ingestUrl } from './lib/fetchurl.mjs'
 import { sha256File } from './lib/hash.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -220,6 +221,88 @@ export async function runIngest (ctx, { only = null } = {}) {
   return { ...report, ingested, escalate, reopened, errors }
 }
 
+/**
+ * Fetch every registered `kind: 'url'` source and record what came back.
+ * Never runs on the scan/fingerprint path (spec 8.1) - this is the one
+ * place in the plugin that touches the network, invoked explicitly via
+ * /voice-and-tone:connect --refresh, never implicitly by a scan.
+ *
+ * A URL's identity is the hash of the bytes it returned (ingestUrl, and the
+ * comment there), so "did this source change" can only be answered by
+ * fetching it - there is no cheap local stat to check first, unlike a file.
+ * That means every call here re-fetches every matching entry regardless of
+ * whether the last fetch is recent; a caller wanting to fetch only one
+ * passes `only` (a register id or the URL itself), the same shape
+ * `runIngest`'s `only` already uses.
+ *
+ * The comparison against what is already indexed mirrors runIngest's
+ * fresh/stale handling for files: no prior entry for this register id is a
+ * plain insert (upsertEntry); a prior entry whose hash now differs is
+ * superseded (supersedeEntry), which hands back the displaced entry so its
+ * `produced` rules can be surfaced for re-derivation - the same courtesy a
+ * changed file already gets. A prior entry whose hash is UNCHANGED is left
+ * untouched rather than run through upsertEntry: upsertEntry's own
+ * existing-entry branch overwrites every field but `id`/`added`, including
+ * `produced`, and a fetch that came back byte-identical has nothing to
+ * report - touching the entry at all would erase rule attribution for no
+ * reason.
+ */
+export async function runRefresh (ctx, { only = null } = {}) {
+  const register = loadRegister(ctx.config)
+  const index = loadIndex(ctx.kbRoot)
+  const profile = activeProfile(ctx.config, ctx.profileName)
+  const primaryLocale = profile.primary_locale ?? 'en'
+
+  const wants = (entry) => !only || entry.id === only || entry.url === only
+  const urlEntries = register.filter((entry) => entry.kind === 'url' && wants(entry))
+
+  const refreshed = []
+  const unchanged = []
+  const escalate = []
+  const reopened = []
+  const errors = []
+
+  for (const entry of urlEntries) {
+    let candidate
+    try {
+      candidate = await ingestUrl(entry, {
+        kbRoot: ctx.kbRoot,
+        now: ctx.now,
+        id: nextEntryId(index),
+        locale: entry.locale ?? primaryLocale,
+        fetchImpl: ctx.fetchImpl
+      })
+    } catch (error) {
+      errors.push({ origin: entry.url, from: entry.id, reason: `refresh-failed: ${error.message}` })
+      continue
+    }
+
+    const existing = index.sources.find((s) => s.kind === 'url' && s.from === entry.id)
+
+    if (existing && existing.sha256 === candidate.sha256) {
+      unchanged.push(existing)
+      continue
+    }
+
+    if (existing) {
+      const displaced = supersedeEntry(index, existing.id, candidate)
+      const saved = index.sources.find((s) => s.sha256 === candidate.sha256) ?? candidate
+      refreshed.push(saved)
+      if (needsModelTier(saved)) escalate.push(saved)
+      if (displaced) {
+        reopened.push({ id: displaced.id, origin: displaced.origin, produced: displaced.produced ?? [] })
+      }
+    } else {
+      upsertEntry(index, candidate)
+      refreshed.push(candidate)
+      if (needsModelTier(candidate)) escalate.push(candidate)
+    }
+  }
+
+  saveIndex(ctx.kbRoot, index, ctx.now)
+  return { refreshed, unchanged, escalate, reopened, errors }
+}
+
 export function runAdd (ctx, { target, label = null }) {
   const register = loadRegister(ctx.config)
   const id = nextRegisterId(register)
@@ -258,7 +341,8 @@ async function main (argv) {
     ingest: { type: 'boolean' },
     add: { type: 'string' },
     label: { type: 'string' },
-    forget: { type: 'string' }
+    forget: { type: 'string' },
+    refresh: { type: 'boolean' }
   })
   if (values.help) {
     printHelp('scripts/sources.mjs', [
@@ -269,6 +353,7 @@ async function main (argv) {
       '  --add <path|url>     register a source',
       '  --label <text>       a human label for --add',
       '  --forget <id>        retract a source and name the rules to reopen',
+      '  --refresh            fetch every registered url source and record what changed',
       '  --root <dir>         project root (default: cwd)',
       '  --kb <dir>           knowledge base dir',
       '  --profile <name>     config profile (default: default)',
@@ -295,6 +380,37 @@ async function main (argv) {
         ? `sources: reopen these rules and re-derive from what remains: ${reopened.join(', ')}`
         : 'sources: it had produced no rules'
     ])
+  }
+
+  if (values.refresh) {
+    const { refreshed, unchanged, escalate, reopened, errors } = await runRefresh(ctx, {})
+    if (values.json) {
+      return writeOut(`${JSON.stringify({
+        refreshed: refreshed.length,
+        unchanged: unchanged.length,
+        errors: errors.length,
+        escalate: escalate.map((e) => e.origin),
+        reopened: reopened.map((r) => ({ id: r.id, origin: r.origin, produced: r.produced }))
+      })}\n`)
+    }
+    const lines = [
+      `sources: refreshed ${refreshed.length} url source(s), ${unchanged.length} unchanged`
+    ]
+    for (const entry of refreshed.slice(0, 20)) lines.push(`sources:   changed ${entry.origin}`)
+    for (const item of errors.slice(0, 20)) lines.push(`sources:   error  ${item.origin} (${item.reason})`)
+    if (reopened.length) {
+      lines.push(`sources: ${reopened.length} url source(s) were superseded; rules to re-derive:`)
+      for (const item of reopened.slice(0, 20)) {
+        lines.push(`sources:   reopen ${item.id} ${item.origin} -> ${item.produced.join(', ') || '(none)'}`)
+      }
+    }
+    if (escalate.length) {
+      lines.push(`sources: ${escalate.length} source(s) need the model tier:`)
+      for (const entry of escalate.slice(0, 20)) {
+        lines.push(`sources:   model  ${entry.origin} (${entry.quality.reasons[0]})`)
+      }
+    }
+    return report(lines)
   }
 
   const result = values.ingest ? await runIngest(ctx, {}) : runCheck(ctx)
