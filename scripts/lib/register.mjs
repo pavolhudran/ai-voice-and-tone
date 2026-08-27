@@ -1,0 +1,149 @@
+import path from 'node:path'
+import os from 'node:os'
+import { existsSync, statSync } from 'node:fs'
+import { walk, toPosix } from './fsx.mjs'
+import { formatFor } from './extract.mjs'
+import { activeProfile, localeOf } from './config.mjs'
+
+/**
+ * Where to look for brand material.
+ *
+ * The register exists because walk() is rooted at projectRoot and config globs
+ * are relative to it, so a glob can never escape the repository. A `local`
+ * entry can, which is the whole point: a user's brand deck lives in
+ * ~/Brand, not in the client's git tree.
+ *
+ * Backwards compatibility is not optional. A config with no `sources` key
+ * synthesises exactly one `project` entry from its existing scan globs, so an
+ * existing knowledge base behaves bit-identically.
+ */
+
+const ALL_FILES = ['**/*']
+
+export function expandHome (p) {
+  const raw = String(p)
+  if (raw === '~') return os.homedir()
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2))
+  return raw
+}
+
+export function loadRegister (config, projectRoot, kbRoot) {
+  const declared = Array.isArray(config?.sources) ? config.sources : null
+  if (declared && declared.length > 0) {
+    return declared.map((entry, i) => ({ id: entry.id ?? `s${String(i + 1).padStart(2, '0')}`, ...entry }))
+  }
+  // Migration path: today's behaviour, expressed as one entry.
+  return [{
+    id: 's01',
+    kind: 'project',
+    label: 'Project files',
+    include: config?.scan?.include ?? [],
+    exclude: config?.scan?.exclude ?? []
+  }]
+}
+
+export function nextRegisterId (register) {
+  let highest = 0
+  for (const entry of register ?? []) {
+    const n = Number(/^s(\d+)$/.exec(String(entry?.id ?? ''))?.[1] ?? 0)
+    if (n > highest) highest = n
+  }
+  return `s${String(highest + 1).padStart(2, '0')}`
+}
+
+function rootAndGlobs (entry, { projectRoot, kbRoot }) {
+  if (entry.kind === 'project') {
+    return {
+      root: projectRoot,
+      include: entry.include ?? [],
+      exclude: entry.exclude ?? [],
+      relativeTo: projectRoot,
+      prefix: ''
+    }
+  }
+  if (entry.kind === 'inbox') {
+    const root = path.resolve(kbRoot, entry.path ?? 'sources')
+    return { root, include: ALL_FILES, exclude: [], relativeTo: root, prefix: `${toPosix(entry.path ?? 'sources').replace(/\/$/, '')}/` }
+  }
+  const target = path.resolve(expandHome(entry.path ?? ''))
+  return { root: target, include: ALL_FILES, exclude: entry.exclude ?? [], relativeTo: target, prefix: null }
+}
+
+export function resolveEntry (entry, ctx) {
+  const { config, profileName = 'default' } = ctx
+  const profile = activeProfile(config, profileName)
+  const primary = profile.primary_locale ?? 'en'
+  const locales = profile.locales ?? [primary]
+
+  // `missing` and `empty` are deliberately two different signals, not one:
+  //   - missing: the configured path does not exist. This is the ORDINARY
+  //     state of a fresh clone, because sources are never committed. A
+  //     caller must not warn about it, or every fresh clone would nag.
+  //   - empty: the path exists but resolving it found nothing at all - no
+  //     files, no skipped entries either. That is not the fresh-clone case;
+  //     it usually means the entry points at the wrong directory, or an
+  //     include glob that matches nothing there. A caller may reasonably
+  //     flag this one.
+  // Conflating them into a single boolean would erase exactly the
+  // distinction a status report needs: "nothing to see yet" vs "this entry
+  // looks wrong". Keeping them separate costs one extra field.
+  const base = { id: entry.id, kind: entry.kind, files: [], url: entry.url ?? null, missing: false, empty: false, skipped: [] }
+  if (entry.kind === 'url') return base
+
+  const { root, include, exclude, relativeTo, prefix } = rootAndGlobs(entry, ctx)
+
+  if (!existsSync(root)) {
+    // Absent is ORDINARY, not an error: sources are never committed, so a
+    // fresh clone has none of them. Callers report this, they do not warn.
+    return { ...base, missing: true }
+  }
+
+  // A local entry may name one file rather than a directory.
+  let absolutePaths
+  if (statSync(root).isFile()) {
+    absolutePaths = [root]
+  } else {
+    absolutePaths = walk(root, { include, exclude })
+  }
+
+  for (const abs of absolutePaths) {
+    // formatFor resolves container formats (.pdf, .docx, ...) to a real
+    // format string too, so a source pointing at an Office deck or a PDF is
+    // a resolvable file here, not a skip - unlike gatherCorpus's text-only
+    // path (corpus.mjs), which cannot read container bytes as text and
+    // routes them to its own `skipped` with reason 'container'. The only
+    // way a file lands in THIS `skipped` is the other half of that
+    // vocabulary: an extension nothing handles at all ('no-extractor'),
+    // e.g. .fig or .sketch.
+    const format = formatFor(abs)
+    const relToRoot = toPosix(path.relative(relativeTo, abs))
+    // A project entry keeps project-relative paths, so nothing about today's
+    // manifest changes. Other kinds record where the file actually came from.
+    const origin = entry.kind === 'project'
+      ? relToRoot
+      : prefix === null
+        ? abs
+        : `${prefix}${relToRoot}`
+
+    if (!format) {
+      base.skipped.push({ origin, ext: path.extname(abs).toLowerCase() })
+      continue
+    }
+    base.files.push({
+      abs,
+      rel: relToRoot,
+      origin,
+      format,
+      locale: localeOf(relToRoot, locales, primary)
+    })
+  }
+
+  base.files.sort((a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0))
+  base.skipped.sort((a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0))
+  base.empty = base.files.length === 0 && base.skipped.length === 0
+  return base
+}
+
+export function resolveRegister (register, ctx) {
+  return (register ?? []).map((entry) => resolveEntry(entry, ctx))
+}
