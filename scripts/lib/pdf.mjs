@@ -35,37 +35,60 @@ export const PDF_EXTRACTOR = Object.freeze({
   version: JSON.parse(readTextFile(path.join(VENDOR, 'manifest.json'))).libraries['pdfjs-dist'].version
 })
 
-let cached = null
-async function pdfjs () {
-  if (cached) return cached
-  const mod = await import(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.min.mjs')).href)
-  mod.GlobalWorkerOptions.workerSrc = fileURLToPath(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.worker.min.mjs')))
-  cached = mod
-  return mod
-}
-
 /**
- * pdfjs's legacy build runs outside a browser, so on every load it complains
- * that it cannot load `@napi-rs/canvas` and cannot polyfill `DOMMatrix`,
- * `ImageData`, or `Path2D` - none of which this adapter needs, since it only
- * reads text content and never renders a page. Spec section 9 keeps stdout
- * quiet and ASCII, so those complaints are suppressed rather than passed
- * through.
+ * pdfjs's legacy build runs outside a browser, so on every process's first
+ * load it complains once that it cannot load `@napi-rs/canvas` and cannot
+ * polyfill `DOMMatrix`, `ImageData`, or `Path2D` - none of which this adapter
+ * needs, since it only reads text content and never renders a page. Spec
+ * section 9 keeps stdout quiet and ASCII, so that one-time noise is
+ * suppressed here.
+ *
+ * Traced directly against the vendored bundle by capturing every channel
+ * separately while it loaded: every one of those four warnings goes out
+ * through `console.log`, and only `console.log` - never `console.warn`/
+ * `error`, and never `process.stdout.write` or `process.stderr.write`
+ * directly. So only `console.log` (kept alongside `warn`/`error` here as a
+ * defensive match for whatever a future pdfjs version might use instead)
+ * needs patching, and the raw streams are never touched at all - not even
+ * for the bounded span of the import.
+ *
+ * That distinction is the whole fix. An earlier version of this file
+ * globally replaced `process.stdout.write` for the ENTIRE parse (an
+ * arbitrarily long, multiply-async span that can overlap another caller's
+ * own output), and a narrower revision still replaced it for just the
+ * one-time import - both swallowed whatever anyone else wrote to that
+ * stream while the replacement was in effect, reproduced directly against
+ * this repo's own test suite even for the "just the import" version: a
+ * dynamic import of a multi-megabyte minified bundle is exactly the kind of
+ * synchronous work that can make an unrelated writer's already-queued
+ * output actually flush while the override sits in front of it. Never
+ * installing a stream override removes the entire hazard, rather than
+ * bounding its window.
+ *
+ * Restored by plain reference, not a bound wrapper: `console.log` etc. are
+ * always called as `console.log(...)`, so no `this` needs preserving, and a
+ * bound copy reassigned back would stack a wrapper layer on every call
+ * rather than genuinely restoring the original function.
  */
 async function quietly (fn) {
-  const outWrite = process.stdout.write.bind(process.stdout)
-  const errWrite = process.stderr.write.bind(process.stderr)
   const { warn, error, log } = console
-  process.stdout.write = () => true
-  process.stderr.write = () => true
   console.warn = console.error = console.log = () => {}
   try {
     return await fn()
   } finally {
-    process.stdout.write = outWrite
-    process.stderr.write = errWrite
     Object.assign(console, { warn, error, log })
   }
+}
+
+let cached = null
+async function pdfjs () {
+  if (cached) return cached
+  cached = await quietly(async () => {
+    const mod = await import(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.min.mjs')).href)
+    mod.GlobalWorkerOptions.workerSrc = fileURLToPath(pathToFileURL(path.join(VENDOR, 'pdfjs', 'pdf.worker.min.mjs')))
+    return mod
+  })
+  return cached
 }
 
 const EMPTY = { strings: [], headings: [], glyphRecall: null, note: 'no-text-layer' }
@@ -73,65 +96,67 @@ const EMPTY = { strings: [], headings: [], glyphRecall: null, note: 'no-text-lay
 export async function extractPdf (buf) {
   if (!buf || buf.length === 0) return { ...EMPTY }
 
-  return quietly(async () => {
-    const lib = await pdfjs()
-    let doc
+  const lib = await pdfjs()
+  let doc
+  try {
+    doc = await lib.getDocument({
+      data: new Uint8Array(buf),
+      useSystemFonts: true,
+      disableFontFace: true,
+      isEvalSupported: false, // no eval in a plugin that reads untrusted files
+      stopAtErrors: false, // a damaged page should not lose the whole document
+      // Measured: this alone silences pdfjs's own per-parse warnings, so the
+      // parse needs no stream patching at all - see the doc comment on
+      // `quietly` above for why that matters.
+      verbosity: lib.VerbosityLevel.ERRORS
+    }).promise
+  } catch (error) {
+    // The vendored bundle's export surface has no Password* class to
+    // instanceof against (checked: no export name on the module matches
+    // /password/i), so detection falls back to the thrown instance's own
+    // `name`, which pdfjs sets to 'PasswordException' regardless of export
+    // visibility. The message regex stays only as a last-resort net for an
+    // encryption failure that somehow doesn't carry that name.
+    if (error?.name === 'PasswordException' || /password|encrypt/i.test(error?.message ?? '')) {
+      return { strings: [], headings: [], glyphRecall: null, note: 'encrypted' }
+    }
+    return { ...EMPTY }
+  }
+
+  const strings = []
+
+  for (let page = 1; page <= doc.numPages; page++) {
+    let items
     try {
-      doc = await lib.getDocument({
-        data: new Uint8Array(buf),
-        useSystemFonts: true,
-        disableFontFace: true,
-        isEvalSupported: false, // no eval in a plugin that reads untrusted files
-        stopAtErrors: false // a damaged page should not lose the whole document
-      }).promise
-    } catch (error) {
-      // The vendored bundle's export surface has no Password* class to
-      // instanceof against (checked: no export name on the module matches
-      // /password/i), so detection falls back to the thrown instance's own
-      // `name`, which pdfjs sets to 'PasswordException' regardless of export
-      // visibility. The message regex stays only as a last-resort net for an
-      // encryption failure that somehow doesn't carry that name.
-      if (error?.name === 'PasswordException' || /password|encrypt/i.test(error?.message ?? '')) {
-        return { strings: [], headings: [], glyphRecall: null, note: 'encrypted' }
-      }
-      return { ...EMPTY }
+      items = (await (await doc.getPage(page)).getTextContent()).items
+    } catch {
+      continue // one unreadable page is not the whole document
     }
 
-    const strings = []
-
-    for (let page = 1; page <= doc.numPages; page++) {
-      let items
-      try {
-        items = (await (await doc.getPage(page)).getTextContent()).items
-      } catch {
-        continue // one unreadable page is not the whole document
-      }
-
-      let line = ''
-      let penEnd = null
-      const flush = () => {
-        const trimmed = line.replace(/\s+/g, ' ').trim()
-        if (trimmed) strings.push(trimmed)
-        line = ''
-      }
-
-      for (const item of items) {
-        if (typeof item.str !== 'string') continue
-
-        const x = item.transform?.[4] ?? 0
-        // A gap beyond where the previous item ended is a word break. pdfjs
-        // already reports each item's own width, so this needs no constant.
-        if (penEnd !== null && x - penEnd > 1 && line && !line.endsWith(' ')) line += ' '
-        line += item.str
-        penEnd = x + (item.width ?? 0)
-        if (item.hasEOL) { flush(); penEnd = null }
-      }
-      flush()
+    let line = ''
+    let penEnd = null
+    const flush = () => {
+      const trimmed = line.replace(/\s+/g, ' ').trim()
+      if (trimmed) strings.push(trimmed)
+      line = ''
     }
 
-    await doc.destroy?.()
+    for (const item of items) {
+      if (typeof item.str !== 'string') continue
 
-    if (strings.length === 0) return { ...EMPTY }
-    return { strings, headings: [], glyphRecall: null, note: 'ok' }
-  })
+      const x = item.transform?.[4] ?? 0
+      // A gap beyond where the previous item ended is a word break. pdfjs
+      // already reports each item's own width, so this needs no constant.
+      if (penEnd !== null && x - penEnd > 1 && line && !line.endsWith(' ')) line += ' '
+      line += item.str
+      penEnd = x + (item.width ?? 0)
+      if (item.hasEOL) { flush(); penEnd = null }
+    }
+    flush()
+  }
+
+  await doc.destroy?.()
+
+  if (strings.length === 0) return { ...EMPTY }
+  return { strings, headings: [], glyphRecall: null, note: 'ok' }
 }

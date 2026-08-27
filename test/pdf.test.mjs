@@ -126,3 +126,39 @@ test('nothing is written to stdout or stderr while parsing', async () => {
   }
   assert.deepEqual(chunks, [], `pdfjs printed: ${chunks.join('')}`)
 })
+
+test('a concurrent write while a parse is in flight is not swallowed', async () => {
+  // Fix round 1: extractPdf used to wrap its whole parse in a helper that
+  // globally replaced process.stdout.write/process.stderr.write for the
+  // parse's entire (arbitrarily long, multiply-async) duration. Anything
+  // else writing to stdout during that window - another test's own output,
+  // another caller entirely - was silently discarded. This pins the
+  // property that actually matters: a write made by someone else while a
+  // parse is in flight must reach the real handler untouched.
+  const buf = onePage('BT /F1 12 Tf (Concurrent write check.) Tj ET')
+
+  // Warm pdfjs's module cache first, via a normal call, so this assertion
+  // is about the parse path itself - not about the bounded, one-time
+  // import-suppression window inside pdfjs(), which is allowed to patch
+  // stdout only for as long as the dynamic import takes.
+  await extractPdf(buf)
+
+  const chunks = []
+  const originalWrite = process.stdout.write
+  process.stdout.write = (chunk) => { chunks.push(chunk); return true }
+  try {
+    const parsing = extractPdf(buf)
+    // extractPdf is now running through its own awaits (getDocument, one
+    // getTextContent per page). A write issued right now, from outside it,
+    // must land in our own handler, not a handler extractPdf installed.
+    process.stdout.write('marker-from-outside-the-parse\n')
+    await parsing
+  } finally {
+    process.stdout.write = originalWrite
+  }
+
+  assert.ok(
+    chunks.some((c) => String(c).includes('marker-from-outside-the-parse')),
+    `expected the concurrent write to reach the real handler untouched; got: ${JSON.stringify(chunks)}`
+  )
+})

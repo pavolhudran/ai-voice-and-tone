@@ -15,25 +15,6 @@ function fileIn (dir, rel, contents) {
   return { abs, rel, origin: rel, format: rel.endsWith('.md') ? 'markdown' : 'text', locale: 'en' }
 }
 
-// extractSource is async too, for the same reason as ingestFile. Placed
-// first in this file deliberately: pdf.mjs's extractPdf briefly monkeypatches
-// process.stdout.write while pdfjs loads (see pdf.mjs's `quietly`), and
-// running it after other tests' TAP output has been queued but not yet
-// flushed can eat that output from the reporter - reproduced directly while
-// building this file. Running it first sidesteps that entirely.
-test('extractSource routes each format to the right parser', async () => {
-  const dir = makeTmpProject({})
-  try {
-    const textOut = await extractSource({ abs: path.join(dir, 'x.txt'), format: 'text', buf: Buffer.from('One. Two.') })
-    assert.deepEqual(textOut.strings, ['One. Two.'])
-    // A binary format must be handed bytes; the router must not decode first.
-    const out = await extractSource({ abs: path.join(dir, 'x.pdf'), format: 'pdf', buf: Buffer.from('%PDF-1.4\n') })
-    assert.equal(out.note, 'no-text-layer')
-  } finally {
-    cleanup(dir)
-  }
-})
-
 test('a text source produces a complete, measured index entry', async () => {
   const dir = makeTmpProject({ 'a.txt': 'x' })
   const kb = path.join(dir, '.voice-and-tone')
@@ -184,6 +165,20 @@ test('an unreadable container is skipped with the reason recorded', async () => 
 
     assert.equal(entry.status, 'skipped')
     assert.ok(entry.quality.reasons.join(' ').match(/not a zip|unreadable/i), entry.quality.reasons.join('; '))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// extractSource is async too, for the same reason as ingestFile.
+test('extractSource routes each format to the right parser', async () => {
+  const dir = makeTmpProject({})
+  try {
+    const textOut = await extractSource({ abs: path.join(dir, 'x.txt'), format: 'text', buf: Buffer.from('One. Two.') })
+    assert.deepEqual(textOut.strings, ['One. Two.'])
+    // A binary format must be handed bytes; the router must not decode first.
+    const out = await extractSource({ abs: path.join(dir, 'x.pdf'), format: 'pdf', buf: Buffer.from('%PDF-1.4\n') })
+    assert.equal(out.note, 'no-text-layer')
   } finally {
     cleanup(dir)
   }

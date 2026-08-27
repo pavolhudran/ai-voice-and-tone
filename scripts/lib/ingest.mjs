@@ -72,8 +72,17 @@ function entryFrom ({
   extractor = null, strings, headings, glyphRecall, note, kbRoot, reasons = []
 }) {
   const text = strings.join('\n')
+  // Shape-complete either way: scoreExtraction('') already returns every
+  // field it ever returns (tokens, meanTokenLen, singleShare,
+  // longTokenShare, replShare, novowelShare, glyphRecall - zeroed or null,
+  // never absent), so a downstream reader can access e.g.
+  // quality.longTokenShare with no guard regardless of which branch
+  // produced this entry. Only `reasons` is replaced, with the extractor's
+  // own note (no-text-layer, encrypted, unreadable, ...) rather than
+  // scoreExtraction's generic "no tokens recovered" - strictly more
+  // informative about WHY nothing came out.
   const quality = strings.length === 0
-    ? { passed: false, reasons: [...reasons, `empty: ${note}`], tokens: 0 }
+    ? { ...scoreExtraction('', { locale, glyphRecall }), reasons: [...reasons, `empty: ${note}`] }
     : scoreExtraction(text, { locale, glyphRecall })
 
   if (quality.passed) writeTextFile(cachePathFor(kbRoot, sha256), `${text}\n`)
