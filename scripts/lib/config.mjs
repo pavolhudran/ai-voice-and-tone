@@ -28,7 +28,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   // opts in by running /voice-and-tone:connect.
   sources: [],
   runtime: { node: 'detected', probed: null },
-  thresholds: { corroboration: 2, derived_min_samples: 5, stale_months: 9 }
+  // drift_pct is the percentage change past which /voice-and-tone:status flags
+  // a fingerprint metric against its baseline. deepMerge supplies it for every
+  // config.yml written before it existed, so no user file needs editing.
+  thresholds: { corroboration: 2, derived_min_samples: 5, stale_months: 9, drift_pct: 25 }
 })
 
 export function kbRootFor (projectRoot, override) {

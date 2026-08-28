@@ -6,7 +6,8 @@ import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig } from '../scripts/lib/config.mjs'
 import { CONTEXTS, STATES } from '../scripts/lib/kb.mjs'
 import {
-  STAGES, inferStages, collect, CARD_SOURCES, cardFreshness, manifestFreshness, coverageOf
+  STAGES, inferStages, collect, CARD_SOURCES, cardFreshness, manifestFreshness, coverageOf,
+  DRIFT_METRICS, deltaPct, driftOf
 } from '../scripts/lib/state.mjs'
 
 const NOW = '2026-08-28T00:00:00.000Z'
@@ -410,4 +411,76 @@ test('evidence counts conflicts and pending drafts', () => {
   })
   assert.equal(state.evidence.drafts, 2)
   assert.equal(typeof state.evidence.conflicts, 'number')
+})
+
+test('percentage change from a zero baseline is null, never Infinity and never a number', () => {
+  // Percentage change from zero is undefined. Rendering it as 100 percent or
+  // Infinity would put a fabricated figure on a dashboard whose whole claim is
+  // that its numbers are computed.
+  assert.equal(deltaPct(0, 5), null)
+  assert.equal(deltaPct(0, 0), 0)
+  assert.equal(deltaPct(null, 5), null)
+  assert.equal(deltaPct(5, null), null)
+  assert.equal(deltaPct(undefined, 5), null)
+})
+
+test('deltaPct is signed and relative to the baseline magnitude', () => {
+  assert.equal(deltaPct(10, 15), 50)
+  assert.equal(deltaPct(10, 5), -50)
+  assert.equal(deltaPct(-10, -15), -50, 'a negative baseline uses its magnitude, preserving the sign of the move')
+})
+
+test('drift flags a metric only once it passes the configured threshold', () => {
+  const fingerprint = {
+    byLocale: { en: { universal: { meanSentenceLength: 20 }, english: null } },
+    baseline: {
+      generated: '2026-03-02T00:00:00.000Z',
+      byLocale: { en: { universal: { meanSentenceLength: 10 }, english: null } }
+    }
+  }
+  const drift = driftOf(fingerprint, 25)
+  const metric = drift.byLocale.en.metrics.find((m) => m.key === 'meanSentenceLength')
+  assert.equal(metric.from, 10)
+  assert.equal(metric.to, 20)
+  assert.equal(metric.deltaPct, 100)
+  assert.equal(metric.flagged, true)
+
+  const lenient = driftOf(fingerprint, 200)
+  assert.equal(lenient.byLocale.en.metrics.find((m) => m.key === 'meanSentenceLength').flagged, false)
+})
+
+test('a locale with no baseline reports baseline null rather than being omitted', () => {
+  // Omitting it would make "no baseline" invisible, which is exactly the gap
+  // that most needs surfacing: drift can never be measured there.
+  const fingerprint = {
+    byLocale: { en: { universal: { meanSentenceLength: 20 } }, cs: { universal: { meanSentenceLength: 14 } } },
+    baseline: {
+      generated: '2026-03-02T00:00:00.000Z',
+      byLocale: { en: { universal: { meanSentenceLength: 10 } } }
+    }
+  }
+  const drift = driftOf(fingerprint, 25)
+  assert.ok('cs' in drift.byLocale)
+  assert.equal(drift.byLocale.cs.baseline, null)
+  assert.deepEqual(drift.byLocale.cs.metrics, [])
+  assert.equal(drift.byLocale.en.baseline, '2026-03-02T00:00:00.000Z')
+})
+
+test('a fingerprint with no baseline at all yields every locale unbaselined', () => {
+  const drift = driftOf({ byLocale: { en: { universal: {} } }, baseline: null }, 25)
+  assert.equal(drift.byLocale.en.baseline, null)
+})
+
+test('an absent fingerprint yields an empty drift map rather than throwing', () => {
+  assert.deepEqual(driftOf(null, 25).byLocale, {})
+})
+
+test('a non-English locale contributes no english-block metrics', () => {
+  const fingerprint = {
+    byLocale: { cs: { universal: { meanSentenceLength: 20 }, english: null } },
+    baseline: { generated: NOW, byLocale: { cs: { universal: { meanSentenceLength: 10 }, english: null } } }
+  }
+  const metrics = driftOf(fingerprint, 25).byLocale.cs.metrics
+  const englishKeys = DRIFT_METRICS.filter((m) => m.block === 'english').map((m) => m.key)
+  for (const metric of metrics) assert.ok(!englishKeys.includes(metric.key), `${metric.key} is English-only`)
 })

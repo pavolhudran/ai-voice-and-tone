@@ -72,6 +72,20 @@ test('a user scan.exclude replaces the default array rather than concatenating w
   }
 })
 
+test('drift_pct defaults to 25 and survives a partial thresholds override', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': 'version: 1\nthresholds:\n  corroboration: 3\n'
+  })
+  try {
+    const config = loadConfig(path.join(dir, '.voice-and-tone'))
+    assert.equal(config.thresholds.drift_pct, 25, 'the default fills in for every existing knowledge base')
+    assert.equal(config.thresholds.corroboration, 3, 'the user override survives')
+    assert.equal(config.thresholds.stale_months, 9, 'untouched siblings survive')
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('localeOf reads the locale from the path, else falls back to primary', () => {
   const locales = ['en', 'cs']
   assert.equal(localeOf('locales/cs/common.json', locales, 'en'), 'cs')

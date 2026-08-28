@@ -200,6 +200,78 @@ function zeroFilled (keys, counts) {
   return Object.fromEntries(keys.map((key) => [key, counts[key] ?? 0]))
 }
 
+/**
+ * fingerprintFromStats returns 22 metrics across its universal and english
+ * blocks. Showing all 22 would bury the four that a reader acts on, so this
+ * is a curated list, ordered by how directly each one reads as "the voice
+ * changed" rather than "the corpus changed shape".
+ *
+ * `block` names which sub-object of the per-locale fingerprint the key lives
+ * in. An english-block metric is simply absent for a non-English locale
+ * (fingerprintFromStats sets `english` to null there), and is skipped rather
+ * than reported as a change to or from nothing.
+ */
+export const DRIFT_METRICS = [
+  { key: 'meanSentenceLength', block: 'universal', label: 'mean sentence' },
+  { key: 'medianSentenceLength', block: 'universal', label: 'median sentence' },
+  { key: 'meanWordLength', block: 'universal', label: 'mean word' },
+  { key: 'exclamationRate', block: 'universal', label: 'exclamations' },
+  { key: 'questionRate', block: 'universal', label: 'questions' },
+  { key: 'emojiPer1000Words', block: 'universal', label: 'emoji /1k' },
+  { key: 'contractionPer1000Words', block: 'english', label: 'contractions /1k' },
+  { key: 'readingGrade', block: 'english', label: 'reading grade' },
+  { key: 'passiveRate', block: 'english', label: 'passive' }
+]
+
+/**
+ * Signed percentage change relative to the magnitude of the baseline.
+ *
+ * A zero baseline returns null, not Infinity and not 100: percentage change
+ * from zero is undefined, and putting a fabricated figure on this dashboard
+ * would contradict the one claim it makes about itself. deltaBar() renders a
+ * null as an explicit 'n/a' rather than an empty bar, so "we cannot say" never
+ * reads as "no drift".
+ */
+export function deltaPct (from, to) {
+  if (from === null || from === undefined || to === null || to === undefined) return null
+  if (from === 0) return to === 0 ? 0 : null
+  return Math.round(((to - from) / Math.abs(from)) * 1000) / 10
+}
+
+export function driftOf (fingerprint, thresholdPct) {
+  const byLocale = {}
+  const baselineLocales = fingerprint?.baseline?.byLocale ?? {}
+
+  for (const [locale, current] of Object.entries(fingerprint?.byLocale ?? {})) {
+    const base = baselineLocales[locale]
+    if (!base) {
+      // Present with a null baseline, never omitted: an omitted locale makes
+      // "drift cannot be measured here" invisible, and that is the gap that
+      // most needs surfacing.
+      byLocale[locale] = { baseline: null, metrics: [] }
+      continue
+    }
+    const metrics = []
+    for (const { key, block, label } of DRIFT_METRICS) {
+      const from = base?.[block]?.[key]
+      const to = current?.[block]?.[key]
+      if (from === undefined && to === undefined) continue
+      const delta = deltaPct(from ?? null, to ?? null)
+      metrics.push({
+        key,
+        label,
+        from: from ?? null,
+        to: to ?? null,
+        deltaPct: delta,
+        flagged: delta !== null && Math.abs(delta) >= thresholdPct
+      })
+    }
+    byLocale[locale] = { baseline: fingerprint.baseline.generated ?? null, metrics }
+  }
+
+  return { thresholdPct, byLocale }
+}
+
 export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now }) {
   const profile = activeProfile(config, profileName)
   const kb = loadKb(kbRoot)
@@ -253,6 +325,7 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       byType: zeroFilled(EVIDENCE_TYPES, countBy(kb.evidence ?? [], (e) => e.type)),
       conflicts: countConflicts(kbRoot),
       drafts: countDrafts(kbRoot)
-    }
+    },
+    drift: driftOf(fingerprint, config.thresholds?.drift_pct ?? 25)
   }
 }
