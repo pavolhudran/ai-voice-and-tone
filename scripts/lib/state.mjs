@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readTextFile } from './fsx.mjs'
 import { activeProfile } from './config.mjs'
-import { loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, cellId } from './kb.mjs'
+import {
+  loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, HUMOR_ZERO_STATES, cellId
+} from './kb.mjs'
 import { loadRegister, resolveRegister } from './register.mjs'
 import { loadIndex } from './sourceindex.mjs'
 import { sha256File } from './hash.mjs'
@@ -176,6 +178,12 @@ export function coverageOf (kb, manifest) {
   return {
     authored: byContext.reduce((sum, c) => sum + c.authored, 0),
     possible: CONTEXTS.length * STATES.length,
+    // Carried on the state object so lib/render.mjs can label the matrix
+    // columns without importing kb.mjs - which reaches node:fs, and would
+    // make the renderer's "no file I/O" guarantee a matter of trust rather
+    // than of its import list. Order matches every `cells` array below.
+    states: [...STATES],
+    humorGated: [...HUMOR_ZERO_STATES],
     byContext
   }
 }

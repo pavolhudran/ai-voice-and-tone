@@ -130,7 +130,7 @@ export const DETECTORS = [
     detect: (state) => state.freshness.card?.staleAgainst?.length
       ? {
           what: `CONTEXT.md is behind ${state.freshness.card.staleAgainst.join(', ')}`,
-          why: 'the always-loaded card does not reflect the current knowledge base',
+          why: 'the always-loaded card no longer matches its own sources',
           fix: '/voice-and-tone:sync'
         }
       : null
