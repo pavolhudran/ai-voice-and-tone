@@ -63,7 +63,7 @@ Zero npm dependencies, now and permanently. Nothing to install beyond the plugin
 
 Creates `.voice-and-tone/` in your project root, then **commit it** - it is
 markdown, so voice changes arrive as pull requests you can read and revert.
-`.drafts/`, `sources/`, and `.cache/` are gitignored; see
+`.drafts/` and `sources/` are gitignored; see
 ["Where your material goes"](#where-your-material-goes) below for why.
 
 ```
@@ -103,14 +103,13 @@ tone-of-voice PDF - into `.voice-and-tone/sources/`, or point `/voice-and-tone:c
 at a file, folder, or URL anywhere else. Run `/voice-and-tone:connect` any time
 to see what is new, changed, or missing.
 
-**Nothing you add is committed.** `sources/` and `.cache/` (the extraction
-cache) are gitignored by default - what survives is `evidence/sources.json`,
-the record of every source's content hash, what was extracted from it, and
-which rules it produced. Identity is the hash, not the path, so re-adding the
-same file from a different folder is a detectable no-op. That record alone is
-enough to recompute the fingerprint or subtract any single source later, so a
-colleague who clones the repository with an empty `sources/` gets the same
-baseline, not a false drift report.
+**Nothing you add is committed.** `sources/` is gitignored by default - what
+survives is `evidence/sources.json`, the record of every source's content
+hash, what was extracted from it, and which rules it produced. Identity is
+the hash, not the path, so re-adding the same file from a different folder is
+a detectable no-op. That record alone is enough to recompute the fingerprint
+or subtract any single source later, so a colleague who clones the repository
+with an empty `sources/` gets the same baseline, not a false drift report.
 
 Read deterministically, no dependencies to install: Markdown, plain text,
 JSON, YAML, PO, HTML, RTF, CSV/TSV, WebVTT/SubRip, `.docx`, `.pptx`, `.xlsx`,

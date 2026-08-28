@@ -405,8 +405,9 @@ footer p + p { margin-top: .7rem; }
   <div class="plate" style="margin-top:1.8rem">
     <span class="plate-label">What happens to your material</span>
     <div class="cols">
-      <p class="note">Point it at anything you have already written - a style guide, an old newsletter, a brand deck living in a completely different folder, a page on the web - and it is read once.</p>
-      <p class="note">Then it is thrown away. What stays is what it proved: enough to recompute the whole voice, or subtract any one source later, without ever keeping the file itself.</p>
+      <p class="note">Point it at anything you have already written - a style guide, an old newsletter, a brand deck living in a completely different folder, a page on the web - in almost any format you already have it in.</p>
+      <p class="note">Most of that it reads for itself, the same bytes to the same result every time. What it genuinely cannot - a scanned page, a photograph of a slide - it shows to the model instead.</p>
+      <p class="note">Either way, it is read once, then thrown away. What stays is what it proved: enough to recompute the whole voice, or subtract any one source later, without ever keeping the file itself.</p>
     </div>
   </div>
 </section>
@@ -474,6 +475,7 @@ footer p + p { margin-top: .7rem; }
 
   <div class="plate" style="margin-top:1.6rem">
     <pre class="tree">.voice-and-tone/
+  <b>config.yml</b>        <i>Profiles, locales, thresholds - and where your material lives.</i>
   <b>CONTEXT.md</b>        <i>GENERATED. ~600 tokens. Loaded before every piece of copy.</i>
   <b>voice.md</b>          <i>Constant. Three to six characteristics, each with what it rules out.</i>
   <b>tone.md</b>           <i>The eighteen rows of numbers, plus the cells you actually authored.</i>
@@ -482,9 +484,11 @@ footer p + p { margin-top: .7rem; }
   <b>mechanics.md</b>      <i>Grammar, casing, punctuation.</i>
   <b>channels/</b>         <i>Per-channel playbooks, generated on second use.</i>
   <b>locales/</b>          <i>Typography seeded automatically; register and anglicisms asked.</i>
+  <b>sources/</b>          <i>Where you drop brand material. Never committed - that is the point.</i>
   <b>evidence/</b>
     <b>ledger.md</b>       <i>Numbered, dated, and bidirectional.</i>
     <b>fingerprint.json</b> <i>Measured metrics, and the baseline drift is measured against.</i>
+    <b>sources.json</b>    <i>What was analysed and what it proved - so the material above can be safely thrown away.</i>
   <b>CHANGELOG.md</b>      <i>Appended on every approved change.</i></pre>
   </div>
 
