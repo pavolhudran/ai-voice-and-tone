@@ -1,6 +1,4 @@
-import path from 'node:path'
 import { readFileSync, statSync } from 'node:fs'
-import { writeTextFile } from './fsx.mjs'
 import { extractStrings, extractHeadings, isBinaryFormat } from './extract.mjs'
 import { extractOffice, OFFICE_FORMATS, OFFICE_EXTRACTOR } from './office.mjs'
 import { extractPdf, PDF_EXTRACTOR } from './pdf.mjs'
@@ -9,7 +7,7 @@ import { statsFor } from './metrics.mjs'
 import { sha256Buffer } from './hash.mjs'
 
 /**
- * The ingest ladder: extract, score, cache, count.
+ * The ingest ladder: extract, score, count.
  *
  * The tier boundary is the quality gate, not the file format. A script parser
  * attempts every source; only a genuine failure is marked for the model.
@@ -18,11 +16,15 @@ import { sha256Buffer } from './hash.mjs'
  * needs the model, and the voice-discovery skill acts on it. Keeping the
  * decision in code and the model call outside it is what makes the ladder
  * testable, and it keeps a token-spending step from hiding inside it.
+ *
+ * This module used to also write extracted text to `<kb>/.cache/extracts/`,
+ * keyed by content hash. Nothing ever read it back - ingestFile always
+ * re-extracts from the original bytes - so it was a cache with no consumer,
+ * silently retaining a plaintext copy of every analysed document under the
+ * knowledge base indefinitely. Removed rather than wired up: re-extraction
+ * is fast, and a plugin whose headline claim is "brand material is analysed
+ * and discarded" should not be the one place quietly keeping a copy.
  */
-
-export function cachePathFor (kbRoot, sha) {
-  return path.join(kbRoot, '.cache', 'extracts', `${sha}.txt`)
-}
 
 /**
  * Both extractOffice and extractPdf are promise-based (their vendored
@@ -75,7 +77,7 @@ export async function extractSource ({ abs, format, buf }) {
 
 function entryFrom ({
   sha256, origin, kind, from, id, format, bytes, locale, label, now, tier,
-  extractor = null, strings, headings, glyphRecall, note, kbRoot, reasons = []
+  extractor = null, strings, headings, glyphRecall, note, reasons = []
 }) {
   const text = strings.join('\n')
   // Shape-complete either way: scoreExtraction('') already returns every
@@ -99,8 +101,6 @@ function entryFrom ({
   const quality = strings.length === 0
     ? { ...scoreExtraction('', { locale, glyphRecall, format, tier }), reasons: [...reasons, `empty: ${note}`], note }
     : { ...scoreExtraction(text, { locale, glyphRecall, format, tier }), note }
-
-  if (quality.passed) writeTextFile(cachePathFor(kbRoot, sha256), `${text}\n`)
 
   return {
     id,

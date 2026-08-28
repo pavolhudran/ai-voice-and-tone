@@ -9,7 +9,8 @@ import {
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
 import { ingestUrl, snapshotPathFor } from './lib/fetchurl.mjs'
-import { writeTextFile } from './lib/fsx.mjs'
+import { readTextFile, writeTextFile } from './lib/fsx.mjs'
+import { stringifyYaml } from './lib/yaml.mjs'
 import { sha256File } from './lib/hash.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -116,9 +117,17 @@ export function runCheck (ctx) {
   const errors = filterVanished(resolved)
   const diff = diffIndex(index, resolved, hasher())
 
+  // `known` entries carry a `needsModelTier` verdict recorded at ingest time
+  // that does not expire just because nothing about the source changed - a
+  // plain --check must surface it too, not only --ingest, so a source can be
+  // found again by someone who only ever runs --check first.
+  const knownShas = new Set(diff.known.map((f) => f.sha256))
+  const escalate = (index.sources ?? []).filter((entry) => knownShas.has(entry.sha256) && needsModelTier(entry))
+
   const total = index.sources.length
   return {
     ...diff,
+    escalate,
     register,
     resolved,
     index,
@@ -218,6 +227,22 @@ export async function runIngest (ctx, { only = null } = {}) {
       // replacement deliberately starts with an empty `produced` of its own.
       reopened.push({ id: displaced.id, origin: displaced.origin, produced: displaced.produced ?? [] })
     }
+  }
+
+  // `known` entries are matched by hash and never re-processed - but a
+  // source recorded with needsModelTier true (a Canva PDF, a JS-rendered
+  // page) does not stop needing it just because nothing about it changed.
+  // Without this, an entry that needed the model tier was announced exactly
+  // once, on the run that first ingested it, and never again: neither
+  // --check nor --ingest ever mentions it a second time, which makes
+  // sourcing.md's documented "do the first ten now, the rest later" workflow
+  // unimplementable for anything past the first batch. Mirrors runRefresh's
+  // identical re-check of its own `unchanged` bucket.
+  const knownShas = new Set(report.known.map((f) => f.sha256))
+  for (const entry of index.sources ?? []) {
+    if (!knownShas.has(entry.sha256)) continue
+    if (!wants(entry.origin, entry.from, entry.id)) continue
+    if (needsModelTier(entry)) escalate.push(entry)
   }
 
   // Anything the register no longer reaches keeps its statistics and is simply
@@ -360,6 +385,97 @@ export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
   return { refreshed, unchanged, escalate, reopened, errors }
 }
 
+/** One item of a YAML block sequence, at the depth a top-level `key:` list's
+ * items sit at (2-space indent for the dash, 4 for the item's own fields) -
+ * exactly what config.yml's `sources:` list already uses. Built by asking
+ * stringifyYaml to render `{ __item__: [item] }` and discarding the
+ * synthetic header line, rather than duplicating its (private)
+ * per-item renderer.
+ */
+function yamlListItemLines (item) {
+  return stringifyYaml({ __item__: [item] }).split('\n').slice(1, -1)
+}
+
+/** The line index one past the last line belonging to the block sequence
+ * that opens at `lines[keyIdx]` (a `key:` line at column 0) - either the
+ * next line at column 0, or the position right after the last real content
+ * line if the block runs to the end of the file. Blank lines inside or
+ * trailing the block never end it by themselves. */
+function endOfYamlBlock (lines, keyIdx) {
+  let lastContent = keyIdx
+  for (let i = keyIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    if (/^\s/.test(line)) { lastContent = i; continue }
+    return i
+  }
+  return lastContent + 1
+}
+
+/**
+ * Register a new source by editing config.yml's TEXT, not by round-tripping
+ * the whole file through parseYaml/stringifyYaml.
+ *
+ * saveConfig() had no callers before this branch. Its round trip is faithful
+ * for VALUES, but it silently drops every comment - the Mailchimp
+ * attribution header, the `sources:` explanation, and the comment placed on
+ * the inbox's `exclude: ["README.md"]` line specifically so that escape
+ * hatch would stay visible in the user's own config. A user's first
+ * /connect <path> deleted all three while leaving the data intact - worse
+ * than losing data, because nothing LOOKS wrong.
+ *
+ * Editing the raw text is simpler than teaching the hand-rolled parser to
+ * round-trip comments (yaml.mjs is deliberately a minimal subset - see its
+ * own header - and comment-preservation would mean attaching each one to a
+ * specific line and re-emitting it in the right place for every shape the
+ * subset supports) and it is exactly as correct for the one operation --add
+ * performs: appending one list item. Every existing entry's text, and every
+ * comment anywhere in the file, is left untouched byte-for-byte.
+ */
+export function registerSource (kbRoot, config, entry) {
+  const file = path.join(kbRoot, 'config.yml')
+  const register = loadRegister(config)
+  const declaredNonEmpty = Array.isArray(config?.sources) && config.sources.length > 0
+
+  if (!existsSync(file)) {
+    // Nothing on disk to preserve comments in yet.
+    saveConfig(kbRoot, { ...config, sources: [...register, entry] })
+    return
+  }
+
+  const raw = readTextFile(file)
+  const lines = raw.split('\n')
+  const keyIdx = lines.findIndex((l) => /^sources:/.test(l))
+
+  let merged
+  if (keyIdx !== -1 && declaredNonEmpty) {
+    // The block already has real content: append just the new item, leaving
+    // every existing entry - and every comment around it - untouched.
+    const end = endOfYamlBlock(lines, keyIdx)
+    merged = [...lines.slice(0, end), ...yamlListItemLines(entry), ...lines.slice(end)]
+  } else if (keyIdx !== -1) {
+    // `sources:` is present but declares nothing (`sources: []`/`sources: ~`)
+    // - today's register is entirely synthesised from `scan` (register.mjs's
+    // migration fallback), and that fallback only runs while `sources` IS
+    // empty. Writing just the new entry would silently make that synthesis
+    // stop the moment `sources` gains one item - the whole register, not
+    // only the new entry, must become explicit here so nothing implicit is
+    // dropped.
+    const end = endOfYamlBlock(lines, keyIdx)
+    const block = ['sources:', ...[...register, entry].flatMap(yamlListItemLines)]
+    merged = [...lines.slice(0, keyIdx), ...block, ...lines.slice(end)]
+  } else {
+    // `sources:` does not appear in the file at all - same reasoning as the
+    // empty case just above, but appended as a brand-new section rather than
+    // replacing an existing (empty) line.
+    const block = ['sources:', ...[...register, entry].flatMap(yamlListItemLines)]
+    merged = raw === '' ? block : [...lines, ...block]
+  }
+
+  const out = merged.join('\n')
+  writeTextFile(file, out.endsWith('\n') ? out : `${out}\n`)
+}
+
 export function runAdd (ctx, { target, label = null }) {
   const register = loadRegister(ctx.config)
   const id = nextRegisterId(register)
@@ -368,9 +484,8 @@ export function runAdd (ctx, { target, label = null }) {
     ? { id, kind: 'url', url: String(target), label, retain: 'none' }
     : { id, kind: 'local', path: path.resolve(expandHome(target)), label }
 
-  const config = { ...ctx.config, sources: [...register, entry] }
-  saveConfig(ctx.kbRoot, config)
-  return { register: config.sources, entry }
+  registerSource(ctx.kbRoot, ctx.config, entry)
+  return { register: [...register, entry], entry }
 }
 
 export function runForget (ctx, { id }) {
@@ -425,6 +540,16 @@ async function main (argv, { fetchImpl } = {}) {
     ])
     return
   }
+
+  // --only is documented (connect.md, --help above) as scoping --refresh
+  // alone. runIngest also accepts an `only` option, wired for a caller that
+  // holds a ctx directly (test/sources.test.mjs), but main() never threaded
+  // it through for --ingest - so `--ingest --only f001` used to parse, exit
+  // 0, and silently ingest EVERYTHING, exactly the trap `--refresh <id>`
+  // (without --only) sprang before R42. Refusing the combination here keeps
+  // the CLI's behaviour matching what it already documents, rather than
+  // quietly accepting a flag that does nothing for the mode it was given in.
+  if (values.only && !values.refresh) die('--only requires --refresh')
 
   const ctx = contextFor(values, { fetchImpl })
 
@@ -484,6 +609,19 @@ async function main (argv, { fetchImpl } = {}) {
 
   const result = values.ingest ? await runIngest(ctx, {}) : runCheck(ctx)
 
+  // Ingesting before /voice-and-tone:init has set a real profile name is
+  // what creates the locale fossil validate.mjs's W_LOCALE_NOT_ACTIVE check
+  // exists to catch (F5): statsFor bakes locale-dependent decisions into the
+  // stored stats block, so ingesting under the template's untouched default
+  // and only later setting the real locale leaves a permanent English-shaped
+  // (or whatever the placeholder's primary_locale was) block sitting under a
+  // profile that never measured it. A warning, not a refusal: --ingest is
+  // legitimate to run standalone (checking the pipeline before init), and
+  // this codebase already prefers a warning over blocking an otherwise-valid
+  // command (see W_STALE_EXTRACTOR's reasoning in validate.mjs).
+  const profile = activeProfile(ctx.config, ctx.profileName)
+  const unnamedProfile = Boolean(values.ingest) && profile.name === 'Unnamed'
+
   if (values.json) {
     return writeOut(`${JSON.stringify({
       known: result.known.length,
@@ -494,7 +632,8 @@ async function main (argv, { fetchImpl } = {}) {
       errors: result.errors.length,
       ingested: result.ingested?.length ?? 0,
       escalate: result.escalate?.map((e) => e.origin) ?? [],
-      reopened: result.reopened?.map((r) => ({ id: r.id, origin: r.origin, produced: r.produced })) ?? []
+      reopened: result.reopened?.map((r) => ({ id: r.id, origin: r.origin, produced: r.produced })) ?? [],
+      unnamedProfile
     })}\n`)
   }
 
@@ -502,6 +641,13 @@ async function main (argv, { fetchImpl } = {}) {
     `sources: ${result.index.sources.length} known, ${result.known.length} matched, ` +
     `${result.fresh.length} new, ${result.stale.length} stale, ${result.missing.length} missing`
   ]
+  if (unnamedProfile) {
+    lines.push(
+      `sources: warning - profile "${values.profile ?? 'default'}" still has the template's ` +
+      'placeholder name ("Unnamed"); finish /voice-and-tone:init before ingesting, or per-locale ' +
+      'statistics may be fossilized under the wrong locale'
+    )
+  }
   for (const file of result.fresh.slice(0, 20)) lines.push(`sources:   new    ${file.origin} (${file.format})`)
   for (const item of result.stale.slice(0, 20)) lines.push(`sources:   stale  ${item.entry.id} ${item.entry.origin}`)
   for (const item of result.skipped.slice(0, 20)) lines.push(`sources:   skip   ${item.origin} (${item.ext})`)

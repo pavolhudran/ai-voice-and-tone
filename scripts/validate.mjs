@@ -1,12 +1,12 @@
 import path from 'node:path'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   loadKb, STATES, CONTEXTS, DIALS, CONFIDENCE_LEVELS, EVIDENCE_TYPES, ID_PREFIXES,
   HUMOR_ZERO_STATES, cellId
 } from './lib/kb.mjs'
-import { loadIndex, indexPathFor, bySha, staleByExtractor, STATS_REQUIRED } from './lib/sourceindex.mjs'
-import { cachePathFor } from './lib/ingest.mjs'
+import { loadIndex, indexPathFor, staleByExtractor, STATS_REQUIRED } from './lib/sourceindex.mjs'
+import { activeProfile } from './lib/config.mjs'
 import { readTextFile } from './lib/fsx.mjs'
 import { parseCliArgs, resolveRoots, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -316,23 +316,35 @@ export function validateKb (kb = {}) {
       }
     }
 
-    // Check 5: every cache file under .cache/extracts/ should belong to a
-    // still-indexed entry. An orphan is harmless on its own - the fingerprint
-    // never reads the cache, only the index - but it signals an ingest that
-    // started extracting a source and never finished recording it, which is
-    // worth a warning even though nothing is actually broken.
-    const cacheDir = path.dirname(cachePathFor(kbRoot, 'sha'))
-    if (existsSync(cacheDir)) {
-      const byHash = bySha(index)
-      for (const name of readdirSync(cacheDir)) {
-        const match = /^([0-9a-f]{64})\.txt$/.exec(name)
-        if (!match) continue
-        if (!byHash.has(match[1])) {
-          addFile('warning', 'W_ORPHAN_CACHE',
-            `.cache/extracts/${name} has no matching entry in ${indexFile}; an interrupted ingest may have left it behind`,
-            indexFile, 0)
-        }
-      }
+    // Check 5: a source's locale must be one the active profile actually
+    // speaks. statsFor bakes three locale-dependent decisions into the
+    // stored stats block (the english sub-block, person markers, heading
+    // title case), and the block carries no marker of its own distinguishing
+    // "measured correctly" from "measured under the wrong locale" - once the
+    // source is discarded there is no text left to recount. This is not a
+    // contrived state: ingesting under the template's default primary_locale
+    // (en) and THEN finishing /voice-and-tone:init with the real locale (say
+    // cs) produces exactly this - a permanent English-shaped fossil sitting
+    // under a Czech profile, with nothing else ever detecting it.
+    //
+    // Warning, not an error, for the same reason Check 6 (below) is a
+    // warning: source text is deliberately never retained, so the only real
+    // fix - re-ingest under the right locale - is only available if the
+    // original document still exists somewhere. An error here could
+    // permanently block `sync` with no way to satisfy it. A warning at least
+    // surfaces the fossil instead of leaving it to silently poison a locale's
+    // statistics forever.
+    const profile = activeProfile(kb.config)
+    const activeLocales = new Set(profile.locales?.length ? profile.locales : [profile.primary_locale ?? 'en'])
+    for (const source of sources) {
+      if (source.locale === null || source.locale === undefined) continue
+      if (activeLocales.has(source.locale)) continue
+      addFile('warning', 'W_LOCALE_NOT_ACTIVE',
+        `source ${source.id} has locale "${source.locale}", which is not among the active profile's locales ` +
+        `(${[...activeLocales].join(', ') || 'none'}); its statistics may have been measured under the wrong ` +
+        'locale and cannot be recomputed since the source text is discarded - re-ingest under the right ' +
+        'locale if the original document is still available',
+        indexFile, 0)
     }
 
     // Check 6: a vendored extractor library was bumped since a source was

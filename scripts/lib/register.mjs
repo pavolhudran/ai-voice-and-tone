@@ -144,7 +144,12 @@ export function resolveEntry (entry, ctx) {
       rel: relToRoot,
       origin,
       format,
-      locale: localeOf(relToRoot, locales, primary)
+      locale: localeOf(relToRoot, locales, primary),
+      // The register entry's own label (e.g. --add's --label), so ingest.mjs
+      // has one to read. Before this, every file source's `label` was
+      // undefined regardless of what the entry declared - only a `url`
+      // source (which never goes through this loop) kept its label.
+      label: entry.label ?? null
     })
   }
 

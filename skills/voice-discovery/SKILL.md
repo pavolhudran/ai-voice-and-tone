@@ -60,7 +60,8 @@ Then ask what shape the project is, or infer it:
 | Docs repo | the docs themselves |
 | No repo | a folder the user points at, pasted text, or URLs |
 
-Adjust `scan.include` in `<KB>/config.yml` to match, then run:
+Adjust the `project` entry's `include` under `<KB>/config.yml`'s `sources:` list
+to match, then run:
 
 ```
 node "<plugin>/scripts/scan.mjs" --root "<project>" --kb "<KB>"
@@ -73,7 +74,7 @@ nothing.
 
 **Out of scope for v1:** string literals inside source code. Too language-specific
 and too error-prone; the false positives would poison the fingerprint. Point
-`scan.include` at specific files instead.
+the `project` entry's `include` at specific files instead.
 
 If the project already has a style guide, a tone-of-voice document, or a
 writing handbook - on disk, dropped into `<KB>/sources/`, or named with

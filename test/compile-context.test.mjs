@@ -239,3 +239,56 @@ test('the card compiled from the pristine templates does not contradict its own 
     cleanup(dir)
   }
 })
+
+// --- F3: compile-context must rank hits from the register (gatherAll), not
+// the legacy config.scan key gatherCorpus reads - CS1's cross-seam finding.
+// Before this fix, main() called gatherCorpus, so a KB whose register (the
+// modern, documented way to point at brand copy) diverges from config.scan
+// silently ranked the compiled card off the WRONG corpus - one the
+// fingerprint had already stopped measuring.
+
+test('compile-context ranks corpus hits from the register, not from a stale config.scan', async () => {
+  const { main } = await import('../scripts/compile-context.mjs')
+  const dir = makeTmpProject({
+    // Deliberately outside config.scan's default include globs (which never
+    // look at "brandcopy/") - only the register's project entry sees this.
+    'brandcopy/about.md': 'We utilize synergy. We utilize synergy again. We utilize it once more.\n',
+    '.voice-and-tone/config.yml': [
+      'kb_version: 0.1.0',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include:',
+      '      - "brandcopy/**/*.md"',
+      '    exclude: []'
+    ].join('\n'),
+    '.voice-and-tone/lexicon.md': [
+      '| ID | Avoid | Prefer | Why | Conf | Ev |',
+      '|---|---|---|---|---|---|',
+      '| L01 | leverage | use | jargon | confirmed | e1 |',
+      '| L02 | utilize | use | jargon | confirmed | e1 |'
+    ].join('\n')
+  })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const { readFileSync } = await import('node:fs')
+    main(['--root', dir, '--kb', kb, '--now', '2026-08-27T00:00:00.000Z'])
+    const md = readFileSync(path.join(kb, 'CONTEXT.md'), 'utf8')
+
+    const start = md.indexOf('## Lexicon')
+    const end = md.indexOf('##', start + 1)
+    const lexiconSection = md.slice(start, end)
+    // 'utilize' is violated 3 times in brandcopy/about.md, 'leverage' zero -
+    // if the corpus were still read via the old gatherCorpus/config.scan
+    // path, corpusStrings would be empty (brandcopy is outside its globs),
+    // both hit counts would be 0, and the tie-break would keep id order
+    // (L01 'leverage' first). Ranking 'utilize' first is only possible if
+    // the register (gatherAll), not config.scan, supplied the corpus.
+    assert.ok(
+      lexiconSection.indexOf('utilize') < lexiconSection.indexOf('leverage'),
+      `expected utilize (3 hits) ranked above leverage (0 hits): ${lexiconSection}`
+    )
+  } finally {
+    cleanup(dir)
+  }
+})

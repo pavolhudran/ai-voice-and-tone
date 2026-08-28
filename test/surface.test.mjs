@@ -25,6 +25,46 @@ function shippedMarkdown (dir = null, out = []) {
   return out
 }
 
+/**
+ * Every markdown file a user (not only a model) might read, including the
+ * templates a knowledge base is copied from. F1: templates/kb/sources/README.md
+ * told every new user to run `--inbox`, a flag deleted by an earlier fix -
+ * the surface test only ever swept skills/commands/agents, so the same dead
+ * flag survived in the one file a first-time user actually follows. Anything
+ * copied into a user's own knowledge base is exactly as "shipped" as a skill
+ * or a command.
+ */
+function userFacingMarkdown () {
+  const out = shippedMarkdown()
+  ;(function walk (dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(abs)
+      else if (entry.name.endsWith('.md')) out.push(abs)
+    }
+  })(surfaceFile('templates', 'kb'))
+  return out
+}
+
+/**
+ * Every `/voice-and-tone:connect ...` invocation named anywhere in the
+ * user-facing surface, with the file it came from. Scoped to this one
+ * command (rather than "every flag in every doc") because other commands'
+ * flags (--locale, --context, --critic, ...) belong to a different
+ * vocabulary entirely and are not sources.mjs flags at all - checking those
+ * against sources.mjs --help would be a false positive machine, not a guard.
+ */
+function connectInvocations () {
+  const out = []
+  for (const file of userFacingMarkdown()) {
+    const text = readFileSync(file, 'utf8')
+    for (const match of text.matchAll(/\/voice-and-tone:connect\b[^\n`]*/g)) {
+      out.push({ file, line: match[0] })
+    }
+  }
+  return out
+}
+
 /** The slice of a document between two markers, for pinning a procedure step. */
 function between (text, startMarker, endMarker) {
   const start = text.indexOf(startMarker)
@@ -317,10 +357,46 @@ test('connect is a real command naming the skill it invokes', () => {
   const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
   assert.match(body, /^---\ndescription:/m)
   assert.match(body, /voice-discovery/)
-  // --inbox never existed as a real flag on sources.mjs; --ingest is what
-  // actually analyses anything newly dropped into the inbox.
-  assert.ok(!body.includes('--inbox'), 'connect.md must not document a flag sources.mjs does not have')
   for (const flag of ['--ingest', '--refresh', '--forget']) assert.ok(body.includes(flag), flag)
+})
+
+// F1: --inbox never existed as a real flag on sources.mjs - --ingest is what
+// actually analyses anything newly dropped into the inbox. The assertion
+// used to check connect.md alone; templates/kb/sources/README.md told every
+// new user to run `/voice-and-tone:connect --inbox` and nothing here ever
+// looked at it, so the plugin's own front door documented a flag that erred
+// out. This now protects every user-facing file that names the invocation,
+// not only the one command file.
+test('no user-facing file documents a /voice-and-tone:connect flag sources.mjs does not have (--inbox)', () => {
+  for (const { file, line } of connectInvocations()) {
+    assert.ok(
+      !line.includes('--inbox'),
+      `${path.relative(root, file)} documents --inbox, which sources.mjs does not have: "${line}"`
+    )
+  }
+})
+
+test('every flag named alongside /voice-and-tone:connect anywhere in the user-facing docs exists on sources.mjs --help', () => {
+  // Task 15 fix round 2: --inbox was documented and never implemented, and
+  // the only thing that would have caught it earlier is running the real
+  // CLI rather than trusting the doc. This runs it - and now over every
+  // user-facing file that names a /voice-and-tone:connect invocation, not
+  // only commands/connect.md.
+  const invocations = connectInvocations()
+  assert.ok(invocations.length > 0, 'expected at least one /voice-and-tone:connect invocation in the docs')
+  const help = execFileSync(
+    process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--help'], { encoding: 'utf8' }
+  )
+  const real = new Set([...help.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))
+  for (const { file, line } of invocations) {
+    for (const flag of line.matchAll(/--[a-z][a-z-]*/g)) {
+      assert.ok(
+        real.has(flag[0]),
+        `${path.relative(root, file)} names ${flag[0]} alongside /voice-and-tone:connect, ` +
+        `which sources.mjs --help does not list: "${line}"`
+      )
+    }
+  }
 })
 
 test('every flag connect.md documents actually exists on sources.mjs --help', () => {

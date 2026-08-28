@@ -277,3 +277,47 @@ test('a project-folder container file, once ingested, contributes its words on t
     cleanup(dir)
   }
 })
+
+// --- F2: an empty fingerprint whose register resolves unindexed files must
+// name /voice-and-tone:connect --ingest, not the dead scan.include key.
+
+test('an empty corpus with no registered material still names scan.include', () => {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  const cfg = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*.md'], exclude: [] } }
+  saveConfig(kb, cfg)
+  let captured = ''
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk) => { captured += chunk; return true }
+  try {
+    main(['--root', dir, '--kb', kb, '--now', '2026-08-27T00:00:00.000Z'])
+  } finally {
+    process.stdout.write = originalWrite
+  }
+  try {
+    assert.match(captured, /fingerprint: no copy found; check scan\.include/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an empty corpus with registered-but-unindexed material names /voice-and-tone:connect --ingest', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  const cfg = { ...DEFAULT_CONFIG, sources: [{ id: 's02', kind: 'inbox', path: 'sources/' }] }
+  saveConfig(kb, cfg)
+  let captured = ''
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk) => { captured += chunk; return true }
+  try {
+    main(['--root', dir, '--kb', kb, '--now', '2026-08-27T00:00:00.000Z'])
+  } finally {
+    process.stdout.write = originalWrite
+  }
+  try {
+    assert.match(captured, /fingerprint: no copy found; 1 registered file\(s\) are not yet ingested - run \/voice-and-tone:connect --ingest/)
+    assert.ok(!captured.includes('scan.include'), 'must not blame a key gatherAll never reads')
+  } finally {
+    cleanup(dir)
+  }
+})

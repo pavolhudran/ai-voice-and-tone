@@ -197,3 +197,45 @@ test('manifest.files lists a path only once, even when the index also holds an e
     cleanup(dir)
   }
 })
+
+// --- F2: registered-but-unindexed material must be counted, and the printed
+// remedy must point at ingest rather than at a key gatherAll never reads.
+
+test('the manifest reports registered-but-unindexed files as their own channel', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const cfg = { ...DEFAULT_CONFIG, sources: [{ id: 's02', kind: 'inbox', path: 'sources/' }] }
+    const manifest = buildManifest(dir, cfg, '2026-08-27T00:00:00.000Z', 'default', kb)
+
+    assert.equal(manifest.totals.files, 0)
+    assert.equal(manifest.unindexed.count, 1)
+    assert.deepEqual(manifest.unindexed.files, [{ path: 'sources/newsletter.txt', ext: '.txt' }])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('the CLI summary names /voice-and-tone:connect --ingest for registered-but-unindexed material', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n',
+    '.voice-and-tone/config.yml': [
+      'version: 1',
+      'sources:',
+      '  - id: s02',
+      '    kind: inbox',
+      '    path: "sources/"'
+    ].join('\n')
+  })
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [SCAN_SCRIPT, '--root', dir, '--now', '2026-08-27T00:00:00.000Z'],
+      { encoding: 'utf8' }
+    )
+    assert.equal(/scan: 0 files/.test(out), true)
+    assert.match(out, /scan: 1 registered file\(s\) not yet ingested \(run \/voice-and-tone:connect --ingest: \.txt\)/)
+  } finally {
+    cleanup(dir)
+  }
+})

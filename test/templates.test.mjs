@@ -33,7 +33,16 @@ test('the config template parses and carries the spec thresholds', () => {
   assert.equal(config.thresholds.corroboration, 2)
   assert.equal(config.thresholds.derived_min_samples, 5)
   assert.equal(config.thresholds.stale_months, 9)
-  assert.ok(config.scan.exclude.includes('node_modules/**'))
+  // F3: the template no longer ships a `scan:` key at all - the `project`
+  // register entry IS the scan now, and shipping both (with identical globs)
+  // made scan.include an inert decoy that CONTEXT.md's compiler used to read
+  // while the fingerprint read the register instead. `scan:` survives only
+  // as loadRegister's migration fallback for a config that predates
+  // `sources:` entirely (config.mjs's DEFAULT_CONFIG, exercised in
+  // config.test.mjs and migration.test.mjs).
+  assert.equal(config.scan, undefined, 'the template must not ship an inert scan: block')
+  const project = config.sources.find((s) => s.kind === 'project')
+  assert.ok(project.exclude.includes('node_modules/**'))
 })
 
 test('the tone template ships a complete vector table for every state and context', () => {
@@ -93,10 +102,12 @@ test('the shipped CONTEXT.md template refuses to be hand-edited', () => {
   assert.match(md, /voice-and-tone:sync/)
 })
 
-test('the KB gitignore excludes sources and the extract cache but not the index', () => {
+test('the KB gitignore excludes sources but not the index', () => {
   const body = readFileSync(path.join(templates, 'gitignore'), 'utf8')
   assert.match(body, /^sources\/$/m)
-  assert.match(body, /^\.cache\/$/m)
+  // F6: the extract cache was removed (write-only, nothing ever read it) -
+  // there is no .cache/ directory left for a KB to gitignore.
+  assert.ok(!/\.cache/.test(body), 'no extract cache is written any more, so nothing should ignore it')
   assert.ok(!/sources\.json/.test(body), 'the index must stay committed')
 })
 

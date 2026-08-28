@@ -9,7 +9,7 @@ import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './
 export function buildManifest (projectRoot, config, generated, profileName = 'default', kbRoot = null) {
   const root = kbRoot ?? kbRootFor(projectRoot)
   const unreadablePaths = []
-  const { files: gathered, skipped, missing } = gatherAll({
+  const { files: gathered, skipped, unindexed, missing } = gatherAll({
     projectRoot, kbRoot: root, config, profileName, unreadable: unreadablePaths
   })
 
@@ -73,6 +73,18 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
         .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
         .map((f) => ({ path: f.rel, ext: f.ext, reason: f.reason }))
     },
+    // Registered material (an inbox or a local entry) that is on disk right
+    // now but has never been ingested - distinct from `skipped` (nothing can
+    // ever read it) and from `missing` (it WAS indexed and is now absent).
+    // This is what makes "0 files" over a non-empty sources/ actionable
+    // instead of misleading: the remedy is /voice-and-tone:connect --ingest,
+    // not editing scan.include, which this path never reads at all.
+    unindexed: {
+      count: unindexed.length,
+      files: [...unindexed]
+        .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+        .map((f) => ({ path: f.rel, ext: f.ext }))
+    },
     missing
   }
 }
@@ -108,7 +120,8 @@ function main (argv) {
       totals: manifest.totals,
       byLocale: manifest.byLocale,
       unreadable: { count: manifest.unreadable.count },
-      skipped: { count: manifest.skipped.count }
+      skipped: { count: manifest.skipped.count },
+      unindexed: { count: manifest.unindexed.count }
     })}\n`)
     return
   }
@@ -126,6 +139,10 @@ function main (argv) {
       : '') +
     (containers.length
       ? `scan: ${containers.length} file(s) need ingest, not scan (run /voice-and-tone:connect: ${extsOf(containers)})\n`
+      : '') +
+    (manifest.unindexed.count
+      ? `scan: ${manifest.unindexed.count} registered file(s) not yet ingested ` +
+        `(run /voice-and-tone:connect --ingest: ${extsOf(manifest.unindexed.files)})\n`
       : '') +
     (manifest.missing
       ? `scan: ${manifest.missing} source(s) not present locally; statistics intact\n`

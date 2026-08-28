@@ -615,19 +615,47 @@ test('a used entry with no stats block is reported', () => {
   }
 })
 
-test('an orphaned extract cache file is reported as a warning, not an error', () => {
-  const orphanSha = 'b'.repeat(64)
+// F6: W_ORPHAN_CACHE and its check were removed along with the extract
+// cache itself - a check on a store nothing ever wrote to any more.
+
+test('a source whose locale is not in the active profile is reported as a warning', () => {
   const { dir, kb } = kbFrom({
-    'kb/config.yml': '\n',
-    [`kb/.cache/extracts/${orphanSha}.txt`]: 'extracted text nobody indexed\n'
+    'kb/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: cs',
+      '    locales: [cs]'
+    ].join('\n'),
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ locale: 'en' })])
   })
   try {
     const report = validateKb(kb)
-    const finding = report.findings.find((f) => f.code === 'W_ORPHAN_CACHE')
+    const finding = report.findings.find((f) => f.code === 'W_LOCALE_NOT_ACTIVE')
     assert.ok(finding, JSON.stringify(report.findings))
     assert.equal(finding.severity, 'warning')
-    assert.match(finding.message, new RegExp(orphanSha))
-    assert.equal(report.errors, 0, 'an orphaned cache file is harmless, not fatal')
+    assert.match(finding.message, /f001/)
+    assert.match(finding.message, /"en"/)
+    assert.equal(report.errors, 0, 'a locale mismatch is a fossil to investigate, not a build-blocking error')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a source whose locale matches the active profile raises no finding', () => {
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en, cs]'
+    ].join('\n'),
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ locale: 'cs' })])
+  })
+  try {
+    const report = validateKb(kb)
+    assert.ok(!codesOf(report).includes('W_LOCALE_NOT_ACTIVE'), codesOf(report).join(', '))
   } finally {
     cleanup(dir)
   }
@@ -665,7 +693,7 @@ test('a well-formed source index produces none of the six new findings', () => {
     const codes = codesOf(report)
     for (const bad of [
       'E_DANGLING_PRODUCED_ID', 'E_INVALID_PRODUCED', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
-      'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
+      'E_NO_STATS', 'W_LOCALE_NOT_ACTIVE', 'W_STALE_EXTRACTOR'
     ]) {
       assert.ok(!codes.includes(bad), `${bad} fired on a well-formed index: ${codes.join(', ')}`)
     }
@@ -688,7 +716,7 @@ test('a hand-built kb with no kbRoot skips every source-index check rather than 
   const codes = codesOf(report)
   for (const bad of [
     'E_DANGLING_PRODUCED_ID', 'E_INVALID_PRODUCED', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
-    'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
+    'E_NO_STATS', 'W_LOCALE_NOT_ACTIVE', 'W_STALE_EXTRACTOR'
   ]) {
     assert.ok(!codes.includes(bad), `${bad} fired despite no kbRoot: ${codes.join(', ')}`)
   }

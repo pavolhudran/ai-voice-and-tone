@@ -13,6 +13,6 @@ record is rich enough to recompute the whole voice fingerprint and to subtract
 any single source - so a colleague who clones this repository with an empty
 `sources/` folder still gets the correct baseline, not a false drift report.
 
-Run `/voice-and-tone:connect --inbox` after adding anything.
+Run `/voice-and-tone:connect --ingest` after adding anything.
 
 To commit these files anyway, delete the `sources/` line from `.gitignore`.

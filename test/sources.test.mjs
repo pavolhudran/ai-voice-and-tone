@@ -1,13 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { loadIndex } from '../scripts/lib/sourceindex.mjs'
 import { runCheck, runIngest, runAdd, runForget, filterVanished, runRefresh, main } from '../scripts/sources.mjs'
 
 const NOW = '2026-08-27T00:00:00.000Z'
+const SOURCES_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'sources.mjs')
 
 function project (files = {}) {
   const dir = makeTmpProject({})
@@ -176,6 +179,90 @@ test('add registers a local path outside the project and returns the new entry i
     assert.ok(loadConfig(kb).sources.some((e) => e.id === 's03'), 'persisted to config.yml')
   } finally {
     cleanup(outside)
+    cleanup(dir)
+  }
+})
+
+// --- F7: --add must not destroy the user's config.yml comments -----------
+//
+// saveConfig() round-trips values faithfully but was never designed to
+// preserve comments (yaml.mjs is a minimal subset with no comment-carrying
+// AST). runAdd used to call it directly, so the first-ever registration
+// silently deleted the Mailchimp attribution header, the `sources:`
+// explanation, and the comment R39 deliberately placed on the inbox's
+// `exclude: ["README.md"]` line so that escape hatch stays visible.
+
+test('add preserves every comment in a hand-authored config.yml, appending only the new entry', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      '# Attribution header - must survive.',
+      'kb_version: 0.1.0',
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '# Where brand material comes from - explanation, must survive.',
+      'sources:',
+      '  - id: s01',
+      '    kind: inbox',
+      '    path: "sources/"',
+      '    # Keeps this folder\'s own README out of the corpus - must survive.',
+      '    exclude:',
+      '      - "README.md"'
+    ].join('\n')
+  })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const ctx = { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW }
+    const { entry } = runAdd(ctx, { target: 'https://acme.com/style-guide', label: 'Style guide' })
+
+    const raw = readFileSync(path.join(kb, 'config.yml'), 'utf8')
+    assert.match(raw, /# Attribution header - must survive\./)
+    assert.match(raw, /# Where brand material comes from - explanation, must survive\./)
+    assert.match(raw, /# Keeps this folder's own README out of the corpus - must survive\./)
+
+    // Data intact too: the original entry and the new one both parse back.
+    const config = loadConfig(kb)
+    assert.equal(config.sources.length, 2)
+    assert.ok(config.sources.some((s) => s.id === 's01' && s.kind === 'inbox'))
+    assert.ok(config.sources.some((s) => s.id === entry.id && s.kind === 'url' && s.label === 'Style guide'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('add on a config with no sources: key at all writes the whole migrated register explicitly', () => {
+  // Before this fix, appending only the new entry here would have been a
+  // silent regression of its own: loadRegister only synthesises the
+  // implicit `project` entry from `scan:` while `sources` is EMPTY, so
+  // persisting just the new entry (leaving `sources` non-empty but missing
+  // the synthesised one) would make the project files vanish from the
+  // register on the very next read.
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      '# A config from before the register existed - must survive.',
+      'kb_version: 0.1.0',
+      'scan:',
+      '  include:',
+      '    - "content/**/*.md"',
+      '  exclude: []'
+    ].join('\n')
+  })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const ctx = { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW }
+    runAdd(ctx, { target: 'https://acme.com/style-guide', label: 'Style guide' })
+
+    const raw = readFileSync(path.join(kb, 'config.yml'), 'utf8')
+    assert.match(raw, /# A config from before the register existed - must survive\./)
+
+    const config = loadConfig(kb)
+    assert.equal(config.sources.length, 2, 'the implicit project entry became explicit, alongside the new one')
+    const project = config.sources.find((s) => s.kind === 'project')
+    assert.deepEqual(project.include, ['content/**/*.md'], 'the migrated entry carries the old scan.include verbatim')
+    assert.ok(config.sources.some((s) => s.kind === 'url'))
+  } finally {
     cleanup(dir)
   }
 })
@@ -523,6 +610,81 @@ test('an unchanged url source is left untouched except its analysed date, and ke
   }
 })
 
+// --- F4: the model-tier work list must not evaporate for FILE sources.
+// runRefresh already re-checks needsModelTier on its `unchanged` bucket
+// (immediately above); runIngest and runCheck never did the same for
+// `known` - a Canva-style scanned PDF was announced once, on the run that
+// first ingested it, and never again. That makes sourcing.md's documented
+// "do the first ten now, the rest later" workflow unimplementable past the
+// first batch.
+
+/** A syntactically valid, minimal PDF with no /Contents key at all - the
+ * "scanned page" shape pdf.mjs reports as no-text-layer, same fixture shape
+ * as test/ingest.test.mjs's own `minimalPdfWithNoTextLayer`. */
+function scannedPdf () {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>'
+  ]
+  let body = '%PDF-1.4\n'
+  const offsets = []
+  objects.forEach((obj, i) => {
+    offsets.push(body.length)
+    body += `${i + 1} 0 obj\n${obj}\nendobj\n`
+  })
+  const xref = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const off of offsets) body += `${String(off).padStart(10, '0')} 00000 n \n`
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`
+  body += `startxref\n${xref}\n%%EOF\n`
+  return Buffer.from(body, 'latin1')
+}
+
+test('runIngest re-surfaces an already-known, unchanged source that still needs the model tier', async () => {
+  const { dir, kb, ctx } = project({})
+  mkdirSync(path.join(kb, 'sources'), { recursive: true })
+  writeFileSync(path.join(kb, 'sources', 'scan.pdf'), scannedPdf())
+  try {
+    const first = await runIngest(ctx, {})
+    assert.equal(first.escalate.length, 1, 'announced on the run that first ingests it')
+    assert.equal(first.escalate[0].quality.note, 'no-text-layer')
+
+    // Nothing changed on disk: the second run only ever matches this file by
+    // hash (diffIndex's `known` bucket), which runIngest used to never
+    // re-check for escalation at all.
+    const second = await runIngest({ ...ctx, config: loadConfig(kb) }, {})
+    assert.equal(second.fresh.length, 0)
+    assert.equal(second.known.length, 1)
+    assert.equal(
+      second.escalate.length, 1,
+      'a known, unchanged source that needs the model tier must keep being reported, not vanish after the first run'
+    )
+    assert.equal(second.escalate[0].origin, 'sources/scan.pdf')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('runCheck (no --ingest) also surfaces an already-known source that still needs the model tier', async () => {
+  const { dir, kb, ctx } = project({})
+  mkdirSync(path.join(kb, 'sources'), { recursive: true })
+  writeFileSync(path.join(kb, 'sources', 'scan.pdf'), scannedPdf())
+  try {
+    await runIngest(ctx, {})
+
+    const check = runCheck({ ...ctx, config: loadConfig(kb) })
+    assert.equal(check.known.length, 1)
+    assert.equal(
+      check.escalate.length, 1,
+      'a plain --check must surface the same escalation --ingest would, without re-ingesting anything'
+    )
+    assert.equal(check.escalate[0].origin, 'sources/scan.pdf')
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('N refreshes of an unchanged retain:snapshot page commit exactly one snapshot file, never one per refresh', async () => {
   const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'snapshot' }])
   try {
@@ -690,6 +852,88 @@ test('--refresh --json reports unchanged with no reopened rules and no index mut
     assert.equal(after.sources[0].id, before.sources[0].id)
     assert.equal(after.sources[0].sha256, before.sources[0].sha256)
     assert.equal(after.sources[0].analysed, '2026-08-28')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- F8: --only is documented (connect.md) and wired (runIngest itself
+// accepts it) but main() never threaded it through for --ingest, so
+// `--ingest --only f001` used to parse, exit 0, and silently ingest
+// EVERYTHING - the same silent-scoping trap R42 closed for `--refresh <id>`,
+// reappearing one layer up. connect.md documents --only as scoping --refresh
+// alone, so the CLI now refuses the combination rather than accepting a flag
+// that does nothing for the mode it was given in.
+
+test('--ingest --only is refused: --only is documented to scope --refresh alone', () => {
+  const dir = makeTmpProject({})
+  try {
+    let status = 0
+    let stderr = ''
+    try {
+      execFileSync(process.execPath, [SOURCES_SCRIPT, '--root', dir, '--ingest', '--only', 'f001'], { encoding: 'utf8' })
+    } catch (error) {
+      status = error.status
+      stderr = error.stderr
+    }
+    assert.equal(status, 1, 'must not exit 0 while silently ignoring --only')
+    assert.match(stderr, /error: --only requires --refresh/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh --only is still accepted (only rejected without --refresh)', () => {
+  const dir = makeTmpProject({})
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [SOURCES_SCRIPT, '--root', dir, '--refresh', '--only', 's04', '--json'],
+      { encoding: 'utf8' }
+    )
+    assert.doesNotThrow(() => JSON.parse(out))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- F9: --label never reached the index for FILE sources. resolveEntry
+// (register.mjs) emitted no `label` on a resolved file, so ingest.mjs's
+// `label: file.label` was always undefined - a URL source kept its label
+// (fetchurl.mjs sets it directly from the register entry), but a local/
+// inbox/project file's label was silently dropped between registration and
+// the index.
+
+test('a local source registered with --label carries that label onto its index entry', async () => {
+  const outside = makeTmpProject({ 'guide.md': 'Our voice is plain and direct.\n' })
+  const { dir, kb, ctx } = project({})
+  try {
+    const { entry } = runAdd(ctx, { target: path.join(outside, 'guide.md'), label: 'Brand guide' })
+
+    const result = await runIngest({ ...ctx, config: loadConfig(kb) }, {})
+    const ingested = result.ingested.find((e) => e.from === entry.id)
+    assert.ok(ingested, 'the local file was ingested')
+    assert.equal(ingested.label, 'Brand guide', 'the register entry\'s label must reach the index entry')
+  } finally {
+    cleanup(outside)
+    cleanup(dir)
+  }
+})
+
+test('an inbox source with a --label on its register entry carries that label onto its index entry', async () => {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  mkdirSync(path.join(kb, 'sources'), { recursive: true })
+  writeFileSync(path.join(kb, 'sources', 'newsletter.txt'), 'We write plainly. We keep it short.\n')
+  saveConfig(kb, {
+    ...DEFAULT_CONFIG,
+    sources: [{ id: 's02', kind: 'inbox', path: 'sources/', label: 'Dropped-in files' }]
+  })
+  try {
+    const ctx = { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW }
+    const result = await runIngest(ctx, {})
+    assert.equal(result.ingested.length, 1)
+    assert.equal(result.ingested[0].label, 'Dropped-in files')
   } finally {
     cleanup(dir)
   }

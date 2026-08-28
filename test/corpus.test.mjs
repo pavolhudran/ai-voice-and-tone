@@ -224,3 +224,62 @@ test('an indexed source with a different origin from any live file is not affect
     cleanup(dir)
   }
 })
+
+// --- F2: registered material that has never been ingested must not vanish
+// without a trace. Before this fix, gatherAll's non-project loop recorded
+// only `entry.skipped` and then `continue`d past everything in
+// `entry.files`, so a file the register could see but nobody had ingested
+// yet was absent from `files`, `skipped`, AND `unreadable` alike - "scan: 0
+// files" and "no copy found; check scan.include", actively misdirecting a
+// first-time user whose sources/ folder was not empty.
+
+test('registered material nobody has ingested yet is surfaced as unindexed, not silently dropped', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const cfg = { ...DEFAULT_CONFIG, sources: [{ id: 's02', kind: 'inbox', path: 'sources/' }] }
+    const { files, unindexed } = gatherAll({ projectRoot: dir, kbRoot: kb, config: cfg, profileName: 'default' })
+
+    assert.deepEqual(files, [], 'an inbox file is never read live')
+    assert.deepEqual(unindexed.map((f) => f.rel), ['sources/newsletter.txt'])
+    assert.equal(unindexed[0].ext, '.txt')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('once a registered file is ingested, it no longer counts as unindexed', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const cfg = { ...DEFAULT_CONFIG, sources: [{ id: 's02', kind: 'inbox', path: 'sources/' }] }
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'a'.repeat(64), kind: 'file', from: 's02',
+        origin: 'sources/newsletter.txt', format: 'text', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['We keep it plain.'], headings: [], locale: 'en' }),
+        status: 'used', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const { unindexed } = gatherAll({ projectRoot: dir, kbRoot: kb, config: cfg, profileName: 'default' })
+    assert.deepEqual(unindexed, [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a project-entry container file never counts as unindexed - it is reported as skipped/container instead', () => {
+  const dir = makeTmpProject({ 'content/brand.pdf': 'not a real pdf, but the extension gates this' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const cfg = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const { unindexed, skipped } = gatherAll({ projectRoot: dir, kbRoot: kb, config: cfg, profileName: 'default' })
+
+    assert.deepEqual(unindexed, [], 'unindexed is scoped to non-project entries only')
+    assert.deepEqual(skipped.map((s) => s.reason), ['container'])
+  } finally {
+    cleanup(dir)
+  }
+})

@@ -133,14 +133,23 @@ export function byLocale (corpus) {
  * - so this function heals rather than trusts: the live project loop runs
  * FIRST and wins, and any index entry sharing its origin is dropped rather
  * than merged, unconditionally, regardless of how it got there.
+ *
+ * The return value's `unindexed` array is a third channel, beside `skipped`
+ * and `missing`: files a non-project register entry (inbox, local) can see on
+ * disk right now but that carry no index entry yet - registered, but never
+ * ingested. Before this existed, such a file simply disappeared from every
+ * count `scan`/`fingerprint` print, and the empty-corpus message told a
+ * reader to check `scan.include`, a key this path never even reads.
  */
 export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default', unreadable = [] }) {
   const register = loadRegister(config)
   const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
   const index = loadIndex(kbRoot)
+  const indexedOrigins = new Set((index.sources ?? []).map((s) => s.origin))
 
   const files = []
   const skipped = []
+  const unindexed = []
   const liveOrigins = new Set()
 
   for (const entry of resolved) {
@@ -149,7 +158,22 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
     // but it is still carried through rather than assumed, exactly as the
     // container branch below carries its own reason explicitly.
     for (const item of entry.skipped) skipped.push({ rel: item.origin, ext: item.ext, reason: item.reason })
-    if (entry.kind !== 'project') continue
+    if (entry.kind !== 'project') {
+      // A non-project entry (inbox, local, url) is never read live - only the
+      // index contributes its statistics. Before this loop, a file the
+      // register could see but nobody had ever ingested simply vanished:
+      // absent from `files`, from `skipped`, and from `unreadable` alike.
+      // `scan` then printed "0 files" and `fingerprint` printed "no copy
+      // found; check scan.include" - actively wrong advice, since the fix is
+      // to ingest, not to touch a key resolveRegister never even reads for
+      // this entry. Recording the file here (rather than silently dropping
+      // it) is what lets a caller say "N registered file(s) need
+      // /voice-and-tone:connect --ingest" instead.
+      for (const file of entry.files) {
+        if (!indexedOrigins.has(file.origin)) unindexed.push({ rel: file.origin, ext: path.extname(file.abs).toLowerCase() })
+      }
+      continue
+    }
 
     for (const file of entry.files) {
       // A container format (.pdf, .docx, ...) is a resolvable file to the
@@ -217,6 +241,7 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
   return {
     files,
     skipped,
+    unindexed,
     indexStats: statsByLocale({
       generated: index.generated,
       sources: (index.sources ?? []).filter((s) => !liveOrigins.has(s.origin))

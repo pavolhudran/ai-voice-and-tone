@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { ingestFile, ingestText, needsModelTier, cachePathFor, extractSource } from '../scripts/lib/ingest.mjs'
-import { readTextFile } from '../scripts/lib/fsx.mjs'
+import { ingestFile, ingestText, needsModelTier, extractSource } from '../scripts/lib/ingest.mjs'
 import { sha256File } from '../scripts/lib/hash.mjs'
 
 const NOW = '2026-08-27T00:00:00.000Z'
@@ -68,18 +67,21 @@ test('a text source produces a complete, measured index entry', async () => {
   }
 })
 
-test('extracted text is cached under the content hash, not the filename', async () => {
+// F6: the extract cache was write-only - ingest.mjs wrote every analysed
+// source's plaintext to <kb>/.cache/extracts/<sha>.txt, and nothing ever read
+// it back (ingestFile always re-extracts from the original bytes). That sat
+// badly against the central claim that brand material is analysed and
+// discarded: it silently retained a full plaintext copy of every document,
+// indefinitely, for no benefit. Removed rather than wired up - this is the
+// regression guard proving ingest never recreates it.
+test('ingest does not write an extract cache; the source text is not retained on disk', async () => {
   const dir = makeTmpProject({ 'a.txt': 'x' })
   const kb = path.join(dir, '.voice-and-tone')
   try {
     const file = fileIn(dir, 'a.txt', 'We write plainly.\n')
-    const entry = await ingestFile(file, { kbRoot: kb, now: NOW, id: 'f001', from: 's02' })
+    await ingestFile(file, { kbRoot: kb, now: NOW, id: 'f001', from: 's02' })
 
-    const cached = cachePathFor(kb, entry.sha256)
-    assert.ok(existsSync(cached), 'extract is cached')
-    assert.match(readTextFile(cached), /We write plainly\./)
-    assert.match(cached, new RegExp(`${entry.sha256}\\.txt$`))
-    assert.ok(cached.includes(path.join('.cache', 'extracts')), 'cache lives in the gitignored dir')
+    assert.equal(existsSync(path.join(kb, '.cache')), false, 'ingest must not create a .cache directory at all')
   } finally {
     cleanup(dir)
   }

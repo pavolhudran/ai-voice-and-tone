@@ -9,7 +9,7 @@ import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './
 
 export function buildFingerprint (projectRoot, config, { generated, source = 'measured', profileName = 'default', kbRoot = null }) {
   const root = kbRoot ?? kbRootFor(projectRoot)
-  const { files, estimatedLocales } = gatherAll({ projectRoot, kbRoot: root, config, profileName })
+  const { files, estimatedLocales, unindexed } = gatherAll({ projectRoot, kbRoot: root, config, profileName })
 
   const perLocale = new Map()
   for (const file of files) {
@@ -35,7 +35,12 @@ export function buildFingerprint (projectRoot, config, { generated, source = 'me
       fidelity: estimatedLocales.has(locale) ? 'estimated' : 'measured'
     }
   }
-  return { generated, source, byLocale: out, baseline: null }
+  // `unindexed` is not part of the persisted fingerprint - it is not a
+  // per-locale statistic, it is a diagnostic for main()'s human-readable
+  // summary below (and its --json counterpart), naming registered material
+  // that has never been ingested rather than letting an empty byLocale point
+  // a reader at scan.include, a key this function never reads.
+  return { generated, source, byLocale: out, baseline: null, unindexed: unindexed.length }
 }
 
 function main (argv) {
@@ -82,10 +87,13 @@ function main (argv) {
     fingerprint.baseline = { generated, byLocale: fingerprint.byLocale }
   }
 
-  writeTextFile(out, `${JSON.stringify(fingerprint, null, 2)}\n`)
+  // `unindexed` is a diagnostic for this function's own messages, never a
+  // per-locale statistic - it must not become part of the persisted artifact.
+  const { unindexed, ...toWrite } = fingerprint
+  writeTextFile(out, `${JSON.stringify(toWrite, null, 2)}\n`)
 
   if (values.json) {
-    writeOut(`${JSON.stringify({ source, locales: Object.keys(fingerprint.byLocale) })}\n`)
+    writeOut(`${JSON.stringify({ source, locales: Object.keys(fingerprint.byLocale), unindexed })}\n`)
     return
   }
   const lines = [`fingerprint: source=${source}`]
@@ -95,7 +103,19 @@ function main (argv) {
       `meanSentence=${fp.universal.meanSentenceLength} english=${fp.english ? 'yes' : 'n/a'}`
     )
   }
-  if (Object.keys(fingerprint.byLocale).length === 0) lines.push('fingerprint: no copy found; check scan.include')
+  if (Object.keys(fingerprint.byLocale).length === 0) {
+    // Before this fix, this line always named scan.include - a key gatherAll
+    // never reads. When the register resolves files the index has not seen
+    // yet, the empty corpus is not a misconfigured glob, it is unanalysed
+    // material sitting in sources/ (or a local/inbox entry) - name the real
+    // remedy instead of the wrong one.
+    lines.push(
+      unindexed > 0
+        ? `fingerprint: no copy found; ${unindexed} registered file(s) are not yet ingested - ` +
+          'run /voice-and-tone:connect --ingest'
+        : 'fingerprint: no copy found; check scan.include'
+    )
+  }
   if (fingerprint.baseline) lines.push(`fingerprint: baseline ${fingerprint.baseline.generated}`)
   lines.push(`fingerprint: wrote ${toPosix(path.relative(projectRoot, out))}`)
   writeOut(`${lines.join('\n')}\n`)
