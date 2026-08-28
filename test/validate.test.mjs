@@ -661,6 +661,60 @@ test('a source whose locale matches the active profile raises no finding', () =>
   }
 })
 
+test('a source whose locale is declared by a non-default profile raises no finding', () => {
+  // validate has no --profile flag, but `sources.mjs --profile cs --ingest`
+  // is supported. Checking only `default` warned on every entry ingested
+  // under a second profile, and told the user to re-ingest - which would
+  // rebuild the identical entry and burn the one repair available.
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  cs:',
+      '    name: "Acme CZ"',
+      '    primary_locale: cs',
+      '    locales: [cs]'
+    ].join('\n'),
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ locale: 'cs' })])
+  })
+  try {
+    const report = validateKb(kb)
+    assert.ok(!codesOf(report).includes('W_LOCALE_NOT_ACTIVE'), codesOf(report).join(', '))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a locale no declared profile mentions is still reported', () => {
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  cs:',
+      '    name: "Acme CZ"',
+      '    primary_locale: cs',
+      '    locales: [cs]'
+    ].join('\n'),
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ locale: 'de' })])
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'W_LOCALE_NOT_ACTIVE')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.match(finding.message, /"de"/)
+    assert.match(finding.message, /en, cs/, 'the warning names every declared locale, not just the default profile')
+    assert.equal(report.errors, 0)
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('an entry produced by an extractor version vendor/manifest.json no longer pins is a warning', () => {
   const { dir, kb } = kbFrom({
     'kb/config.yml': '\n',

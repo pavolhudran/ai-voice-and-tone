@@ -334,16 +334,27 @@ export function validateKb (kb = {}) {
     // permanently block `sync` with no way to satisfy it. A warning at least
     // surfaces the fossil instead of leaving it to silently poison a locale's
     // statistics forever.
-    const profile = activeProfile(kb.config)
-    const activeLocales = new Set(profile.locales?.length ? profile.locales : [profile.primary_locale ?? 'en'])
+    // Every declared profile, not just `default`. validate has no --profile
+    // flag, but `sources.mjs --profile <name> --ingest` is supported, so an
+    // entry may legitimately carry any locale ANY profile declares. Checking
+    // `default` alone warned on every source ingested under a second profile
+    // and then handed it a remedy - re-ingest - that reproduces the very same
+    // entry, burning the one repair available.
+    const declared = Object.values(kb.config.profiles ?? {})
+    const profiles = declared.length ? declared : [activeProfile(kb.config)]
+    const activeLocales = new Set()
+    for (const p of profiles) {
+      if (p.locales?.length) for (const loc of p.locales) activeLocales.add(loc)
+      else activeLocales.add(p.primary_locale ?? 'en')
+    }
     for (const source of sources) {
       if (source.locale === null || source.locale === undefined) continue
       if (activeLocales.has(source.locale)) continue
       addFile('warning', 'W_LOCALE_NOT_ACTIVE',
-        `source ${source.id} has locale "${source.locale}", which is not among the active profile's locales ` +
-        `(${[...activeLocales].join(', ') || 'none'}); its statistics may have been measured under the wrong ` +
-        'locale and cannot be recomputed since the source text is discarded - re-ingest under the right ' +
-        'locale if the original document is still available',
+        `source ${source.id} has locale "${source.locale}", which no profile declares ` +
+        `(declared: ${[...activeLocales].join(', ') || 'none'}); its statistics may have been measured under ` +
+        'the wrong locale and cannot be recomputed since the source text is discarded - add the locale to a ' +
+        'profile if it is genuine, or re-ingest under the right locale if the original document remains',
         indexFile, 0)
     }
 
