@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractStrings, extractHeadings, formatFor, isBinaryFormat, BINARY_EXTENSIONS } from '../scripts/lib/extract.mjs'
+import { extractStrings, extractHeadings, formatFor, isBinaryFormat, BINARY_EXTENSIONS, isUrlOrHandle } from '../scripts/lib/extract.mjs'
 import { OFFICE_FORMATS } from '../scripts/lib/office.mjs'
 import { stripControlChars } from '../scripts/lib/text.mjs'
 
@@ -56,6 +56,22 @@ test('json takes values not keys, and drops non-copy values', () => {
   const { format, strings } = extractStrings('/x/en.json', json)
   assert.equal(format, 'json')
   assert.deepEqual(strings.sort(), ['Cancel', 'Delete', 'Hi there', 'Save'])
+})
+
+test('isUrlOrHandle recognizes URLs, bracketed URLs, and @handles - Ruling R43', () => {
+  assert.equal(isUrlOrHandle('https://vivido.fit/cs/instructors'), true)
+  assert.equal(isUrlOrHandle('[https://app.anandita.cz/cs/serie/festival-joga-pro-dobrou-vec]'), true)
+  assert.equal(isUrlOrHandle('mailto:hi@example.com'), true)
+  assert.equal(isUrlOrHandle('@yoga.anna.augustinova'), true)
+  assert.equal(isUrlOrHandle('@yoga.anna.augustinova,'), true, 'trailing sentence punctuation does not shield a handle')
+  assert.equal(isUrlOrHandle('hello'), false)
+  assert.equal(isUrlOrHandle('email@example.com'), false, 'a bare address is not itself a link scheme or handle')
+})
+
+test('json drops an @handle value the same way it drops a URL', () => {
+  const json = JSON.stringify({ save: 'Save', handle: '@yoga.anna.augustinova', url: 'https://example.com' })
+  const { strings } = extractStrings('/x/en.json', json)
+  assert.deepEqual(strings, ['Save'])
 })
 
 test('yaml takes values, and falls back to a line scan on unsupported syntax', () => {

@@ -97,8 +97,8 @@ function entryFrom ({
   // answers. A real field lets it branch on a value instead of parsing
   // prose.
   const quality = strings.length === 0
-    ? { ...scoreExtraction('', { locale, glyphRecall }), reasons: [...reasons, `empty: ${note}`], note }
-    : { ...scoreExtraction(text, { locale, glyphRecall }), note }
+    ? { ...scoreExtraction('', { locale, glyphRecall, format, tier }), reasons: [...reasons, `empty: ${note}`], note }
+    : { ...scoreExtraction(text, { locale, glyphRecall, format, tier }), note }
 
   if (quality.passed) writeTextFile(cachePathFor(kbRoot, sha256), `${text}\n`)
 

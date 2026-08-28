@@ -1,3 +1,5 @@
+import { isUrlOrHandle } from './extract.mjs'
+
 /**
  * Does this extraction deserve to be trusted?
  *
@@ -33,6 +35,30 @@
  * omits the field for the same reason - it cannot measure it either. `null`
  * skips this check entirely (see below), so the 0.5 threshold is dormant
  * until some extractor can supply a figure that actually varies.
+ *
+ * Ruling R43 (a real 72-file brand corpus, 8 of 9 rejections false positives):
+ *
+ * 1. A URL or @handle is not prose in any format - a link is not a merged
+ *    or split word just because it is long or has no spaces. Both are
+ *    stripped from the token set before anything is scored, using the same
+ *    isUrlOrHandle() judgement extract.mjs already applies when deciding
+ *    what counts as copy, so the plugin does not carry two divergent
+ *    opinions of "this isn't a word". If stripping them leaves too few
+ *    tokens to compute a share that means anything (see MIN_SHAPE_TOKENS
+ *    below), the merge/split signals are not scored rather than scored on
+ *    noise.
+ *
+ * 2. longTokenShare and singleShare answer "did extraction lose fidelity",
+ *    which has no meaning for a format nothing extracted. A .txt/.md/.json/
+ *    .yaml/.po/.csv/.tsv/subtitle file IS what a person wrote - scoring it
+ *    read the words back unchanged - so these two signals do not apply to
+ *    it (see AUTHORED_FORMATS / appliesShapeGate below). .pdf, the office
+ *    formats, .html and .rtf all recover running text from something else
+ *    (a text layer, a container, markup, control words) and stay gated, as
+ *    does any model-tier transcription regardless of the original format -
+ *    a model reconstructing unreadable text is itself a recovery step.
+ *    replShare and glyphRecall are unaffected: a wrong-encoding decode can
+ *    corrupt a plain-text file too.
  */
 
 export const QUALITY_THRESHOLDS = Object.freeze({
@@ -91,6 +117,46 @@ export const LONG_TOKEN_LENGTHS = Object.freeze({
   it: 20
 })
 
+/**
+ * Formats where the scored text IS the source, not a recovery of it - see
+ * Ruling R43's change 2 in the header comment above. `format` here is the
+ * same string extract.mjs's formatFor()/COPY_EXTENSIONS produce (`'text'`,
+ * `'markdown'`, ...), which is what ingest.mjs already carries alongside
+ * every extraction.
+ *
+ * `.html` and `.rtf` are deliberately absent: both recover running text out
+ * of markup (tags, RTF control words), the same kind of lossy step pdf.mjs
+ * and office.mjs perform, so a merge/split failure there can still mean the
+ * recovery mangled word boundaries.
+ */
+export const AUTHORED_FORMATS = new Set([
+  'text', 'markdown', 'json', 'yaml', 'po', 'csv', 'tsv', 'subtitles'
+])
+
+/**
+ * Whether longTokenShare/singleShare may judge this text at all. A
+ * model-tier transcription is always a recovery regardless of its original
+ * format - a model reconstructing text it could not read directly can lose
+ * or merge word boundaries exactly as a vendored parser can. An unspecified
+ * format defaults to "gate applies", the same conservative bias
+ * SINGLE_LETTER_WORDS uses above: an absent judgement produces a false
+ * escalation at worst, never a false pass.
+ */
+export function appliesShapeGate (format, tier) {
+  if (tier === 'model') return true
+  if (format == null) return true
+  return !AUTHORED_FORMATS.has(format)
+}
+
+/**
+ * Below this many prose tokens, a computed share is noise, not evidence -
+ * the R43 corpus example was a longTokenShare of 4/9 whose numerator was
+ * entirely URLs. 10 is not a new calibration: it is the smallest sample the
+ * existing suite already relies on for a real verdict (the ten-token
+ * "a b c d e f g h i j" case below), so nothing sound is newly let through.
+ */
+export const MIN_SHAPE_TOKENS = 10
+
 const VOWELS = /[aeiouyáéíóúůýěäöüåøæàèìòùâêîôû]/i
 
 const round = (value, places) => Number(value.toFixed(places))
@@ -98,11 +164,12 @@ const round = (value, places) => Number(value.toFixed(places))
 function tokenize (text) {
   return String(text)
     .split(/\s+/)
+    .filter((raw) => raw.length > 0 && !isUrlOrHandle(raw))
     .map((token) => token.replace(/^\p{P}+|\p{P}+$/gu, ''))
     .filter((token) => token.length > 0 && /\p{L}/u.test(token))
 }
 
-export function scoreExtraction (text, { locale = 'en', glyphRecall = null } = {}) {
+export function scoreExtraction (text, { locale = 'en', glyphRecall = null, format = null, tier = 'script' } = {}) {
   const source = String(text ?? '')
   const tokens = tokenize(source)
   const n = tokens.length
@@ -137,11 +204,18 @@ export function scoreExtraction (text, { locale = 'en', glyphRecall = null } = {
     glyphRecall: base.glyphRecall
   }
 
+  // longTokenShare/singleShare judge whether an extraction step lost
+  // fidelity. That question has no answer for authored-format text (see
+  // AUTHORED_FORMATS above) and no reliable answer over a handful of
+  // tokens (see MIN_SHAPE_TOKENS) - either way the two signals are still
+  // reported below, just not held against the source.
+  const shapeGateApplies = appliesShapeGate(format, tier) && n >= MIN_SHAPE_TOKENS
+
   const reasons = []
-  if (scored.longTokenShare > QUALITY_THRESHOLDS.longTokenShare) {
+  if (shapeGateApplies && scored.longTokenShare > QUALITY_THRESHOLDS.longTokenShare) {
     reasons.push(`longTokenShare ${scored.longTokenShare} exceeds ${QUALITY_THRESHOLDS.longTokenShare} at length ${longTokenLength} (words look merged)`)
   }
-  if (scored.singleShare > QUALITY_THRESHOLDS.singleShare) {
+  if (shapeGateApplies && scored.singleShare > QUALITY_THRESHOLDS.singleShare) {
     reasons.push(`singleShare ${scored.singleShare} exceeds ${QUALITY_THRESHOLDS.singleShare} (words look split)`)
   }
   if (scored.replShare > QUALITY_THRESHOLDS.replShare) {

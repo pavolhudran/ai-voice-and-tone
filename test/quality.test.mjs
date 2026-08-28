@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scoreExtraction, QUALITY_THRESHOLDS } from '../scripts/lib/quality.mjs'
+import { scoreExtraction, QUALITY_THRESHOLDS, appliesShapeGate, AUTHORED_FORMATS, MIN_SHAPE_TOKENS } from '../scripts/lib/quality.mjs'
 
 // The two real failure shapes, taken verbatim from the spec's measurements.
 const SPLIT = 'I V A Š TÍH LÁ ADMIN IS TRATIV NÍ PRACOVNIC E 2 6-4 5 L ET DEMOGRAFIC KÉ ÚDAJE'
@@ -109,6 +109,100 @@ test('empty text fails rather than passing vacuously', () => {
   assert.equal(q.passed, false)
   assert.deepEqual(q.reasons, ['empty: no tokens recovered'])
   assert.equal(q.tokens, 0)
+})
+
+// Ruling R43 - the real 72-file brand corpus rejected 9 files, 8 of them
+// wrongly. The shapes below are taken from that run: a line of bare URLs,
+// a bracket-wrapped URL, and an @handle sitting inside ordinary prose.
+
+test('a line of bare URLs does not trip longTokenShare in a format the gate applies to', () => {
+  // Without exclusion this is 4 of 19 tokens over 20 chars (0.21, far past
+  // 0.015) - exactly the landing-pages.txt/newsletter shape from the real
+  // run. 'pdf' is used so the shape gate itself is active; only the URL
+  // exclusion is under test here.
+  const prose = 'Our team helps people feel calm and focused every single day at work and home'
+  const urls = 'https://vivido.fit/cs/instructors https://vivido.fit/cs/pribehy ' +
+    'https://app.anandita.cz/cs/serie/festival-joga-pro-dobrou-vec @yoga.anna.augustinova'
+  const q = scoreExtraction(`${prose} ${urls}`, { locale: 'en', format: 'pdf' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+  assert.equal(q.tokens, 15, 'the 4 URL/handle tokens are excluded from the token set, not merely under threshold')
+  assert.equal(q.longTokenShare, 0)
+})
+
+test('a bracket-wrapped URL is excluded the same way a bare one is', () => {
+  const prose = 'Sign up for the festival of yoga and enjoy workshops all weekend long with friends'
+  const bracketed = '[https://app.anandita.cz/cs/serie/festival-joga-pro-dobrou-vec]'
+  const q = scoreExtraction(`${prose} ${bracketed}`, { locale: 'en', format: 'pdf' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+  assert.equal(q.tokens, 15, 'the brackets do not shield the URL from exclusion')
+  assert.equal(q.longTokenShare, 0)
+})
+
+test('an @handle mixed into ordinary prose does not count as a word at all', () => {
+  const text = 'Follow updates at https://vivido.fit/cs/instructors or find us on Instagram ' +
+    '@yoga.anna.augustinova for daily tips and new class times'
+  const q = scoreExtraction(text, { locale: 'en', format: 'pdf' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+  assert.ok(!q.reasons.some((r) => r.startsWith('longTokenShare')))
+})
+
+test('too few prose tokens survive URL removal to compute a meaningful share, so the shape signals are not judged', () => {
+  // 7 raw tokens, 3 of them URLs; "z" is a genuine single-letter token no
+  // locale allows, so singleShare over the 4 remaining prose tokens would
+  // be 0.25 (over the 0.10 threshold) if judged. It must not be: 4 tokens
+  // is exactly the "share computed over almost nothing" case the ruling
+  // calls out, and MIN_SHAPE_TOKENS keeps a real result from being decided
+  // by a handful of words.
+  const text = 'Buy z today now https://a.example.com/x https://b.example.com/y https://c.example.com/z'
+  const q = scoreExtraction(text, { locale: 'en', format: 'pdf' })
+  assert.equal(q.tokens, 4)
+  assert.ok(q.tokens < MIN_SHAPE_TOKENS)
+  assert.equal(q.singleShare, 0.25, 'the value is still measured and reported')
+  assert.equal(q.passed, true, q.reasons.join('; '))
+})
+
+test('genuinely merged words still fail the gate for a format the gate applies to (pdf)', () => {
+  const q = scoreExtraction(MERGED, { locale: 'en', format: 'pdf' })
+  assert.equal(q.passed, false)
+  assert.ok(q.reasons.some((r) => r.startsWith('longTokenShare')))
+})
+
+test('the same merged text does not fail for an authored format - nothing extracted it, so nothing can have mangled it', () => {
+  const q = scoreExtraction(MERGED, { locale: 'en', format: 'text' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+  assert.ok(q.longTokenShare > 0, 'the signal is still measured and reported, just not gated on')
+})
+
+test('genuinely split words still fail the gate for a format the gate applies to (pdf)', () => {
+  const q = scoreExtraction(SPLIT, { locale: 'cs', format: 'pdf' })
+  assert.equal(q.passed, false)
+  assert.ok(q.reasons.some((r) => r.startsWith('singleShare')))
+})
+
+test('the same split text does not fail for an authored format', () => {
+  const q = scoreExtraction(SPLIT, { locale: 'cs', format: 'text' })
+  assert.equal(q.passed, true, q.reasons.join('; '))
+  assert.ok(q.singleShare > 0, 'the signal is still measured and reported, just not gated on')
+})
+
+test('a model-tier transcription is gated even when its declared format looks authored', () => {
+  // A model transcription is a recovery of what someone wrote, whatever the
+  // original container was - it can lose or merge word boundaries exactly
+  // as a vendored parser can.
+  const q = scoreExtraction(MERGED, { locale: 'en', format: 'text', tier: 'model' })
+  assert.equal(q.passed, false)
+  assert.ok(q.reasons.some((r) => r.startsWith('longTokenShare')))
+})
+
+test('appliesShapeGate: authored formats are exempt, markup/containers are not, model tier always applies', () => {
+  for (const format of AUTHORED_FORMATS) {
+    assert.equal(appliesShapeGate(format, 'script'), false, format)
+  }
+  for (const format of ['html', 'rtf', 'pdf', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods']) {
+    assert.equal(appliesShapeGate(format, 'script'), true, format)
+  }
+  assert.equal(appliesShapeGate('text', 'model'), true)
+  assert.equal(appliesShapeGate(null, 'script'), true, 'an unspecified format is conservative: gate applies')
 })
 
 test('every returned figure is a finite number or null, never NaN', () => {

@@ -51,13 +51,36 @@ export function formatFor (absPath) {
   return COPY_EXTENSIONS[ext] || BINARY_EXTENSIONS[ext] || null
 }
 
-// A value that carries no brand voice: URLs, tokens, colors, bare numbers,
+/**
+ * A token shaped like a URL, a link scheme (mailto:/tel:/data:), or an
+ * @handle. None of these carry brand voice in any file format - a URL is
+ * not prose whether a script parser mis-extracted it from a PDF or a person
+ * typed it into a newsletter by hand. Counting one as a "word" would skew
+ * every length- and shape-based signal that reads it.
+ *
+ * A leading bracket/paren and trailing sentence punctuation are trimmed
+ * before the shape test, but nothing else is - an @handle's own leading `@`
+ * must survive, unlike generic punctuation stripping (which treats `@` as
+ * punctuation and would eat it). That lets a caller run this directly on a
+ * raw whitespace-split token, bracketed URL and all, ahead of any other
+ * normalisation. Shared by isCopy() below and quality.mjs's tokenizer so
+ * the plugin has exactly one notion of "this is a link, not a word" -
+ * Ruling R43.
+ */
+export function isUrlOrHandle (value) {
+  const text = String(value).trim().replace(/^[([{<]+|[)\]}>.,;:!?]+$/g, '')
+  if (/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(text)) return true
+  if (/^@[\w.-]+$/.test(text)) return true
+  return false
+}
+
+// A value that carries no brand voice: URLs, handles, colors, bare numbers,
 // anything without a letter. Counting these would skew every metric.
 function isCopy (value) {
   const text = String(value).trim()
   if (text.length === 0) return false
   if (!/\p{L}/u.test(text)) return false
-  if (/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(text)) return false
+  if (isUrlOrHandle(text)) return false
   if (/^#[0-9a-f]{3,8}$/i.test(text)) return false
   if (/^[0-9a-f]{6}$|^[0-9a-f]{8}$/i.test(text) && /\d/.test(text)) return false
   if (/^[/.]{0,2}\//.test(text)) return false

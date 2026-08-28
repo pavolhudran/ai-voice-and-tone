@@ -127,12 +127,21 @@ test('a scanned PDF with no text layer is skipped, but still needs the model tie
 
 // ingestFile is async (extractOffice/extractPdf are promise-based, so the
 // whole extraction path is), unlike the brief's sketch of this test.
+//
+// Ruling R43: the shape gate (longTokenShare/singleShare) no longer applies
+// to authored plain text - a .txt file with split-looking words is exactly
+// what someone typed, not a corrupted extraction, so a .txt fixture can no
+// longer demonstrate a gate failure here. .html is still gated (markup
+// recovers running text, same as a PDF or office container), so it stands
+// in for "an extraction step that can genuinely lose word boundaries".
 test('a gate failure marks the entry for the model tier', async () => {
-  const dir = makeTmpProject({ 'split.txt': 'x' })
+  const dir = makeTmpProject({})
   const kb = path.join(dir, '.voice-and-tone')
   try {
-    const file = fileIn(dir, 'split.txt', 'I V A Š TÍH LÁ ADMIN IS TRATIV NÍ PRACOVNIC E L ET\n')
-    const entry = await ingestFile({ ...file, locale: 'cs' }, { kbRoot: kb, now: NOW, id: 'f001', from: 's02' })
+    const abs = path.join(dir, 'split.html')
+    writeFileSync(abs, '<p>I V A Š TÍH LÁ ADMIN IS TRATIV NÍ PRACOVNIC E L ET</p>\n')
+    const file = { abs, origin: 'split.html', format: 'html', locale: 'cs' }
+    const entry = await ingestFile(file, { kbRoot: kb, now: NOW, id: 'f001', from: 's02' })
 
     assert.equal(entry.quality.passed, false)
     assert.equal(needsModelTier(entry), true)
