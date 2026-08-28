@@ -664,7 +664,7 @@ test('a well-formed source index produces none of the six new findings', () => {
     const report = validateKb(kb)
     const codes = codesOf(report)
     for (const bad of [
-      'E_DANGLING_PRODUCED_ID', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
+      'E_DANGLING_PRODUCED_ID', 'E_INVALID_PRODUCED', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
       'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
     ]) {
       assert.ok(!codes.includes(bad), `${bad} fired on a well-formed index: ${codes.join(', ')}`)
@@ -687,9 +687,98 @@ test('a hand-built kb with no kbRoot skips every source-index check rather than 
   })
   const codes = codesOf(report)
   for (const bad of [
-    'E_DANGLING_PRODUCED_ID', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
+    'E_DANGLING_PRODUCED_ID', 'E_INVALID_PRODUCED', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
     'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
   ]) {
     assert.ok(!codes.includes(bad), `${bad} fired despite no kbRoot: ${codes.join(', ')}`)
+  }
+})
+
+// --- Task 14 fix round 2: a malformed `produced` must never throw ---------
+//
+// `for (const x of source.produced ?? [])` only substitutes on null/undefined
+// - a real on-disk sources.json with `produced: 5` or `produced: {}` threw
+// (not iterable), and `produced: "V1"` iterated character-by-character and
+// reported phantom dangling ids for "V" and "1". sources.json is committed
+// and hand-editable, so a scalar written where an array belongs must become
+// a finding, never a crash of every /voice-and-tone:sync.
+
+function entryWithProduced (shape) {
+  const entry = sourceEntry()
+  if (shape === 'absent') {
+    delete entry.produced
+  } else {
+    entry.produced = shape
+  }
+  return entry
+}
+
+test('validateKb never throws, for every shape a committed `produced` field might take', () => {
+  const shapes = ['absent', null, ['V1'], 5, 'V1', {}]
+  for (const shape of shapes) {
+    const { dir, kb } = kbFrom({
+      'kb/config.yml': '\n',
+      'kb/evidence/sources.json': sourcesJson([entryWithProduced(shape)])
+    })
+    try {
+      let report
+      assert.doesNotThrow(() => { report = validateKb(kb) }, `produced: ${JSON.stringify(shape)} must not throw`)
+      assert.ok(Array.isArray(report.findings), `produced: ${JSON.stringify(shape)} must still return a report`)
+    } finally {
+      cleanup(dir)
+    }
+  }
+})
+
+test('produced as a number, string, or object is its own finding, not silently emptied', () => {
+  for (const shape of [5, 'V1', {}]) {
+    const { dir, kb } = kbFrom({
+      'kb/config.yml': '\n',
+      'kb/evidence/sources.json': sourcesJson([entryWithProduced(shape)])
+    })
+    try {
+      const report = validateKb(kb)
+      const codes = codesOf(report)
+      assert.ok(codes.includes('E_INVALID_PRODUCED'),
+        `produced: ${JSON.stringify(shape)} should report E_INVALID_PRODUCED (${codes.join(', ')})`)
+      assert.equal(report.errors, 1,
+        `produced: ${JSON.stringify(shape)} should report exactly one error, not a cascade (${codes.join(', ')})`)
+    } finally {
+      cleanup(dir)
+    }
+  }
+})
+
+test('a string `produced` reports the shape defect, never phantom per-character dangling ids', () => {
+  // The failure this fix closes: "V1" is iterable, so the old code walked
+  // it character by character and reported "V" and "1" as dangling rule ids
+  // - two confident, wrong findings about ids that were never really there.
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': '\n',
+    'kb/evidence/sources.json': sourcesJson([entryWithProduced('V1')])
+  })
+  try {
+    const report = validateKb(kb)
+    assert.deepEqual(codesOf(report), ['E_INVALID_PRODUCED'])
+    assert.ok(!report.findings.some((f) => /\bV\b/.test(f.message) || /\b1\b/.test(f.message)),
+      `must not mention phantom single-character ids: ${JSON.stringify(report.findings)}`)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('produced as null or absent is treated as empty, with no finding at all', () => {
+  for (const shape of [null, 'absent']) {
+    const { dir, kb } = kbFrom({
+      'kb/config.yml': '\n',
+      'kb/evidence/sources.json': sourcesJson([entryWithProduced(shape)])
+    })
+    try {
+      const codes = codesOf(validateKb(kb))
+      assert.ok(!codes.includes('E_INVALID_PRODUCED'), `produced: ${shape} must not be flagged as malformed`)
+      assert.ok(!codes.includes('E_DANGLING_PRODUCED_ID'), `produced: ${shape} must not be treated as dangling ids`)
+    } finally {
+      cleanup(dir)
+    }
   }
 })

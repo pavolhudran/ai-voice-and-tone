@@ -219,16 +219,46 @@ export function validateKb (kb = {}) {
     // 'tone.md' or 'evidence/ledger.md' - never an absolute path.
     const indexFile = path.relative(kbRoot, indexPathFor(kbRoot))
 
+    // A source's `produced` must be an array of rule ids. Absent (undefined)
+    // or explicitly `null` is not corruption - a source that has not (yet)
+    // produced any rule is completely ordinary, and `producedOf` below
+    // already treats either as an empty list with no finding. Anything else - a
+    // bare number, string, or object, all valid JSON in this committed,
+    // hand-editable file - IS corruption, and gets its own finding rather
+    // than being silently folded into "produced nothing": a source that
+    // really did produce rules would then look like it produced none,
+    // which is precisely the retraction failure check 1 exists to catch.
+    // `producedOf` still degrades a malformed shape to `[]` everywhere
+    // else below, so the checks that iterate `produced` stay throw-free
+    // AND report exactly this one clear finding - never a cascade of wrong
+    // ones (a bare string would otherwise iterate character-by-character
+    // and report each character as a phantom dangling rule id).
+    const producedOf = (source) => (Array.isArray(source.produced) ? source.produced : [])
+    for (const source of sources) {
+      if (source.produced !== undefined && source.produced !== null && !Array.isArray(source.produced)) {
+        addFile('error', 'E_INVALID_PRODUCED',
+          `source ${source.id} has a non-array produced (${typeof source.produced}); it is treated as empty ` +
+          'here, which could hide rules it really did produce - fix the shape in evidence/sources.json',
+          indexFile, 0)
+      }
+    }
+
     const producedRuleIds = new Set()
     for (const source of sources) {
-      for (const producedId of source.produced ?? []) producedRuleIds.add(producedId)
+      for (const producedId of producedOf(source)) producedRuleIds.add(producedId)
     }
 
     // Check 1: every id a source claims to have produced must be a rule
     // that actually exists. A dangling id is what leaves --forget unable to
-    // name the right rules to reopen.
+    // name the right rules to reopen. This is an ERROR where the ledger's
+    // own W_ORPHAN_EVIDENCE (same defect shape: a claimed-produced id that
+    // does not exist) is only a WARNING, because the two files are not
+    // equally trustworthy: the ledger is human-authored prose, where a
+    // typo is the likely story, but sources.json is machine-written by the
+    // ingest pipeline (sources.mjs), so a dangling id there is not a typo -
+    // it is the index itself lying about what it produced.
     for (const source of sources) {
-      for (const producedId of source.produced ?? []) {
+      for (const producedId of producedOf(source)) {
         if (!ruleIds.has(producedId)) {
           addFile('error', 'E_DANGLING_PRODUCED_ID',
             `source ${source.id} claims to have produced ${producedId}, which is not a rule in this knowledge base`,
@@ -309,8 +339,14 @@ export function validateKb (kb = {}) {
     // last ingested through it. Nothing about the entry is broken - its
     // statistics are just now measured by a version the manifest no longer
     // pins, so they can drift under the baseline with nothing saying why
-    // unless the source is re-ingested. That is a prompt to revisit, not a
-    // defect, so it is a warning.
+    // unless the source is re-ingested. That alone would already argue for
+    // a warning, but there is a harder reason it cannot be an error: source
+    // text is deliberately never retained (sourceindex.mjs's header comment
+    // - identity is the hash, not a kept copy), so the original document
+    // for a stale entry may simply be gone. An error here would then
+    // permanently block every `sync` for that knowledge base, with no way
+    // to satisfy it - re-ingesting is impossible and the entry cannot be
+    // un-flagged. Warning is the only severity that does not risk that trap.
     const manifest = loadVendorManifest()
     for (const stale of staleByExtractor(index, manifest)) {
       const pinned = manifest.libraries?.[stale.extractor.name]?.version
