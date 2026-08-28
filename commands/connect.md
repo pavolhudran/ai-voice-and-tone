@@ -1,6 +1,6 @@
 ---
 description: Register brand material, see what has already been analysed, and ingest what is new
-argument-hint: "[<path|url>] [--inbox] [--refresh] [--forget <id>]"
+argument-hint: "[<path|url>] [--ingest] [--refresh [<id>]] [--forget <id>]"
 ---
 
 # /voice-and-tone:connect
@@ -15,11 +15,22 @@ exactly what has been analysed.
 ```
 /voice-and-tone:connect                  what is new, changed, or missing
 /voice-and-tone:connect <path>           register a file or folder, anywhere on disk
-/voice-and-tone:connect <url>            register and fetch a page
-/voice-and-tone:connect --inbox          analyse everything newly dropped in
-/voice-and-tone:connect --refresh [<id>] re-fetch URLs, re-extract changed files
+/voice-and-tone:connect <url>            register a page - fetching it is a separate step
+/voice-and-tone:connect --ingest         analyse everything new or changed, including
+                                          anything just dropped into the inbox
+/voice-and-tone:connect --refresh [<id>] re-fetch registered URLs and record what changed
 /voice-and-tone:connect --forget <id>    retract a source and reopen its rules
 ```
+
+Two different mechanisms re-read something that changed, and each covers only
+its own kind of source: `--refresh` re-fetches `url` sources over the network
+and is the only way anything here ever touches it; `--ingest` re-extracts a
+`local` or inbox file whose bytes changed since it was last analysed (its
+"stale" handling), and never fetches a URL. Neither one substitutes for the
+other.
+
+Registering a URL with a bare `<url>` only adds it to the register - no
+network call happens until you run `--refresh`.
 
 ## What it reads
 

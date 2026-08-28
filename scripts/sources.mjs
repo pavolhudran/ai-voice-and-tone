@@ -403,7 +403,8 @@ async function main (argv, { fetchImpl } = {}) {
     add: { type: 'string' },
     label: { type: 'string' },
     forget: { type: 'string' },
-    refresh: { type: 'boolean' }
+    refresh: { type: 'boolean' },
+    only: { type: 'string' }
   })
   if (values.help) {
     printHelp('scripts/sources.mjs', [
@@ -415,6 +416,7 @@ async function main (argv, { fetchImpl } = {}) {
       '  --label <text>       a human label for --add',
       '  --forget <id>        retract a source and name the rules to reopen',
       '  --refresh            fetch every registered url source and record what changed',
+      '  --only <id|url>      scope --refresh to one registered url source',
       '  --root <dir>         project root (default: cwd)',
       '  --kb <dir>           knowledge base dir',
       '  --profile <name>     config profile (default: default)',
@@ -429,7 +431,13 @@ async function main (argv, { fetchImpl } = {}) {
   if (values.add) {
     const { entry } = runAdd(ctx, { target: values.add, label: values.label ?? null })
     if (values.json) return writeOut(`${JSON.stringify({ added: entry.id, kind: entry.kind })}\n`)
-    return report([`sources: added ${entry.id} (${entry.kind})`, 'sources: run --ingest to analyse it'])
+    // --ingest never processes kind: 'url' (runRefresh does, and only
+    // runRefresh); naming the wrong next step here would send a url straight
+    // back to the same doc/CLI mismatch this fix round exists to close.
+    return report([
+      `sources: added ${entry.id} (${entry.kind})`,
+      entry.kind === 'url' ? 'sources: run --refresh to fetch it' : 'sources: run --ingest to analyse it'
+    ])
   }
 
   if (values.forget) {
@@ -444,7 +452,7 @@ async function main (argv, { fetchImpl } = {}) {
   }
 
   if (values.refresh) {
-    const { refreshed, unchanged, escalate, reopened, errors } = await runRefresh(ctx, {})
+    const { refreshed, unchanged, escalate, reopened, errors } = await runRefresh(ctx, { only: values.only ?? null })
     if (values.json) {
       return writeOut(`${JSON.stringify({
         refreshed: refreshed.length,

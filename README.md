@@ -113,7 +113,7 @@ with an empty `sources/` gets the same baseline, not a false drift report.
 Read deterministically, no dependencies: Markdown, plain text, JSON, YAML, PO,
 HTML, RTF, CSV/TSV, WebVTT/SubRip, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`,
 `.ods`, and PDFs with a text layer. Scanned PDFs, images, and JS-rendered pages
-are read by Claude instead and recorded `estimated` - they can support
+are read by the model instead and recorded `estimated` - they can support
 `assumed` rules but never `derived` ones. Legacy `.doc`, `.ppt`, and `.xls` are
 refused; re-save them as the modern format.
 

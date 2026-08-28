@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
 import { STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
@@ -315,7 +316,27 @@ test('connect is a real command naming the skill it invokes', () => {
   const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
   assert.match(body, /^---\ndescription:/m)
   assert.match(body, /voice-discovery/)
-  for (const flag of ['--inbox', '--refresh', '--forget']) assert.ok(body.includes(flag), flag)
+  // --inbox never existed as a real flag on sources.mjs; --ingest is what
+  // actually analyses anything newly dropped into the inbox.
+  assert.ok(!body.includes('--inbox'), 'connect.md must not document a flag sources.mjs does not have')
+  for (const flag of ['--ingest', '--refresh', '--forget']) assert.ok(body.includes(flag), flag)
+})
+
+test('every flag connect.md documents actually exists on sources.mjs --help', () => {
+  // Task 15 fix round 2: --inbox was documented and never implemented, and
+  // the only thing that would have caught it earlier is running the real
+  // CLI rather than trusting the doc. This runs it.
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  const documented = new Set(
+    [...body.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]).filter((f) => f !== '--')
+  )
+  const help = execFileSync(
+    process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--help'], { encoding: 'utf8' }
+  )
+  const real = new Set([...help.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))
+  for (const flag of documented) {
+    assert.ok(real.has(flag), `connect.md documents ${flag}, which sources.mjs --help does not list`)
+  }
 })
 
 test('init documents --add as implemented, pointing at the script that does it', () => {

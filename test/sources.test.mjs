@@ -192,6 +192,41 @@ test('add recognises a url and stores it as a url entry with retention off', () 
   }
 })
 
+async function runCli (args) {
+  let out = ''
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk) => { out += chunk; return true }
+  try {
+    await main(args)
+    return out
+  } finally {
+    process.stdout.write = originalWrite
+  }
+}
+
+test('--add on a url tells the user to run --refresh, not --ingest, which never touches url sources', async () => {
+  const { dir } = project({})
+  try {
+    const out = await runCli(['--root', dir, '--add', 'https://acme.com/about'])
+    assert.match(out, /run --refresh to fetch it/)
+    assert.ok(!out.includes('--ingest'), '--ingest is the wrong next step for a url entry')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--add on a local path still tells the user to run --ingest', async () => {
+  const outside = makeTmpProject({ 'guide.md': 'Our voice is plain.\n' })
+  const { dir } = project({})
+  try {
+    const out = await runCli(['--root', dir, '--add', path.join(outside, 'guide.md')])
+    assert.match(out, /run --ingest to analyse it/)
+  } finally {
+    cleanup(outside)
+    cleanup(dir)
+  }
+})
+
 test('forget removes an entry and names the rules that must be reopened', async () => {
   const { dir, kb, ctx } = project({ 'a.txt': 'We write plainly. We keep it short.\n' })
   try {
@@ -577,6 +612,42 @@ test('--refresh --json reports refreshed/unchanged/escalate/reopened counts', as
     assert.equal(summary.unchanged, 0)
     assert.deepEqual(summary.escalate, ['https://acme.com/spa'])
     assert.deepEqual(summary.reopened, [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh --only scopes to one registered url source, by id, and leaves the other untouched', async () => {
+  const { dir, kb } = urlProject([
+    { id: 's04', kind: 'url', url: 'https://acme.com/a', retain: 'none' },
+    { id: 's05', kind: 'url', url: 'https://acme.com/b', retain: 'none' }
+  ])
+  try {
+    const out = await runRefreshCli(dir, kb, ['--now', NOW, '--only', 's04', '--json'], fetchStub(HTML_PAGE))
+    const summary = JSON.parse(out)
+    assert.equal(summary.refreshed, 1, '--only must scope, not just filter the report')
+    assert.equal(summary.unchanged, 0)
+
+    const index = loadIndex(kb)
+    assert.equal(index.sources.length, 1, 'the unscoped url source was never even fetched, let alone indexed')
+    assert.equal(index.sources[0].origin, 'https://acme.com/a')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh --only also scopes by the url itself, not only by register id', async () => {
+  const { dir, kb } = urlProject([
+    { id: 's04', kind: 'url', url: 'https://acme.com/a', retain: 'none' },
+    { id: 's05', kind: 'url', url: 'https://acme.com/b', retain: 'none' }
+  ])
+  try {
+    const out = await runRefreshCli(
+      dir, kb, ['--now', NOW, '--only', 'https://acme.com/b', '--json'], fetchStub(HTML_PAGE)
+    )
+    const summary = JSON.parse(out)
+    assert.equal(summary.refreshed, 1)
+    assert.equal(loadIndex(kb).sources[0].origin, 'https://acme.com/b')
   } finally {
     cleanup(dir)
   }

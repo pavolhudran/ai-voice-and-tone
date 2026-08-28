@@ -51,10 +51,58 @@ For every source `--ingest` lists under "need the model tier":
    not summarise, paraphrase, or clean up its prose - a paraphrase is not the
    source, and a rule derived from your paraphrase is a rule derived from
    nothing.
-3. Write the transcription back with `ingestText` (`scripts/lib/ingest.mjs`),
-   passing `tier: 'model'`. This is the only path that ever sets that tier;
-   `--check` and `--ingest` never do it for you, by design (see "Escalation
-   itself is NOT performed here" in `ingest.mjs`).
+3. Persist it yourself. `ingestText` (`scripts/lib/ingest.mjs`) only *builds*
+   an entry - it writes nothing to disk. Nothing else does this for the model
+   tier either: `--check` and `--ingest` never call it (see "Escalation
+   itself is NOT performed here" in `ingest.mjs`), so a transcription that
+   stops at step 2 leaves `evidence/sources.json` completely unaware anything
+   was ever read. The full sequence, the same one `runIngest` performs for
+   the script tier, is four calls, in order:
+
+   ```js
+   import { readFileSync } from 'node:fs'
+   import { loadIndex, saveIndex, nextEntryId, upsertEntry } from '<plugin>/scripts/lib/sourceindex.mjs'
+   import { ingestText } from '<plugin>/scripts/lib/ingest.mjs'
+   import { sha256File } from '<plugin>/scripts/lib/hash.mjs'
+
+   const kbRoot = '<KB>'
+   const now = new Date().toISOString()
+   const abs = '/absolute/path/to/the/original/file'   // the file you just READ, not a transcript file
+
+   const index = loadIndex(kbRoot)
+   const entry = ingestText({
+     sha256: sha256File(abs),      // hash of the ORIGINAL bytes - see below, this is not optional
+     origin: 'sources/brand-deck.pdf', // exactly the origin --ingest printed for this source
+     format: 'pdf',                // the format --ingest printed, e.g. pdf, image, html
+     bytes: readFileSync(abs).length,
+     locale: 'en',                 // the locale this source was attributed under
+     label: null,
+     strings: ['Paragraph one of the transcription.', 'Paragraph two.', '...'],
+     headings: ['Any section headings, if the source has them']
+   }, { kbRoot, now, id: nextEntryId(index), from: '<register id, e.g. s02>', tier: 'model' })
+
+   upsertEntry(index, entry)
+   saveIndex(kbRoot, index, now)
+   ```
+
+   Write this as a one-off script and run it with `node "<absolute path>"`,
+   the same invocation convention every other script in this plugin uses.
+
+   **The `sha256` must hash the original file's bytes (`sha256File(abs)`),
+   never the transcription.** Source identity is content-hash-keyed
+   throughout this plugin (`sourceindex.mjs`'s own header comment: "Identity
+   is the sha256 of the bytes, never the path"), and `--check` computes that
+   same hash from the file on disk every time it runs. Hash the transcription
+   instead and the entry you just saved will never match what `--check` sees
+   next time - the source stays permanently "new," is ingested again, and a
+   second index entry with a different id and the same origin accumulates
+   for it on every future run.
+
+   A transcription with real content passed as `strings` (not a single bare
+   string - it must be an array) is what marks the entry `used` rather than
+   `skipped`; get the shape wrong and the entry silently drops out of the
+   fingerprint with no error raised anywhere, indistinguishable from having
+   done nothing at all.
 
 ## Estimated, and what that limits
 
