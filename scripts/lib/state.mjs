@@ -1,10 +1,12 @@
 import { existsSync, statSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { readTextFile } from './fsx.mjs'
 import { activeProfile } from './config.mjs'
 import { loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, cellId } from './kb.mjs'
-import { loadRegister } from './register.mjs'
+import { loadRegister, resolveRegister } from './register.mjs'
 import { loadIndex } from './sourceindex.mjs'
+import { sha256File } from './hash.mjs'
 import { validateKb } from '../validate.mjs'
 
 /**
@@ -272,7 +274,88 @@ export function driftOf (fingerprint, thresholdPct) {
   return { thresholdPct, byLocale }
 }
 
-export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now }) {
+/**
+ * Deciding whether a registered source is stale means hashing it, which on a
+ * corpus of decks and PDFs is real I/O. That is not worth paying on every
+ * glance, so read-only mode reports `freshness: 'unchecked'` and leaves
+ * `stale` and `fresh` null.
+ *
+ * Null, not zero: zero stale reads as "everything is current", a claim this
+ * mode has not earned, because it never hashed anything.
+ */
+export function sourcesOf (config, index, register, manifest, opts = {}) {
+  const { checkFreshness = false, projectRoot, kbRoot, profileName = 'default' } = opts
+  const indexed = index.sources ?? []
+
+  const entries = indexed.map((source) => ({
+    id: source.id,
+    kind: source.kind ?? null,
+    label: source.label ?? null,
+    origin: source.origin ?? null,
+    status: source.status ?? null,
+    fidelity: source.quality?.fidelity ?? source.fidelity ?? null,
+    analysed: source.analysed ?? null,
+    produced: Array.isArray(source.produced) ? source.produced : []
+  }))
+
+  const out = {
+    registered: register.length,
+    analysed: indexed.length,
+    missing: entries.filter((e) => e.status === 'missing').length,
+    unindexed: manifest?.unindexed?.count ?? 0,
+    freshness: 'unchecked',
+    stale: null,
+    fresh: null,
+    entries
+  }
+
+  if (!checkFreshness) return out
+
+  // Under --refresh only. resolveRegister walks the register, and hashing each
+  // resolved file against the index tells stale from current. No child process
+  // is spawned - conformance forbids it - the library functions are called
+  // directly.
+  try {
+    const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
+    const knownShas = new Set(indexed.map((s) => s.sha256).filter(Boolean))
+    const originToSha = new Map(indexed.filter((s) => s.sha256).map((s) => [s.origin, s.sha256]))
+    let stale = 0
+    let fresh = 0
+    for (const entry of resolved) {
+      if (entry.kind === 'project' || entry.kind === 'url') continue
+      for (const file of entry.files ?? []) {
+        if (!existsSync(file.abs)) continue
+        const sha = sha256File(file.abs)
+        if (knownShas.has(sha)) continue
+        if (originToSha.has(file.origin)) stale += 1
+        else fresh += 1
+      }
+    }
+    out.freshness = 'checked'
+    out.stale = stale
+    out.fresh = fresh
+  } catch {
+    // A vanished share or an unreadable file must not take down the dashboard;
+    // the honest report is that the check did not complete.
+    out.freshness = 'unchecked'
+  }
+  return out
+}
+
+/**
+ * The vendored library manifest, resolved relative to this module's own
+ * location the same way lib/office.mjs and lib/pdf.mjs resolve the bundles
+ * themselves - never from whatever --root/--kb a caller passed. It ships with
+ * the plugin and is never per-project.
+ */
+function loadVendorPins () {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const manifest = readJson(path.resolve(here, '..', '..', 'vendor', 'manifest.json'))
+  const libraries = manifest?.libraries ?? {}
+  return Object.entries(libraries).map(([name, meta]) => ({ name, version: meta?.version ?? null }))
+}
+
+export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now, checkFreshness = false }) {
   const profile = activeProfile(config, profileName)
   const kb = loadKb(kbRoot)
   const present = kb.present ?? {}
@@ -326,6 +409,22 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       conflicts: countConflicts(kbRoot),
       drafts: countDrafts(kbRoot)
     },
-    drift: driftOf(fingerprint, config.thresholds?.drift_pct ?? 25)
+    drift: driftOf(fingerprint, config.thresholds?.drift_pct ?? 25),
+    sources: sourcesOf(config, index, register, manifest, { checkFreshness, projectRoot, kbRoot, profileName }),
+    corpus: {
+      totals: manifest?.totals ?? null,
+      byLocale: manifest?.byLocale ?? {},
+      skipped: manifest?.skipped?.count ?? 0,
+      unreadable: manifest?.unreadable?.count ?? 0,
+      fidelity: Object.fromEntries(
+        Object.entries(fingerprint?.byLocale ?? {}).map(([locale, fp]) => [locale, fp.fidelity ?? null])
+      )
+    },
+    settings: {
+      thresholds: config.thresholds ?? {},
+      register: register.map((entry) => ({ id: entry.id, kind: entry.kind, label: entry.label ?? null })),
+      runtime: config.runtime ?? {},
+      vendor: loadVendorPins()
+    }
   }
 }

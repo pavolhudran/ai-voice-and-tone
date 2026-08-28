@@ -484,3 +484,103 @@ test('a non-English locale contributes no english-block metrics', () => {
   const englishKeys = DRIFT_METRICS.filter((m) => m.block === 'english').map((m) => m.key)
   for (const metric of metrics) assert.ok(!englishKeys.includes(metric.key), `${metric.key} is English-only`)
 })
+
+const CONFIG_WITH_INBOX = [
+  MINIMAL_CONFIG.trimEnd(),
+  '  - id: s02',
+  '    kind: inbox',
+  '    label: "Dropped-in files"',
+  '    path: "sources/"',
+  ''
+].join('\n')
+
+test('read-only mode leaves source freshness explicitly unchecked, not zero', () => {
+  // Zero stale reads as "everything is current", which is a claim this mode
+  // has not earned - it never hashed anything.
+  const state = stateOf({ '.voice-and-tone/config.yml': CONFIG_WITH_INBOX, '.voice-and-tone/voice.md': '# V\n' })
+  assert.equal(state.sources.freshness, 'unchecked')
+  assert.equal(state.sources.stale, null)
+  assert.equal(state.sources.fresh, null)
+})
+
+test('registered and analysed counts come from the register and the index respectively', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': CONFIG_WITH_INBOX,
+    '.voice-and-tone/voice.md': '# V\n',
+    '.voice-and-tone/evidence/sources.json': JSON.stringify({
+      generated: NOW,
+      sources: [{
+        id: 'e01',
+        kind: 'inbox',
+        origin: 'sources/guide.md',
+        status: 'used',
+        sha256: 'a'.repeat(64),
+        produced: ['L01']
+      }]
+    })
+  })
+  assert.equal(state.sources.registered, 2, 'one project entry plus one inbox entry')
+  assert.equal(state.sources.analysed, 1)
+  assert.equal(state.sources.entries.length, 1)
+  assert.equal(state.sources.entries[0].id, 'e01')
+})
+
+test('a missing index entry is counted as missing and never as a fault', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': CONFIG_WITH_INBOX,
+    '.voice-and-tone/voice.md': '# V\n',
+    '.voice-and-tone/evidence/sources.json': JSON.stringify({
+      generated: NOW,
+      sources: [{ id: 'e01', kind: 'local', origin: '/gone/deck.pdf', status: 'missing', sha256: 'b'.repeat(64) }]
+    })
+  })
+  assert.equal(state.sources.missing, 1)
+})
+
+test('corpus totals and unindexed come straight from the manifest', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# V\n',
+    '.voice-and-tone/evidence/manifest.json': JSON.stringify({
+      generated: NOW,
+      totals: { files: 12, strings: 300, words: 4200, sentences: 380 },
+      byLocale: { en: { files: 12, strings: 300, words: 4200 } },
+      files: [],
+      unreadable: { count: 0, paths: [] },
+      skipped: { count: 2, files: [] },
+      unindexed: { count: 3, files: [] }
+    })
+  })
+  assert.equal(state.corpus.totals.words, 4200)
+  assert.equal(state.corpus.skipped, 2)
+  assert.equal(state.sources.unindexed, 3)
+})
+
+test('an absent manifest yields null totals rather than fabricated zeroes', () => {
+  const state = stateOf({ '.voice-and-tone/config.yml': MINIMAL_CONFIG, '.voice-and-tone/voice.md': '# V\n' })
+  assert.equal(state.corpus.totals, null)
+})
+
+test('settings expose the thresholds and the register that actually drive behaviour', () => {
+  const state = stateOf({ '.voice-and-tone/config.yml': CONFIG_WITH_INBOX, '.voice-and-tone/voice.md': '# V\n' })
+  assert.equal(state.settings.thresholds.corroboration, 2)
+  assert.equal(state.settings.thresholds.drift_pct, 25)
+  assert.equal(state.settings.register.length, 2)
+  assert.equal(state.settings.register[0].kind, 'project')
+})
+
+test('vendor pins are read from the shipped manifest, not from the project', () => {
+  // Resolved relative to this module's own location, the same way office.mjs
+  // and pdf.mjs resolve the bundles themselves - never from --root/--kb.
+  const state = stateOf({ '.voice-and-tone/config.yml': MINIMAL_CONFIG, '.voice-and-tone/voice.md': '# V\n' })
+  assert.ok(Array.isArray(state.settings.vendor))
+  assert.ok(state.settings.vendor.length > 0, 'the plugin ships vendored extractors')
+  for (const pin of state.settings.vendor) assert.equal(typeof pin.name, 'string')
+})
+
+test('the whole state object survives a JSON round trip', () => {
+  // --json prints this object verbatim. An undefined, a Map, or a circular
+  // reference anywhere in it would silently vanish or throw at print time.
+  const state = stateOf({ '.voice-and-tone/config.yml': CONFIG_WITH_INBOX, '.voice-and-tone/voice.md': '# V\n' })
+  assert.deepEqual(JSON.parse(JSON.stringify(state)), state)
+})
