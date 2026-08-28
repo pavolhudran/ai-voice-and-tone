@@ -44,6 +44,69 @@ test('the five cp1252-undefined bytes in 0x80-0x9F are dropped, never emitted as
   }
 })
 
+// Task 16 carried item: only 4 of the 27 mapped cp1252 codepoints (0x80,
+// 0x86, 0x85, 0x99) had a behavioural test before this. RTF_CP1252_HIGH maps
+// each \'hh escape to a fixed Unicode codepoint via a direct lookup, with no
+// arithmetic connecting a byte to its glyph - so nothing about the shape of
+// the map lets a test for four codepoints stand in for the other twenty-odd.
+// Because stripControlChars only ever absorbs a byte the map failed to
+// resolve at all (see the five-undefined-bytes test above), an entry whose
+// VALUE gets quietly changed - or dropped, sending its byte through the same
+// "undefined" branch as a genuinely unmapped one - produces a plausible,
+// non-garbage string with one glyph swapped for another or missing outright.
+// No other test in this suite would notice: the specific-codepoint tests
+// above name only four bytes, and a generic "output looks like text" guard
+// cannot tell a correct glyph from a wrong (or absent) one.
+//
+// The expected codepoints below are transcribed independently from the
+// Windows-1252 standard (verified against Python's built-in cp1252 codec,
+// which decodes each byte via its own table, not this file's), never
+// imported from textish.mjs's RTF_CP1252_HIGH - importing it would make
+// this test compare the table to itself and pass no matter what the table
+// said. Codepoints are numeric, per this file's own escaping convention: a
+// literal curly quote, dash, or bullet pasted into source is the exact
+// authoring trap the comment above RTF_CP1252_HIGH warns about.
+test('every mapped cp1252 codepoint in 0x80-0x9F decodes to its real glyph', () => {
+  const table = [
+    [0x80, 0x20ac], // EURO SIGN
+    [0x82, 0x201a], // SINGLE LOW-9 QUOTATION MARK
+    [0x83, 0x0192], // LATIN SMALL LETTER F WITH HOOK
+    [0x84, 0x201e], // DOUBLE LOW-9 QUOTATION MARK
+    [0x85, 0x2026], // HORIZONTAL ELLIPSIS
+    [0x86, 0x2020], // DAGGER
+    [0x87, 0x2021], // DOUBLE DAGGER
+    [0x88, 0x02c6], // MODIFIER LETTER CIRCUMFLEX ACCENT
+    [0x89, 0x2030], // PER MILLE SIGN
+    [0x8a, 0x0160], // LATIN CAPITAL LETTER S WITH CARON
+    [0x8b, 0x2039], // SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+    [0x8c, 0x0152], // LATIN CAPITAL LIGATURE OE
+    [0x8e, 0x017d], // LATIN CAPITAL LETTER Z WITH CARON
+    [0x91, 0x2018], // LEFT SINGLE QUOTATION MARK
+    [0x92, 0x2019], // RIGHT SINGLE QUOTATION MARK
+    [0x93, 0x201c], // LEFT DOUBLE QUOTATION MARK
+    [0x94, 0x201d], // RIGHT DOUBLE QUOTATION MARK
+    [0x95, 0x2022], // BULLET
+    [0x96, 0x2013], // EN DASH
+    [0x97, 0x2014], // EM DASH
+    [0x98, 0x02dc], // SMALL TILDE
+    [0x99, 0x2122], // TRADE MARK SIGN
+    [0x9a, 0x0161], // LATIN SMALL LETTER S WITH CARON
+    [0x9b, 0x203a], // SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+    [0x9c, 0x0153], // LATIN SMALL LIGATURE OE
+    [0x9e, 0x017e], // LATIN SMALL LETTER Z WITH CARON
+    [0x9f, 0x0178] // LATIN CAPITAL LETTER Y WITH DIAERESIS
+  ]
+  for (const [byte, codepoint] of table) {
+    const hex = byte.toString(16).padStart(2, '0')
+    const expected = String.fromCodePoint(codepoint)
+    assert.deepEqual(
+      extractRtf(String.raw`{\rtf1 A\'` + hex + String.raw`B\par}`),
+      [`A${expected}B`],
+      `0x${hex} should decode to U+${codepoint.toString(16).padStart(4, '0')}`
+    )
+  }
+})
+
 test('vtt cues are extracted and timing lines dropped', () => {
   const vtt = [
     'WEBVTT', '', '1', '00:00:01.000 --> 00:00:04.000',
