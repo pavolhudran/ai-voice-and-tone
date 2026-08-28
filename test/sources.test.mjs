@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { loadIndex } from '../scripts/lib/sourceindex.mjs'
-import { runCheck, runIngest, runAdd, runForget, filterVanished } from '../scripts/sources.mjs'
+import { runCheck, runIngest, runAdd, runForget, filterVanished, runRefresh, main } from '../scripts/sources.mjs'
 
 const NOW = '2026-08-27T00:00:00.000Z'
 
@@ -369,6 +369,234 @@ test('a project-folder container file is still ingestible and contributes real s
     assert.equal(result.ingested.length, 1)
     assert.equal(result.ingested[0].status, 'used')
     assert.ok(result.ingested[0].stats.words > 0, 'the PDF was actually read, not just registered')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- Task 13 fix round: --refresh / runRefresh had zero committed tests ---
+
+const HTML_PAGE = `<!doctype html><html><head><title>About</title></head>
+<body><h1>How we write</h1><p>We write plainly. We keep every sentence short.</p></body></html>`
+
+const JS_SHELL = '<!doctype html><html><body><div id="root"></div><script src="app.js"></script></body></html>'
+
+const fetchStub = (body, { status = 200, contentType = 'text/html' } = {}) => async () => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: { get: (k) => (k.toLowerCase() === 'content-type' ? contentType : null) },
+  text: async () => body
+})
+
+function urlProject (sources) {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  saveConfig(kb, { ...DEFAULT_CONFIG, sources })
+  return { dir, kb, ctx: { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW } }
+}
+
+test('runRefresh inserts a brand-new url source and escalates a JS-rendered shell', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/spa', retain: 'none' }])
+  try {
+    const result = await runRefresh({ ...ctx, fetchImpl: fetchStub(JS_SHELL) }, {})
+    assert.equal(result.refreshed.length, 1)
+    assert.equal(result.unchanged.length, 0)
+    assert.equal(result.escalate.length, 1, 'a JS-rendered shell needs the model tier on first sight')
+    assert.equal(result.escalate[0].quality.note, 'no-text-layer')
+
+    const index = loadIndex(kb)
+    assert.equal(index.sources.length, 1)
+    assert.equal(index.sources[0].from, 's04')
+    assert.equal(index.sources[0].status, 'skipped')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('runRefresh supersedes a changed url source and surfaces its produced rules for re-derivation', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'none' }])
+  try {
+    await runRefresh({ ...ctx, fetchImpl: fetchStub(HTML_PAGE) }, {})
+    const before = loadIndex(kb)
+    before.sources[0].produced = ['V3']
+    const { saveIndex } = await import('../scripts/lib/sourceindex.mjs')
+    saveIndex(kb, before, NOW)
+    const originalId = before.sources[0].id
+
+    const changedPage = HTML_PAGE.replace('How we write', 'How we write now')
+    const result = await runRefresh({ ...ctx, config: loadConfig(kb), fetchImpl: fetchStub(changedPage) }, {})
+
+    assert.equal(result.refreshed.length, 1)
+    assert.equal(result.reopened.length, 1)
+    assert.equal(result.reopened[0].id, originalId)
+    assert.deepEqual(result.reopened[0].produced, ['V3'])
+
+    const index = loadIndex(kb)
+    assert.equal(index.sources.length, 1, 'superseded, not appended alongside')
+    assert.notEqual(index.sources[0].id, originalId, 'the replacement gets a new id, never the old one')
+    assert.deepEqual(index.sources[0].produced, [], 'rule attribution is never inherited across a rewrite')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an unchanged url source is left untouched except its analysed date, and keeps re-surfacing escalation', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/spa', retain: 'none' }])
+  try {
+    await runRefresh({ ...ctx, fetchImpl: fetchStub(JS_SHELL) }, {})
+    const before = loadIndex(kb)
+    assert.equal(before.sources[0].analysed, '2026-08-27')
+
+    const laterCtx = { ...ctx, config: loadConfig(kb), now: '2026-09-01T00:00:00.000Z', fetchImpl: fetchStub(JS_SHELL) }
+    const result = await runRefresh(laterCtx, {})
+
+    assert.equal(result.refreshed.length, 0)
+    assert.equal(result.unchanged.length, 1)
+    assert.equal(
+      result.escalate.length, 1,
+      'the escalation signal must not vanish on an unchanged refresh - the persisted entry is still no-text-layer'
+    )
+
+    const after = loadIndex(kb)
+    assert.equal(after.sources.length, 1)
+    assert.equal(after.sources[0].id, before.sources[0].id, 'an unchanged entry keeps its id')
+    assert.equal(after.sources[0].analysed, '2026-09-01', 'checked-today is now distinguishable from not-checked-in-weeks')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('N refreshes of an unchanged retain:snapshot page commit exactly one snapshot file, never one per refresh', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'snapshot' }])
+  try {
+    for (let i = 0; i < 5; i++) {
+      await runRefresh({ ...ctx, config: loadConfig(kb), fetchImpl: fetchStub(HTML_PAGE) }, {})
+    }
+    const snapshotsDir = path.join(kb, 'evidence', 'snapshots')
+    const files = existsSync(snapshotsDir) ? readdirSync(snapshotsDir) : []
+    assert.equal(files.length, 1, `expected exactly one committed snapshot, found ${files.length}: ${files.join(', ')}`)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test("a superseded entry's snapshot is left in place as evidence, and the new snapshot is written under the new id", async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'snapshot' }])
+  try {
+    await runRefresh({ ...ctx, fetchImpl: fetchStub(HTML_PAGE) }, {})
+    const originalId = loadIndex(kb).sources[0].id
+
+    const changedPage = HTML_PAGE.replace('How we write', 'How we write differently now')
+    await runRefresh({ ...ctx, config: loadConfig(kb), fetchImpl: fetchStub(changedPage) }, {})
+    const newId = loadIndex(kb).sources[0].id
+
+    const snapshotsDir = path.join(kb, 'evidence', 'snapshots')
+    const files = readdirSync(snapshotsDir)
+    assert.equal(files.length, 2, 'the old snapshot is kept, not deleted, and a new one is written for the replacement')
+    assert.ok(files.some((f) => f.startsWith(`${originalId}-`)), "the superseded entry's evidence survives")
+    assert.ok(files.some((f) => f.startsWith(`${newId}-`)), 'the replacement gets its own snapshot under its own id')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a fetch that never answers is skipped with a timeout reason instead of hanging --refresh forever', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/hangs', retain: 'none' }])
+  try {
+    const hang = () => (_url, { signal } = {}) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        const error = new Error('The operation was aborted.')
+        error.name = 'AbortError'
+        reject(error)
+      })
+    })
+    const result = await runRefresh({ ...ctx, fetchImpl: hang() }, { timeoutMs: 25 })
+    assert.equal(result.refreshed.length, 1)
+    assert.equal(result.refreshed[0].status, 'skipped')
+    assert.ok(result.refreshed[0].quality.reasons.join(' ').includes('timed out'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a non-html content-type is skipped visibly through --refresh, never silently absorbed', async () => {
+  const { dir, kb, ctx } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/api/data', retain: 'none' }])
+  try {
+    const json = JSON.stringify({ a: 1 })
+    const result = await runRefresh({ ...ctx, fetchImpl: fetchStub(json, { contentType: 'application/json' }) }, {})
+    assert.equal(result.refreshed.length, 1)
+    assert.equal(result.refreshed[0].status, 'skipped')
+    assert.ok(result.refreshed[0].quality.reasons.join(' ').includes('application/json'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- --refresh CLI wiring: both output formats, all three branches ---
+
+async function runRefreshCli (dir, kb, args, fetchImpl) {
+  let out = ''
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk) => { out += chunk; return true }
+  try {
+    await main(['--root', dir, '--kb', kb, '--refresh', ...args], { fetchImpl })
+    return out
+  } finally {
+    process.stdout.write = originalWrite
+  }
+}
+
+test('--refresh --json reports refreshed/unchanged/escalate/reopened counts', async () => {
+  const { dir, kb } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/spa', retain: 'none' }])
+  try {
+    const out = await runRefreshCli(dir, kb, ['--now', NOW, '--json'], fetchStub(JS_SHELL))
+    const summary = JSON.parse(out)
+    assert.equal(summary.refreshed, 1)
+    assert.equal(summary.unchanged, 0)
+    assert.deepEqual(summary.escalate, ['https://acme.com/spa'])
+    assert.deepEqual(summary.reopened, [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh human-readable output names changed sources, reopened rules, and model-tier candidates', async () => {
+  const { dir, kb } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'none' }])
+  try {
+    await runRefreshCli(dir, kb, ['--now', NOW], fetchStub(HTML_PAGE))
+    const before = loadIndex(kb)
+    before.sources[0].produced = ['V9']
+    const { saveIndex } = await import('../scripts/lib/sourceindex.mjs')
+    saveIndex(kb, before, NOW)
+
+    const changed = HTML_PAGE.replace('How we write', 'How we write, differently')
+    const out = await runRefreshCli(dir, kb, ['--now', '2026-08-28T00:00:00.000Z'], fetchStub(changed))
+
+    assert.match(out, /sources: refreshed 1 url source\(s\), 0 unchanged/)
+    assert.match(out, /sources: {3}changed https:\/\/acme\.com\/about/)
+    assert.match(out, /sources: 1 url source\(s\) were superseded/)
+    assert.match(out, /reopen .* -> V9/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh --json reports unchanged with no reopened rules and no index mutation beyond analysed', async () => {
+  const { dir, kb } = urlProject([{ id: 's04', kind: 'url', url: 'https://acme.com/about', retain: 'none' }])
+  try {
+    await runRefreshCli(dir, kb, ['--now', NOW, '--json'], fetchStub(HTML_PAGE))
+    const before = loadIndex(kb)
+
+    const out = await runRefreshCli(dir, kb, ['--now', '2026-08-28T00:00:00.000Z', '--json'], fetchStub(HTML_PAGE))
+    const summary = JSON.parse(out)
+    assert.equal(summary.refreshed, 0)
+    assert.equal(summary.unchanged, 1)
+    assert.deepEqual(summary.reopened, [])
+
+    const after = loadIndex(kb)
+    assert.equal(after.sources[0].id, before.sources[0].id)
+    assert.equal(after.sources[0].sha256, before.sources[0].sha256)
+    assert.equal(after.sources[0].analysed, '2026-08-28')
   } finally {
     cleanup(dir)
   }

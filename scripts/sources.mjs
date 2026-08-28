@@ -8,7 +8,8 @@ import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
-import { ingestUrl } from './lib/fetchurl.mjs'
+import { ingestUrl, snapshotPathFor } from './lib/fetchurl.mjs'
+import { writeTextFile } from './lib/fsx.mjs'
 import { sha256File } from './lib/hash.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -22,14 +23,22 @@ import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './
 
 const isUrl = (target) => /^https?:\/\//i.test(String(target))
 
-function contextFor (values) {
+// `fetchImpl` is never supplied via argv (a function cannot travel through a
+// CLI flag) - it is a second, optional parameter to `main` itself, threaded
+// through here purely so a test can drive the real `--refresh` CLI path
+// (both output formats, all three branches) without ever reaching the
+// network. Real invocations never pass it, so `ctx.fetchImpl` is `undefined`
+// in production and `ingestUrl`/`fetchPage` fall back to `globalThis.fetch`,
+// exactly as before.
+function contextFor (values, { fetchImpl } = {}) {
   const { projectRoot, kbRoot } = resolveRoots(values)
   return {
     projectRoot,
     kbRoot,
     config: loadConfig(kbRoot),
     profileName: values.profile ?? 'default',
-    now: nowIso(values)
+    now: nowIso(values),
+    fetchImpl
   }
 }
 
@@ -221,6 +230,15 @@ export async function runIngest (ctx, { only = null } = {}) {
   return { ...report, ingested, escalate, reopened, errors }
 }
 
+// Passed to ingestUrl as a placeholder `id` for every fetch: the real id is
+// only ever assigned once the changed/unchanged decision below is made (a
+// fresh insert gets one right before it is persisted; a supersede gets one
+// from supersedeEntry itself, which always assigns its own regardless of
+// what it is handed). An unchanged fetch never persists this candidate at
+// all, so its placeholder id is simply discarded. This is what keeps
+// nextEntryId from being called on every single fetch, changed or not.
+const PENDING_ID = 'pending'
+
 /**
  * Fetch every registered `kind: 'url'` source and record what came back.
  * Never runs on the scan/fingerprint path (spec 8.1) - this is the one
@@ -245,13 +263,34 @@ export async function runIngest (ctx, { only = null } = {}) {
  * existing-entry branch overwrites every field but `id`/`added`, including
  * `produced`, and a fetch that came back byte-identical has nothing to
  * report - touching the entry at all would erase rule attribution for no
- * reason.
+ * reason. Its `analysed` date is still bumped to today, so the index can
+ * tell "checked today, unchanged" from "not checked in weeks", and its
+ * escalation signal is re-checked every time (see the comment at that
+ * branch below) rather than only being surfaced on the one refresh that
+ * happened to change the bytes.
+ *
+ * Snapshot retention (fetchurl.mjs's file header explains why ingestUrl
+ * itself never writes one): a snapshot is written here, once, only for a
+ * candidate this function has just decided to actually persist - never for
+ * one left in the `unchanged` bucket. That is the fix for the defect this
+ * fix round was opened for: every routine refresh of an unchanged page used
+ * to write another byte-identical committed file, forever. A snapshot
+ * belonging to an entry that gets superseded later is left exactly where it
+ * is - it remains the evidence for whatever rules were derived from it, and
+ * pruning orphaned snapshots (once an entry superseding a source keeps
+ * happening for years) is a separate, not-yet-built piece of housekeeping.
  */
-export async function runRefresh (ctx, { only = null } = {}) {
+// `timeoutMs` is never exposed as a CLI flag (there is no ordinary reason a
+// user would want to shorten or lengthen it on the command line) - it stays
+// a programmatic parameter purely so a test can drive a real timeout without
+// waiting out fetchPage's real 15-second default, the same reasoning that
+// already applies to `only`.
+export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
   const register = loadRegister(ctx.config)
   const index = loadIndex(ctx.kbRoot)
   const profile = activeProfile(ctx.config, ctx.profileName)
   const primaryLocale = profile.primary_locale ?? 'en'
+  const date = String(ctx.now).slice(0, 10)
 
   const wants = (entry) => !only || entry.id === only || entry.url === only
   const urlEntries = register.filter((entry) => entry.kind === 'url' && wants(entry))
@@ -263,39 +302,57 @@ export async function runRefresh (ctx, { only = null } = {}) {
   const errors = []
 
   for (const entry of urlEntries) {
-    let candidate
+    let fetched
     try {
-      candidate = await ingestUrl(entry, {
+      fetched = await ingestUrl(entry, {
         kbRoot: ctx.kbRoot,
         now: ctx.now,
-        id: nextEntryId(index),
+        id: PENDING_ID,
         locale: entry.locale ?? primaryLocale,
-        fetchImpl: ctx.fetchImpl
+        fetchImpl: ctx.fetchImpl,
+        timeoutMs
       })
     } catch (error) {
       errors.push({ origin: entry.url, from: entry.id, reason: `refresh-failed: ${error.message}` })
       continue
     }
 
+    const { entry: candidate, body } = fetched
     const existing = index.sources.find((s) => s.kind === 'url' && s.from === entry.id)
 
     if (existing && existing.sha256 === candidate.sha256) {
+      existing.analysed = date
       unchanged.push(existing)
+      // Without this, a JS-rendered shell (or any other escalation-worthy
+      // verdict) is reported once, on the refresh that first produced it,
+      // and never again: the persisted entry still says `no-text-layer`,
+      // but every later unchanged refresh used to push-and-continue before
+      // ever consulting needsModelTier. Re-checking the already-persisted
+      // entry here costs nothing and keeps the signal alive for as long as
+      // it stays true.
+      if (needsModelTier(existing)) escalate.push(existing)
       continue
     }
 
+    let saved
+    let displaced = null
     if (existing) {
-      const displaced = supersedeEntry(index, existing.id, candidate)
-      const saved = index.sources.find((s) => s.sha256 === candidate.sha256) ?? candidate
-      refreshed.push(saved)
-      if (needsModelTier(saved)) escalate.push(saved)
-      if (displaced) {
-        reopened.push({ id: displaced.id, origin: displaced.origin, produced: displaced.produced ?? [] })
-      }
+      displaced = supersedeEntry(index, existing.id, candidate)
+      saved = index.sources.find((s) => s.sha256 === candidate.sha256) ?? candidate
     } else {
+      candidate.id = nextEntryId(index)
       upsertEntry(index, candidate)
-      refreshed.push(candidate)
-      if (needsModelTier(candidate)) escalate.push(candidate)
+      saved = candidate
+    }
+
+    refreshed.push(saved)
+    if (needsModelTier(saved)) escalate.push(saved)
+    if (displaced) {
+      reopened.push({ id: displaced.id, origin: displaced.origin, produced: displaced.produced ?? [] })
+    }
+
+    if (entry.retain === 'snapshot' && body !== null) {
+      writeTextFile(snapshotPathFor(ctx.kbRoot, saved.id, date), body)
     }
   }
 
@@ -334,7 +391,11 @@ function report (lines) {
   writeOut(`${lines.join('\n')}\n`)
 }
 
-async function main (argv) {
+// The optional second parameter exists purely for tests: it is never
+// supplied by the real entry point at the bottom of this file, so
+// `fetchImpl` is `undefined` in every production run and `--refresh` falls
+// back to `globalThis.fetch` exactly as before. See contextFor's comment.
+async function main (argv, { fetchImpl } = {}) {
   const { values } = parseCliArgs(argv, {
     profile: { type: 'string' },
     check: { type: 'boolean' },
@@ -363,7 +424,7 @@ async function main (argv) {
     return
   }
 
-  const ctx = contextFor(values)
+  const ctx = contextFor(values, { fetchImpl })
 
   if (values.add) {
     const { entry } = runAdd(ctx, { target: values.add, label: values.label ?? null })
