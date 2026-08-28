@@ -302,8 +302,31 @@ test('learn, audit, and sync commands route to the maintenance skill', () => {
   assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
 })
 
-test('every command file the plugin ships is one of the eight in the spec', () => {
-  const expected = ['audit.md', 'init.md', 'learn.md', 'localize.md', 'review.md', 'rewrite.md', 'sync.md', 'write.md']
+test('every command file the plugin ships is one of the nine in the spec', () => {
+  const expected = [
+    'audit.md', 'connect.md', 'init.md', 'learn.md', 'localize.md',
+    'review.md', 'rewrite.md', 'sync.md', 'write.md'
+  ]
   const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
   assert.deepEqual(actual, expected)
+})
+
+test('connect is a real command naming the skill it invokes', () => {
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  assert.match(body, /^---\ndescription:/m)
+  assert.match(body, /voice-discovery/)
+  for (const flag of ['--inbox', '--refresh', '--forget']) assert.ok(body.includes(flag), flag)
+})
+
+test('init documents --add as implemented, pointing at the script that does it', () => {
+  const body = readFileSync(surfaceFile('commands', 'init.md'), 'utf8')
+  assert.match(body, /--add/)
+  assert.match(body, /sources\.mjs/, 'the promise is now backed by a script')
+})
+
+test('the discovery skill tells the model what to do on an escalation', () => {
+  const body = readFileSync(surfaceFile('skills', 'voice-discovery', 'references', 'sourcing.md'), 'utf8')
+  assert.match(body, /estimated/)
+  assert.match(body, /never .*derived/i)
+  assert.match(body, /sources\.mjs/)
 })

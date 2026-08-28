@@ -62,8 +62,9 @@ Zero npm dependencies, now and permanently. Nothing to install beyond the plugin
 ```
 
 Creates `.voice-and-tone/` in your project root, then **commit it** - it is
-markdown, so voice changes arrive as pull requests you can read and revert. Only
-`.drafts/` is gitignored.
+markdown, so voice changes arrive as pull requests you can read and revert.
+`.drafts/`, `sources/`, and `.cache/` are gitignored; see
+["Where your material goes"](#where-your-material-goes) below for why.
 
 ```
 /voice-and-tone:write an error for a file over the upload limit
@@ -94,6 +95,30 @@ The interview is preference-pair calibration, not adjective elicitation. Asked
 "how formal are you, 1-5?", people answer unreliably - they are describing
 themselves. Shown two rewrites of a string they recognise, they answer well.
 Anything the corpus already answered is never asked.
+
+## Where your material goes
+
+Drop brand material - a style guide, the brand deck, past newsletters, a
+tone-of-voice PDF - into `.voice-and-tone/sources/`, or point `/voice-and-tone:connect`
+at a file, folder, or URL anywhere else. Run `/voice-and-tone:connect` any time
+to see what is new, changed, or missing.
+
+**Nothing you add is committed.** `sources/` and `.cache/` (the extraction
+cache) are gitignored by default - what survives is `evidence/sources.json`,
+the record of every source's content hash, what was extracted from it, and
+which rules it produced. That is enough to recompute the fingerprint or
+subtract any single source later, so a colleague who clones the repository
+with an empty `sources/` gets the same baseline, not a false drift report.
+
+Read deterministically, no dependencies: Markdown, plain text, JSON, YAML, PO,
+HTML, RTF, CSV/TSV, WebVTT/SubRip, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`,
+`.ods`, and PDFs with a text layer. Scanned PDFs, images, and JS-rendered pages
+are read by Claude instead and recorded `estimated` - they can support
+`assumed` rules but never `derived` ones. Legacy `.doc`, `.ppt`, and `.xls` are
+refused; re-save them as the modern format.
+
+To commit source material anyway, delete the `sources/` line from
+`.voice-and-tone/.gitignore`.
 
 ## The tone model
 
@@ -168,6 +193,7 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | Command | What it does |
 |---|---|
 | `/voice-and-tone:init` | discover, measure, interview, canonize |
+| `/voice-and-tone:connect` | register brand material and see what has been analysed |
 | `/voice-and-tone:write` | draft for a context and a reader state |
 | `/voice-and-tone:review` | critique with severities and `file:line` anchors |
 | `/voice-and-tone:rewrite` | off-brand text to on-brand, showing what changed and why |

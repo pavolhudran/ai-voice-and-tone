@@ -92,3 +92,17 @@ test('the shipped CONTEXT.md template refuses to be hand-edited', () => {
   assert.match(md, /GENERATED FILE/)
   assert.match(md, /voice-and-tone:sync/)
 })
+
+test('the KB gitignore excludes sources and the extract cache but not the index', () => {
+  const body = readFileSync(path.join(templates, 'gitignore'), 'utf8')
+  assert.match(body, /^sources\/$/m)
+  assert.match(body, /^\.cache\/$/m)
+  assert.ok(!/sources\.json/.test(body), 'the index must stay committed')
+})
+
+test('the template config declares a register that reproduces current behaviour', () => {
+  const config = parseYaml(readFileSync(path.join(templates, 'config.yml'), 'utf8'))
+  assert.ok(Array.isArray(config.sources))
+  assert.equal(config.sources[0].kind, 'project')
+  assert.ok(config.sources.some((s) => s.kind === 'inbox'))
+})

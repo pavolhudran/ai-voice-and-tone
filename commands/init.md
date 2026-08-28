@@ -19,9 +19,12 @@ Creates `.voice-and-tone/` in the project root.
 /voice-and-tone:init --add <path-or-url>  ingest new material into an existing KB
 ```
 
-`--add` re-runs ingest on the new material only, diffs it against the rules that
-already exist, and records contradictions as `disputed` rather than overwriting
-anything.
+`--add` registers the new material with `scripts/sources.mjs --add`, ingests
+it, and diffs it against the rules that already exist, recording
+contradictions as `disputed` rather than overwriting anything. This is the
+same registration `/voice-and-tone:connect` performs - reach for `:connect`
+directly when you only want to manage sources (register, refresh, forget)
+without running the rest of the pipeline.
 
 ## Invokes
 

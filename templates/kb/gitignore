@@ -1,2 +1,9 @@
 # Plugin-produced drafts, kept for :learn. Pruned at 90 days.
 .drafts/
+
+# Dropped-in source material. Inputs, not artifacts - never committed.
+# The analysis survives in evidence/ - these files need not.
+sources/
+
+# Extraction cache, keyed by content hash. Regenerable at any time.
+.cache/
