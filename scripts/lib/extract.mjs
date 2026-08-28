@@ -1,6 +1,8 @@
 import path from 'node:path'
 import { parseYaml } from './yaml.mjs'
-import { splitParagraphs } from './text.mjs'
+import { splitParagraphs, stripControlChars } from './text.mjs'
+import { extractRtf, extractSubtitles, extractDelimited } from './textish.mjs'
+import { OFFICE_FORMATS } from './office.mjs'
 
 export const COPY_EXTENSIONS = {
   '.md': 'markdown',
@@ -13,20 +15,72 @@ export const COPY_EXTENSIONS = {
   '.pot': 'po',
   '.html': 'html',
   '.htm': 'html',
-  '.txt': 'text'
+  '.txt': 'text',
+  '.rtf': 'rtf',
+  '.vtt': 'subtitles',
+  '.srt': 'subtitles',
+  '.csv': 'csv',
+  '.tsv': 'tsv'
+}
+
+/**
+ * Container formats. These hold bytes, not text, so a caller must read them
+ * with readFileSync and no encoding and hand the Buffer to office.mjs or
+ * pdf.mjs - never to extractStrings, which takes decoded text.
+ *
+ * The office half of this table is derived from office.mjs's own
+ * OFFICE_FORMATS rather than repeated by hand: the two lists drifting apart
+ * would resolve a real file's extension to a format neither table's caller
+ * can act on, and nothing would say why. Every office format string happens
+ * to equal its extension without the leading dot, so the derivation is
+ * exact, not a heuristic.
+ */
+export const BINARY_EXTENSIONS = Object.fromEntries([
+  ...[...OFFICE_FORMATS].map((format) => [`.${format}`, format]),
+  ['.pdf', 'pdf']
+])
+
+const BINARY_FORMATS = new Set(Object.values(BINARY_EXTENSIONS))
+
+export function isBinaryFormat (format) {
+  return BINARY_FORMATS.has(format)
 }
 
 export function formatFor (absPath) {
-  return COPY_EXTENSIONS[path.extname(String(absPath)).toLowerCase()] || null
+  const ext = path.extname(String(absPath)).toLowerCase()
+  return COPY_EXTENSIONS[ext] || BINARY_EXTENSIONS[ext] || null
 }
 
-// A value that carries no brand voice: URLs, tokens, colors, bare numbers,
+/**
+ * A token shaped like a URL, a link scheme (mailto:/tel:/data:), or an
+ * @handle. None of these carry brand voice in any file format - a URL is
+ * not prose whether a script parser mis-extracted it from a PDF or a person
+ * typed it into a newsletter by hand. Counting one as a "word" would skew
+ * every length- and shape-based signal that reads it.
+ *
+ * A leading bracket/paren and trailing sentence punctuation are trimmed
+ * before the shape test, but nothing else is - an @handle's own leading `@`
+ * must survive, unlike generic punctuation stripping (which treats `@` as
+ * punctuation and would eat it). That lets a caller run this directly on a
+ * raw whitespace-split token, bracketed URL and all, ahead of any other
+ * normalisation. Shared by isCopy() below and quality.mjs's tokenizer so
+ * the plugin has exactly one notion of "this is a link, not a word" -
+ * Ruling R43.
+ */
+export function isUrlOrHandle (value) {
+  const text = String(value).trim().replace(/^[([{<]+|[)\]}>.,;:!?]+$/g, '')
+  if (/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(text)) return true
+  if (/^@[\w.-]+$/.test(text)) return true
+  return false
+}
+
+// A value that carries no brand voice: URLs, handles, colors, bare numbers,
 // anything without a letter. Counting these would skew every metric.
 function isCopy (value) {
   const text = String(value).trim()
   if (text.length === 0) return false
   if (!/\p{L}/u.test(text)) return false
-  if (/^(?:https?:|mailto:|tel:|data:|\/\/)/i.test(text)) return false
+  if (isUrlOrHandle(text)) return false
   if (/^#[0-9a-f]{3,8}$/i.test(text)) return false
   if (/^[0-9a-f]{6}$|^[0-9a-f]{8}$/i.test(text) && /\d/.test(text)) return false
   if (/^[/.]{0,2}\//.test(text)) return false
@@ -35,7 +89,11 @@ function isCopy (value) {
 }
 
 function pushCopy (out, value) {
-  const text = String(value).replace(/\s+/g, ' ').trim()
+  // stripControlChars first: a source with a stray C0/C1 byte next to real
+  // words (a malformed JSON escape, a translator's pasted byte in a .po
+  // file) must not carry that byte into the corpus even though the string
+  // around it still passes isCopy's "has a letter" check.
+  const text = stripControlChars(String(value)).replace(/\s+/g, ' ').trim()
   if (isCopy(text)) out.push(text)
 }
 
@@ -193,6 +251,19 @@ export function extractHeadings (absPath, raw) {
 export function extractStrings (absPath, raw) {
   const format = formatFor(absPath)
   if (!format) return { format: null, strings: [] }
+  // A container format never reaches here with usable input: its bytes are
+  // not text, so a caller that got this far read a PDF or an Office file as
+  // UTF-8 - a caller bug, not a normal outcome. office.mjs's extractOffice
+  // throws on the mirror-image mistake (an unsupported format string), and
+  // this does the same rather than returning the mojibake that would
+  // otherwise poison every metric downstream while looking like real,
+  // if sparse, copy.
+  if (isBinaryFormat(format)) {
+    throw new Error(
+      `extractStrings cannot read container format "${format}" as text; ` +
+      'read it with readFileSync (no encoding) and hand the buffer to extractOffice or extractPdf instead'
+    )
+  }
   const text = String(raw).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
 
   switch (format) {
@@ -210,6 +281,10 @@ export function extractStrings (absPath, raw) {
       for (const block of splitParagraphs(text)) pushCopy(out, block)
       return { format, strings: out }
     }
+    case 'rtf': return { format, strings: extractRtf(text) }
+    case 'subtitles': return { format, strings: extractSubtitles(text) }
+    case 'csv': return { format, strings: extractDelimited(text, ',') }
+    case 'tsv': return { format, strings: extractDelimited(text, '\t') }
     default: return { format: null, strings: [] }
   }
 }

@@ -2,9 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
 import { STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
+import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const surfaceFile = (...parts) => path.join(root, ...parts)
@@ -19,6 +21,46 @@ function shippedMarkdown (dir = null, out = []) {
     const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) shippedMarkdown(abs, out)
     else if (entry.name.endsWith('.md')) out.push(abs)
+  }
+  return out
+}
+
+/**
+ * Every markdown file a user (not only a model) might read, including the
+ * templates a knowledge base is copied from. F1: templates/kb/sources/README.md
+ * told every new user to run `--inbox`, a flag deleted by an earlier fix -
+ * the surface test only ever swept skills/commands/agents, so the same dead
+ * flag survived in the one file a first-time user actually follows. Anything
+ * copied into a user's own knowledge base is exactly as "shipped" as a skill
+ * or a command.
+ */
+function userFacingMarkdown () {
+  const out = shippedMarkdown()
+  ;(function walk (dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(abs)
+      else if (entry.name.endsWith('.md')) out.push(abs)
+    }
+  })(surfaceFile('templates', 'kb'))
+  return out
+}
+
+/**
+ * Every `/voice-and-tone:connect ...` invocation named anywhere in the
+ * user-facing surface, with the file it came from. Scoped to this one
+ * command (rather than "every flag in every doc") because other commands'
+ * flags (--locale, --context, --critic, ...) belong to a different
+ * vocabulary entirely and are not sources.mjs flags at all - checking those
+ * against sources.mjs --help would be a false positive machine, not a guard.
+ */
+function connectInvocations () {
+  const out = []
+  for (const file of userFacingMarkdown()) {
+    const text = readFileSync(file, 'utf8')
+    for (const match of text.matchAll(/\/voice-and-tone:connect\b[^\n`]*/g)) {
+      out.push({ file, line: match[0] })
+    }
   }
   return out
 }
@@ -302,8 +344,143 @@ test('learn, audit, and sync commands route to the maintenance skill', () => {
   assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
 })
 
-test('every command file the plugin ships is one of the eight in the spec', () => {
-  const expected = ['audit.md', 'init.md', 'learn.md', 'localize.md', 'review.md', 'rewrite.md', 'sync.md', 'write.md']
+test('every command file the plugin ships is one of the nine in the spec', () => {
+  const expected = [
+    'audit.md', 'connect.md', 'init.md', 'learn.md', 'localize.md',
+    'review.md', 'rewrite.md', 'sync.md', 'write.md'
+  ]
   const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
   assert.deepEqual(actual, expected)
+})
+
+test('connect is a real command naming the skill it invokes', () => {
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  assert.match(body, /^---\ndescription:/m)
+  assert.match(body, /voice-discovery/)
+  for (const flag of ['--ingest', '--refresh', '--forget']) assert.ok(body.includes(flag), flag)
+})
+
+// F1: --inbox never existed as a real flag on sources.mjs - --ingest is what
+// actually analyses anything newly dropped into the inbox. The assertion
+// used to check connect.md alone; templates/kb/sources/README.md told every
+// new user to run `/voice-and-tone:connect --inbox` and nothing here ever
+// looked at it, so the plugin's own front door documented a flag that erred
+// out. This now protects every user-facing file that names the invocation,
+// not only the one command file.
+test('no user-facing file documents a /voice-and-tone:connect flag sources.mjs does not have (--inbox)', () => {
+  for (const { file, line } of connectInvocations()) {
+    assert.ok(
+      !line.includes('--inbox'),
+      `${path.relative(root, file)} documents --inbox, which sources.mjs does not have: "${line}"`
+    )
+  }
+})
+
+test('every flag named alongside /voice-and-tone:connect anywhere in the user-facing docs exists on sources.mjs --help', () => {
+  // Task 15 fix round 2: --inbox was documented and never implemented, and
+  // the only thing that would have caught it earlier is running the real
+  // CLI rather than trusting the doc. This runs it - and now over every
+  // user-facing file that names a /voice-and-tone:connect invocation, not
+  // only commands/connect.md.
+  const invocations = connectInvocations()
+  assert.ok(invocations.length > 0, 'expected at least one /voice-and-tone:connect invocation in the docs')
+  const help = execFileSync(
+    process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--help'], { encoding: 'utf8' }
+  )
+  const real = new Set([...help.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))
+  for (const { file, line } of invocations) {
+    for (const flag of line.matchAll(/--[a-z][a-z-]*/g)) {
+      assert.ok(
+        real.has(flag[0]),
+        `${path.relative(root, file)} names ${flag[0]} alongside /voice-and-tone:connect, ` +
+        `which sources.mjs --help does not list: "${line}"`
+      )
+    }
+  }
+})
+
+test('every flag connect.md documents actually exists on sources.mjs --help', () => {
+  // Task 15 fix round 2: --inbox was documented and never implemented, and
+  // the only thing that would have caught it earlier is running the real
+  // CLI rather than trusting the doc. This runs it.
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  const documented = new Set(
+    [...body.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]).filter((f) => f !== '--')
+  )
+  const help = execFileSync(
+    process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--help'], { encoding: 'utf8' }
+  )
+  const real = new Set([...help.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))
+  for (const flag of documented) {
+    assert.ok(real.has(flag), `connect.md documents ${flag}, which sources.mjs --help does not list`)
+  }
+})
+
+test('every literal flag sequence connect.md shows in its usage block is accepted by the real parser', () => {
+  // Task 15 fix round 3: "--refresh <id>" was documented, and the parser
+  // accepts a bare positional there without complaint - it just silently
+  // ignores it. That means "does the parser accept this token" cannot be
+  // the whole check (round 3's defect would sail straight through it); it
+  // is still worth running for the class round 2's --inbox belonged to,
+  // where a doc names a flag the parser rejects outright. Whether a flag
+  // that IS accepted actually does what its line claims is pinned instead
+  // by targeted behavioural tests (sources.test.mjs's --refresh --only
+  // tests, the --forget test above).
+  //
+  // Two usage rows are deliberately skipped: the bare `<path>` and `<url>`
+  // rows are user-facing shorthand for the skill to translate into
+  // `--add <path>` / `--add <url>` - they were never meant to be typed at
+  // sources.mjs directly, so running them literally would test a mapping
+  // this file does not claim to make. Every OTHER row in the usage block is
+  // asserted to consist only of real flags and the `<id>` placeholder,
+  // which is what keeps this from silently degrading into a test that only
+  // ever checks the two rows that happen to already be flag-only today.
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  const usageStart = body.indexOf('## Usage')
+  assert.ok(usageStart !== -1, 'connect.md has no Usage section')
+  const block = between(body.slice(usageStart), '```\n', '\n```')
+  const lines = block.split('\n').filter((l) => l.startsWith('/voice-and-tone:connect'))
+  assert.ok(lines.length >= 5, 'expected the usage block to still list its documented invocations')
+
+  const dir = makeTmpProject({})
+  try {
+    let literalLines = 0
+    for (const line of lines) {
+      const rest = line.slice('/voice-and-tone:connect'.length).trim()
+      const rawTokens = rest.length ? rest.split(/\s{2,}/)[0].trim().split(/\s+/) : []
+      if (!rawTokens.every((t) => t === '<id>' || /^--[a-z][a-z-]*$/.test(t))) continue // <path>/<url> shorthand
+      literalLines++
+      const tokens = rawTokens.map((t) => (t === '<id>' ? 's01' : t))
+      // A line like "--forget <id>" legitimately exits 1 here (no such id in
+      // an empty project) - that is a domain error, not a parse failure, and
+      // execFileSync throws on any non-zero exit. Only "Unknown option" (the
+      // real parser's own rejection message) means the flag itself is bad.
+      let out
+      try {
+        out = execFileSync(
+          process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--root', dir, ...tokens],
+          { encoding: 'utf8' }
+        )
+      } catch (error) {
+        out = `${error.stdout ?? ''}${error.stderr ?? ''}`
+      }
+      assert.ok(!/unknown option/i.test(out), `"${line}" is rejected by the real parser`)
+    }
+    assert.ok(literalLines >= 3, 'expected at least the bare/--ingest/--refresh rows to be checked as literal invocations')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('init documents --add as implemented, pointing at the script that does it', () => {
+  const body = readFileSync(surfaceFile('commands', 'init.md'), 'utf8')
+  assert.match(body, /--add/)
+  assert.match(body, /sources\.mjs/, 'the promise is now backed by a script')
+})
+
+test('the discovery skill tells the model what to do on an escalation', () => {
+  const body = readFileSync(surfaceFile('skills', 'voice-discovery', 'references', 'sourcing.md'), 'utf8')
+  assert.match(body, /estimated/)
+  assert.match(body, /never .*derived/i)
+  assert.match(body, /sources\.mjs/)
 })

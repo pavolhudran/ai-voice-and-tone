@@ -1,9 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { buildManifest } from '../scripts/scan.mjs'
+import { saveIndex } from '../scripts/lib/sourceindex.mjs'
+import { statsFor } from '../scripts/lib/metrics.mjs'
+
+const SCAN_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'scan.mjs')
 
 const config = {
   ...DEFAULT_CONFIG,
@@ -61,6 +67,86 @@ test('paths in the manifest are POSIX on every platform', () => {
   }
 })
 
+test('the manifest reports skipped files with their extension and reason', () => {
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/logo.fig': 'placeholder',
+    'content/mock.sketch': 'placeholder'
+  })
+  try {
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z')
+
+    assert.equal(manifest.totals.files, 1)
+    assert.equal(manifest.skipped.count, 2)
+    assert.deepEqual(manifest.skipped.files.map((f) => f.ext).sort(), ['.fig', '.sketch'])
+    assert.deepEqual(
+      manifest.skipped.files.map((f) => f.path),
+      ['content/logo.fig', 'content/mock.sketch'],
+      'sorted, so the artifact diffs cleanly'
+    )
+    // R23 regression net: no-extractor files must keep this reason, not the
+    // 'container' reason a supported-but-unread format gets below.
+    assert.deepEqual(manifest.skipped.files.map((f) => f.reason), ['no-extractor', 'no-extractor'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a container format in the scan glob is reported as needing ingest, not scanned inline', () => {
+  // R23 (Task 7 fix round 1): before this fix, a supported container format
+  // (.pdf, .docx, ...) resolved to a truthy `format` from formatFor, so
+  // gatherCorpus's `if (!format)` skip gate no longer caught it; the file
+  // was read as text and extractStrings threw, uncaught, killing the scan.
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/brand.pdf': 'not real pdf bytes'
+  })
+  try {
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z')
+
+    assert.equal(manifest.totals.files, 1, 'the markdown file is still scanned')
+    assert.deepEqual(manifest.files.map((f) => f.path), ['content/a.md'])
+    assert.equal(manifest.skipped.count, 1)
+    assert.deepEqual(manifest.skipped.files, [{ path: 'content/brand.pdf', ext: '.pdf', reason: 'container' }])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('the CLI summary distinguishes files with no extractor from containers that need ingest', () => {
+  const dir = makeTmpProject({
+    'content/a.md': 'Copy here.\n',
+    'content/logo.fig': 'placeholder',
+    'content/brand.pdf': 'not real pdf bytes',
+    '.voice-and-tone/config.yml': [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      'scan:',
+      '  include:',
+      '    - "content/**/*"',
+      '  exclude:',
+      '    - "node_modules/**"'
+    ].join('\n')
+  })
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [SCAN_SCRIPT, '--root', dir, '--now', '2026-08-27T00:00:00.000Z'],
+      { encoding: 'utf8' }
+    )
+    assert.match(out, /scan: 1 file\(s\) skipped \(no extractor: \.fig\)/)
+    assert.match(out, /scan: 1 file\(s\) need ingest, not scan \(run \/voice-and-tone:connect: \.pdf\)/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('a malformed JSON file is surfaced as unreadable, not silently dropped', () => {
   const jsonConfig = {
     ...config,
@@ -77,6 +163,78 @@ test('a malformed JSON file is surfaced as unreadable, not silently dropped', ()
     // The malformed file contributes no data point: it is absent from files/totals.
     assert.equal(manifest.totals.files, 1)
     assert.deepEqual(manifest.files.map((f) => f.path), ['locales/cs/common.json'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- Task 12 fix round 1: manifest.files must never list the same path
+// twice, even when a stale/hand-edited index still holds an entry for a
+// file the live project loop also emits.
+
+test('manifest.files lists a path only once, even when the index also holds an entry for it', () => {
+  const dir = makeTmpProject({ 'content/a.md': 'We write plainly. We keep it short.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    saveIndex(kb, {
+      sources: [{
+        id: 'f001', sha256: 'e'.repeat(64), kind: 'file', from: 's01',
+        origin: 'content/a.md', format: 'markdown', locale: 'en',
+        tier: 'script', fidelity: 'measured', quality: { passed: true },
+        stats: statsFor({ strings: ['We write plainly. We keep it short.'], headings: [], locale: 'en' }),
+        status: 'used', produced: []
+      }]
+    }, '2026-08-27T00:00:00.000Z')
+
+    const skipConfig = { ...DEFAULT_CONFIG, scan: { include: ['content/**/*.md'], exclude: [] } }
+    const manifest = buildManifest(dir, skipConfig, '2026-08-27T00:00:00.000Z', 'default', kb)
+
+    const paths = manifest.files.map((f) => f.path)
+    assert.deepEqual(paths, ['content/a.md'])
+    assert.equal(new Set(paths).size, paths.length, 'no path appears twice')
+    assert.equal(manifest.files[0].status, null, 'the surviving row is the live measurement, not the indexed one')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- F2: registered-but-unindexed material must be counted, and the printed
+// remedy must point at ingest rather than at a key gatherAll never reads.
+
+test('the manifest reports registered-but-unindexed files as their own channel', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n' })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const cfg = { ...DEFAULT_CONFIG, sources: [{ id: 's02', kind: 'inbox', path: 'sources/' }] }
+    const manifest = buildManifest(dir, cfg, '2026-08-27T00:00:00.000Z', 'default', kb)
+
+    assert.equal(manifest.totals.files, 0)
+    assert.equal(manifest.unindexed.count, 1)
+    assert.deepEqual(manifest.unindexed.files, [{ path: 'sources/newsletter.txt', ext: '.txt' }])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('the CLI summary names /voice-and-tone:connect --ingest for registered-but-unindexed material', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/newsletter.txt': 'We keep it plain.\n',
+    '.voice-and-tone/config.yml': [
+      'version: 1',
+      'sources:',
+      '  - id: s02',
+      '    kind: inbox',
+      '    path: "sources/"'
+    ].join('\n')
+  })
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [SCAN_SCRIPT, '--root', dir, '--now', '2026-08-27T00:00:00.000Z'],
+      { encoding: 'utf8' }
+    )
+    assert.equal(/scan: 0 files/.test(out), true)
+    assert.match(out, /scan: 1 registered file\(s\) not yet ingested \(run \/voice-and-tone:connect --ingest: \.txt\)/)
   } finally {
     cleanup(dir)
   }

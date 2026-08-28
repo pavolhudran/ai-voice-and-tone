@@ -7,7 +7,7 @@ or a bare folder of text with no code in it at all.
 Built on Mailchimp's Voice and Tone framework: **voice is constant, tone flexes
 with the reader's emotional state.**
 
-**[Read the illustrated overview](https://pavol.hudran.gitlab.io/ai-voice-and-tone/)** -
+**[Read the illustrated overview](https://ai-voice-and-tone-9125a0.gitlab.io/)** -
 the same material for a non-technical audience, with the tone matrix and the
 corroboration rule as things you can click. This README is the developer's cut:
 file layout, the arithmetic, what is enforced by code, and how to run the tests.
@@ -47,11 +47,11 @@ Or from a local checkout, point the marketplace at the directory instead:
 /plugin marketplace add ~/Sites/ai-voice-and-tone
 ```
 
-**Requires Node 18 or newer.** `/voice-and-tone:init`, `:learn`, `:audit`, and
-`:sync` run the measurement scripts directly and will not complete without it -
-`:init` calls `scan.mjs` at its first step. The writing and review commands -
-`:write`, `:rewrite`, `:localize`, `:review` - read the compiled knowledge base
-and need no runtime once it exists.
+**Requires Node 18 or newer.** `/voice-and-tone:init`, `:connect`, `:learn`,
+`:audit`, and `:sync` run scripts directly and will not complete without it -
+`:init` calls `scan.mjs` at its first step, `:connect` calls `sources.mjs`. The
+writing and review commands - `:write`, `:rewrite`, `:localize`, `:review` -
+read the compiled knowledge base and need no runtime once it exists.
 
 Zero npm dependencies, now and permanently. Nothing to install beyond the plugin.
 
@@ -62,8 +62,9 @@ Zero npm dependencies, now and permanently. Nothing to install beyond the plugin
 ```
 
 Creates `.voice-and-tone/` in your project root, then **commit it** - it is
-markdown, so voice changes arrive as pull requests you can read and revert. Only
-`.drafts/` is gitignored.
+markdown, so voice changes arrive as pull requests you can read and revert.
+`.drafts/` and `sources/` are gitignored; see
+["Where your material goes"](#where-your-material-goes) below for why.
 
 ```
 /voice-and-tone:write an error for a file over the upload limit
@@ -94,6 +95,36 @@ The interview is preference-pair calibration, not adjective elicitation. Asked
 "how formal are you, 1-5?", people answer unreliably - they are describing
 themselves. Shown two rewrites of a string they recognise, they answer well.
 Anything the corpus already answered is never asked.
+
+## Where your material goes
+
+Drop brand material - a style guide, the brand deck, past newsletters, a
+tone-of-voice PDF - into `.voice-and-tone/sources/`, or point `/voice-and-tone:connect`
+at a file, folder, or URL anywhere else. Run `/voice-and-tone:connect` any time
+to see what is new, changed, or missing.
+
+**Nothing you add is committed.** `sources/` is gitignored by default - what
+survives is `evidence/sources.json`, the record of every source's content
+hash, what was extracted from it, and which rules it produced. Identity is
+the hash, not the path, so re-adding the same file from a different folder is
+a detectable no-op. That record alone is enough to recompute the fingerprint
+or subtract any single source later, so a colleague who clones the repository
+with an empty `sources/` gets the same baseline, not a false drift report.
+
+Read deterministically, no dependencies to install: Markdown, plain text,
+JSON, YAML, PO, HTML, RTF, CSV/TSV, WebVTT/SubRip, `.docx`, `.pptx`, `.xlsx`,
+`.odt`, `.odp`, `.ods`, and PDFs with a text layer. Scanned PDFs, images, and
+JS-rendered pages are read by the model instead and recorded `estimated` -
+they can support `assumed` rules but never `derived` ones. Legacy `.doc`,
+`.ppt`, and `.xls` are refused; re-save them as the modern format.
+
+Container formats are read by two libraries vendored into the plugin rather
+than installed - pinned versions, hash-verified, so the same document
+extracts identically on every machine. See `vendor/README.md` for versions
+and licenses.
+
+To commit source material anyway, delete the `sources/` line from
+`.voice-and-tone/.gitignore`.
 
 ## The tone model
 
@@ -168,6 +199,7 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | Command | What it does |
 |---|---|
 | `/voice-and-tone:init` | discover, measure, interview, canonize |
+| `/voice-and-tone:connect` | register brand material and see what has been analysed |
 | `/voice-and-tone:write` | draft for a context and a reader state |
 | `/voice-and-tone:review` | critique with severities and `file:line` anchors |
 | `/voice-and-tone:rewrite` | off-brand text to on-brand, showing what changed and why |

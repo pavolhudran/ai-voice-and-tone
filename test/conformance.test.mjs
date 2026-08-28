@@ -25,7 +25,7 @@ const LOGIC_FILE = /\.(mjs|md)$/
 
 function walkPlugin (dir = root, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember'].includes(entry.name)) continue
+    if (['.git', 'node_modules', '.tmp', '.superpowers', '.remember', 'vendor'].includes(entry.name)) continue
     const abs = path.join(dir, entry.name)
     out.push(abs)
     if (entry.isDirectory()) walkPlugin(abs, out)
@@ -41,6 +41,12 @@ function walkPluginLogic () {
     }
   }
   return out
+}
+
+// The scripts that ship as plugin logic, .mjs only - vendor/ is already
+// pruned out of walkPlugin above, so this only ever names our own code.
+function allPluginScripts () {
+  return walkPluginLogic().filter((abs) => abs.endsWith('.mjs'))
 }
 
 test('the conformance walk actually reaches every directory holding plugin logic', () => {
@@ -70,8 +76,26 @@ test('no symlinks anywhere in the plugin tree', () => {
 test('plugin logic never shells out to unix text tools', () => {
   const forbidden = /\b(?:grep|sed|awk|find|cat)\s+-|\bexecSync\(|\bchild_process\b/
   for (const abs of walkPluginLogic()) {
+    if (abs.endsWith(path.join('scripts', 'vendor.mjs'))) continue // the one exception, by design
     const source = readFileSync(abs, 'utf8')
     assert.ok(!forbidden.test(source), `${path.relative(root, abs)} shells out or uses a unix text tool`)
+  }
+})
+
+test('plugin logic never uses the newer built-in dirname shorthand on import.meta', () => {
+  // That shorthand needs Node >= 20.11. package.json's "engines" (and
+  // test/manifest.test.mjs, which pins it) declare a floor of >= 18.13, where
+  // the shorthand is undefined and the next path.join(undefined, ...) throws
+  // - a real crash for a user on the declared floor, not a style nit. Four
+  // scripts reached for it anyway (fixed alongside this sweep); this postdates
+  // that fix and exists so the next file that needs a directory path cannot
+  // silently reintroduce the same crash. The portable replacement is
+  // path.dirname(fileURLToPath(import.meta.url)).
+  for (const abs of allPluginScripts()) {
+    const source = readFileSync(abs, 'utf8')
+    assert.ok(!source.includes('import.meta.dirname'),
+      `${path.relative(root, abs)} uses import.meta.dirname (needs Node >= 20.11); ` +
+      'use path.dirname(fileURLToPath(import.meta.url)) to stay on the declared >= 18.13 floor')
   }
 })
 
@@ -105,6 +129,27 @@ test('no file in the plugin tree carries a literal byte-order mark', () => {
     for (let i = 0; i < bytes.length - 2; i++) {
       const isBom = bytes[i] === 0xEF && bytes[i + 1] === 0xBB && bytes[i + 2] === 0xBF
       assert.ok(!isBom, `${path.relative(root, abs)} contains a literal BOM at byte ${i}`)
+    }
+  }
+})
+
+test('no file in the plugin tree carries a literal control character', () => {
+  // The same defect class as the BOM guard above, and it has landed in this
+  // project three times: a source line needs a non-printable sentinel (a
+  // delimiter no real text will contain), someone's editor or shell
+  // collapses the intended \u00XX escape into the raw byte, and it is
+  // invisible in review - a diff shows nothing, and it's invisible in every
+  // editor, because it renders exactly one narrow control-picture glyph
+  // wide either way. Tab, LF and CR are legitimate file content and are
+  // covered by the CRLF test above, so they are excluded here.
+  for (const abs of walkPlugin()) {
+    if (lstatSync(abs).isDirectory()) continue
+    if (!/\.(mjs|md|json|yml|yaml)$/.test(abs)) continue
+    const bytes = readFileSync(abs)
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i]
+      const isControl = byte < 0x20 && byte !== 0x09 && byte !== 0x0A && byte !== 0x0D
+      assert.ok(!isControl, `${path.relative(root, abs)} contains a literal control byte (0x${byte.toString(16).padStart(2, '0')}) at byte ${i}`)
     }
   }
 })
@@ -208,4 +253,18 @@ test('toAscii normalizes a non-breaking space to a regular space, not a question
   const output = toAscii(input)
   assert.equal(output, 'a b')
   assert.ok(!output.includes('?'), 'a non-breaking space must not degrade to a question mark')
+})
+
+const VENDOR = 'vendor'
+
+test('only the vendoring tool may use npm or a child process', () => {
+  for (const file of allPluginScripts()) {
+    if (file.includes(VENDOR)) continue
+    if (file.endsWith(path.join('scripts', 'vendor.mjs'))) continue // the one exception, by design
+    const body = readFileSync(file, 'utf8')
+    assert.ok(
+      !/child_process|execSync|execFileSync|spawnSync/.test(body),
+      `${file} spawns a process; only scripts/vendor.mjs may, and it never runs on a user machine`
+    )
+  }
 })

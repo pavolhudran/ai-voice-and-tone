@@ -34,16 +34,22 @@ drives interview priority, review severity, and rule retirement.
 
 Resolve `<KB>` = `.voice-and-tone/` at the project root unless the user names
 another path. If `<KB>/config.yml` already exists, this is an **extension** run:
-skip to step 6 and diff against what is there rather than overwriting it.
+skip to step 5 and diff against what is there rather than overwriting it.
 
 Probe the runtime once: run `node --version`. Record the result - it decides
 whether metrics are `measured` or `estimated`, and an `estimated` fingerprint may
 only ever produce `assumed` rules, never `derived`.
 
-## 1. Scan
+## 1. Source and scan
 
 Copy the templates from `<plugin>/templates/kb/` into `<KB>/` first, so the
 scripts have a config to read. Rename `gitignore` to `.gitignore`.
+
+Ask where the project's brand material lives before scanning anything -
+project copy, a folder elsewhere on disk, pages on the web, or files the user
+has not dropped in yet. Mention `<KB>/sources/` explicitly: it is where
+anything that is not already project copy (a brand deck, a style guide PDF,
+exported newsletters) belongs, and nothing placed there is ever committed.
 
 Then ask what shape the project is, or infer it:
 
@@ -54,10 +60,12 @@ Then ask what shape the project is, or infer it:
 | Docs repo | the docs themselves |
 | No repo | a folder the user points at, pasted text, or URLs |
 
-Adjust `scan.include` in `<KB>/config.yml` to match, then run:
+Adjust the `project` entry's `include` under `<KB>/config.yml`'s `sources:` list
+to match, then run:
 
 ```
 node "<plugin>/scripts/scan.mjs" --root "<project>" --kb "<KB>"
+node "<plugin>/scripts/sources.mjs" --root "<project>" --kb "<KB>" --check
 ```
 
 Read the printed totals back to the user. If the file count is zero, the include
@@ -66,15 +74,18 @@ nothing.
 
 **Out of scope for v1:** string literals inside source code. Too language-specific
 and too error-prone; the false positives would poison the fingerprint. Point
-`scan.include` at specific files instead.
+the `project` entry's `include` at specific files instead.
 
-## 2. Ingest
+If the project already has a style guide, a tone-of-voice document, or a
+writing handbook - on disk, dropped into `<KB>/sources/`, or named with
+`--add` - it is registered brand material, not an ad-hoc read: run
+`node "<plugin>/scripts/sources.mjs" --root "<project>" --kb "<KB>" --ingest`
+and read `references/sourcing.md` for how to read the report and act on it,
+including what to do when a source needs the model tier. Rules an existing
+document states explicitly enter at `confirmed` with an evidence entry of type
+`source`; an existing explicit rule outranks anything inferred.
 
-If the project already has a style guide, a tone-of-voice document, or a writing
-handbook, read it and enter its rules at `confirmed` with an evidence entry of
-type `source`. An existing explicit rule outranks anything inferred.
-
-## 3. Measure
+## 2. Measure
 
 ```
 node "<plugin>/scripts/fingerprint.mjs" --root "<project>" --kb "<KB>" --set-baseline
@@ -86,7 +97,7 @@ yourself. Say so in one line to the user, and note how to upgrade.
 Fingerprints are per locale and are never averaged across locales. English-only
 metrics come back `null` for other languages - that is correct, not a gap.
 
-## 4. Draft the knowledge base
+## 3. Draft the knowledge base
 
 Fill every slot. Nothing is left blank:
 
@@ -100,13 +111,13 @@ Write each rule in the §4.3 shape, with an evidence ID, and add the matching
 ledger entry with a `Produced:` line naming every rule it created. Bidirectionality
 is required: it is what makes retraction possible later.
 
-## 5. Gap analysis
+## 4. Gap analysis
 
 Read `references/gap-analysis.md`. Turn unfilled and low-confidence slots into
 candidate questions, then rank them by **leverage** - how many downstream rules
 each answer resolves. Drop anything the corpus already answered.
 
-## 6. Interview
+## 5. Interview
 
 Read `references/interview-method.md`. The primary mechanism is preference-pair
 calibration - forced choice between rewrites of the project's **own** strings,
@@ -120,14 +131,14 @@ Constraints:
 Each pick writes a `confirmed` rule and an `interview` ledger entry that stores
 the pair as evidence.
 
-## 7. Locales
+## 6. Locales
 
 For each locale beyond the primary, create `<KB>/locales/<code>.md` from
 `<plugin>/templates/kb/locales/_template.md`. Read `references/locale-seed.md`:
 fill the typography conventions mechanically - they are not brand opinions and
 need no question - and interview only for the brand decisions.
 
-## 8. Canonize
+## 7. Canonize
 
 1. Run `node "<plugin>/scripts/validate.mjs" --kb "<KB>"`. Fix every error before continuing.
 2. Run `node "<plugin>/scripts/compile-context.mjs" --root "<project>" --kb "<KB>"`.

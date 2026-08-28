@@ -2,7 +2,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { writeTextFile, toPosix } from './lib/fsx.mjs'
 import { loadConfig, activeProfile } from './lib/config.mjs'
-import { gatherCorpus } from './lib/corpus.mjs'
+import { gatherAll } from './lib/corpus.mjs'
 import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
 import { countHits, rankRules } from './lib/hits.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -147,7 +147,15 @@ function main (argv) {
   const kb = loadKb(kbRoot)
   const config = loadConfig(kbRoot)
   const profileName = values.profile ?? 'default'
-  const corpusStrings = gatherCorpus(projectRoot, config, profileName).flatMap((f) => f.strings)
+  // gatherAll, not the older gatherCorpus: gatherCorpus reads config.scan
+  // directly, a key the register (config.sources) has superseded everywhere
+  // else in this pipeline. Using it here let CONTEXT.md - the always-loaded
+  // runtime card - rank its lexicon and mechanics off a corpus the
+  // fingerprint no longer measures, and see project files only, never an
+  // inbox or local source's register entry. gatherAll agrees with
+  // scan.mjs/fingerprint.mjs on what the corpus is: the register, with
+  // `scan` read only as loadRegister's own migration fallback.
+  const corpusStrings = gatherAll({ projectRoot, kbRoot, config, profileName }).files.flatMap((f) => f.strings)
 
   const md = compileContext(kb, { corpusStrings, generated: nowIso(values), profileName })
   const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'CONTEXT.md')

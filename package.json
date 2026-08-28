@@ -8,6 +8,10 @@
     "node": ">=18.13.0"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   }
 }

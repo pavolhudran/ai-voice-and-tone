@@ -83,19 +83,23 @@ blockquote {
 /* ---------- header: wordmark row, then a nav band ---------- */
 .topbar { position: sticky; top: 0; z-index: 20; background: var(--paper); }
 .topbar-top { background: var(--paper); }
-.topbar-top-inner { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; padding-block: .85rem; }
+.topbar-top-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.25rem .75rem; padding-block: .85rem; }
 .brandmark {
   font-family: var(--display); font-weight: 700; font-size: 1.4rem;
   letter-spacing: -.02em; color: var(--ink); text-decoration: none; white-space: nowrap;
 }
 .brandmark em { font-style: italic; font-weight: 400; }
+.topbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .6rem; }
 .framework-link {
   font-size: var(--step--1); font-weight: 600; text-decoration: none;
-  background: var(--band); color: var(--on-band);
   padding: .45rem .95rem; border-radius: 999px; white-space: nowrap;
-  transition: background .15s, color .15s;
+  border: 1.5px solid transparent;
+  transition: background .15s, color .15s, border-color .15s;
 }
-.framework-link:hover { background: var(--ink); color: var(--band); }
+.framework-link.is-primary { background: var(--band); color: var(--on-band); }
+.framework-link.is-primary:hover { background: var(--ink); color: var(--band); }
+.framework-link.is-secondary { background: transparent; color: var(--ink); border-color: var(--edge); }
+.framework-link.is-secondary:hover { background: var(--grey); border-color: var(--ink-soft); }
 
 .topbar-nav { background: var(--grey); }
 .navlinks {
@@ -292,7 +296,10 @@ footer p + p { margin-top: .7rem; }
   <div class="topbar-top">
     <div class="wrap topbar-top-inner">
       <a class="brandmark" href="#top">Voice <em>&amp;</em> Tone</a>
-      <a class="framework-link" href="https://styleguide.mailchimp.com/voice-and-tone/" target="_blank" rel="noopener noreferrer">Built on Mailchimp&rsquo;s framework <span aria-hidden="true">&#8599;</span></a>
+      <div class="topbar-actions">
+        <a class="framework-link is-secondary" href="https://styleguide.mailchimp.com/voice-and-tone/" target="_blank" rel="noopener noreferrer">Built on Mailchimp&rsquo;s framework <span aria-hidden="true">&#8599;</span></a>
+        <a class="framework-link is-primary" href="https://gitlab.com/pavol.hudran/ai-voice-and-tone" target="_blank" rel="noopener noreferrer">View the source <span aria-hidden="true">&#8599;</span></a>
+      </div>
     </div>
   </div>
   <div class="topbar-nav">
@@ -317,11 +324,11 @@ footer p + p { margin-top: .7rem; }
   <h1>A brand voice guide your tooling can prove.</h1>
   <p class="lede">Most style guides are opinions nobody can check. Here, every rule records where it came from and how sure it is.</p>
   <div class="specs">
-    <span class="spec"><b>8</b> commands</span>
+    <span class="spec"><b>9</b> commands</span>
     <span class="spec"><b>5</b> skills</span>
     <span class="spec"><b>1</b> independent critic</span>
-    <span class="spec"><b>5</b> CLI scripts</span>
-    <span class="spec"><b>11</b> shared modules</span>
+    <span class="spec"><b>6</b> CLI scripts</span>
+    <span class="spec"><b>20</b> shared modules</span>
     <span class="spec">Node 18+</span>
     <span class="spec disclaim">Not affiliated with Mailchimp</span>
   </div>
@@ -368,7 +375,7 @@ footer p + p { margin-top: .7rem; }
   <p class="eyebrow">Getting started</p>
   <div class="stack measure">
     <h2>It reads what you have already written.</h2>
-    <p>No template to fill in. It scans your existing copy: pages, UI strings, docs, locale files. Then it measures that copy and turns what it still does not know into questions.</p>
+    <p>No template to fill in. Point it at what you already have - pages and UI strings in the project, a style guide or brand deck dropped in, even a page on your live site - in almost any format. It measures that material and turns what it still does not know into questions.</p>
   </div>
 
   <div class="pipeline" style="margin-top:1.8rem">
@@ -393,6 +400,15 @@ footer p + p { margin-top: .7rem; }
       <b>B</b>&nbsp; Campaign scheduled successfully. &nbsp;<i style="color:var(--ink-faint)">&larr; unchanged baseline</i><br>
       <b>C</b>&nbsp; All set. It goes out Thursday at 9am. &nbsp;<i style="color:var(--ink-faint)">&larr; specificity</i>
     </p>
+  </div>
+
+  <div class="plate" style="margin-top:1.8rem">
+    <span class="plate-label">What happens to your material</span>
+    <div class="cols">
+      <p class="note">Point it at anything you have already written - a style guide, an old newsletter, a brand deck living in a completely different folder, a page on the web - in almost any format you already have it in.</p>
+      <p class="note">Most of that it reads for itself, the same bytes to the same result every time. What it genuinely cannot - a scanned page, a photograph of a slide - it shows to the model instead.</p>
+      <p class="note">Either way, it is read once, then thrown away. What stays is what it proved: enough to recompute the whole voice, or subtract any one source later, without ever keeping the file itself.</p>
+    </div>
   </div>
 </section>
 
@@ -459,6 +475,7 @@ footer p + p { margin-top: .7rem; }
 
   <div class="plate" style="margin-top:1.6rem">
     <pre class="tree">.voice-and-tone/
+  <b>config.yml</b>        <i>Profiles, locales, thresholds - and where your material lives.</i>
   <b>CONTEXT.md</b>        <i>GENERATED. ~600 tokens. Loaded before every piece of copy.</i>
   <b>voice.md</b>          <i>Constant. Three to six characteristics, each with what it rules out.</i>
   <b>tone.md</b>           <i>The eighteen rows of numbers, plus the cells you actually authored.</i>
@@ -467,9 +484,11 @@ footer p + p { margin-top: .7rem; }
   <b>mechanics.md</b>      <i>Grammar, casing, punctuation.</i>
   <b>channels/</b>         <i>Per-channel playbooks, generated on second use.</i>
   <b>locales/</b>          <i>Typography seeded automatically; register and anglicisms asked.</i>
+  <b>sources/</b>          <i>Where you drop brand material. Never committed - that is the point.</i>
   <b>evidence/</b>
     <b>ledger.md</b>       <i>Numbered, dated, and bidirectional.</i>
     <b>fingerprint.json</b> <i>Measured metrics, and the baseline drift is measured against.</i>
+    <b>sources.json</b>    <i>What was analysed and what it proved - so the material above can be safely thrown away.</i>
   <b>CHANGELOG.md</b>      <i>Appended on every approved change.</i></pre>
   </div>
 
@@ -488,7 +507,7 @@ footer p + p { margin-top: .7rem; }
 <section id="surface" class="wrap">
   <p class="eyebrow">What you actually type</p>
   <div class="stack measure">
-    <h2>Eight commands, five skills that need no command.</h2>
+    <h2>Nine commands, five skills that need no command.</h2>
     <p>Commands are explicit. Skills trigger themselves. Ask for a button label and the microcopy skill loads uncalled.</p>
   </div>
 
@@ -498,6 +517,7 @@ footer p + p { margin-top: .7rem; }
         <thead><tr><th>Command</th><th>What it does</th></tr></thead>
         <tbody>
           <tr><td>:init</td><td>Discover, measure, interview, canonize.</td></tr>
+          <tr><td>:connect</td><td>Point it at brand material, anywhere, and see what has been learned.</td></tr>
           <tr><td>:write</td><td>Draft for a context and a reader state.</td></tr>
           <tr><td>:review</td><td>Critique with severities and file:line anchors.</td></tr>
           <tr><td>:rewrite</td><td>Off-brand text to on-brand, showing what changed and why.</td></tr>
@@ -594,7 +614,7 @@ footer p + p { margin-top: .7rem; }
       <span class="num">3</span>
       <div>
         <h3>Commit the folder</h3>
-        <p>It is markdown, so it belongs in version control. Voice changes then arrive as pull requests you can read and revert. Only <span class="mono">.drafts/</span> is gitignored.</p>
+        <p>It is markdown, so it belongs in version control. Voice changes then arrive as pull requests you can read and revert. Drafts and any raw material you dropped in stay out of git - what it measured from them does not.</p>
       </div>
     </div>
     <div class="gstep">

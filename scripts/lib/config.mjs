@@ -23,6 +23,10 @@ export const DEFAULT_CONFIG = Object.freeze({
     ],
     exclude: ['node_modules/**', 'dist/**', 'build/**', '.git/**', '.voice-and-tone/**']
   },
+  // Empty by design. loadRegister() synthesises a `project` entry from `scan`
+  // when this is empty, so an existing knowledge base is unaffected until it
+  // opts in by running /voice-and-tone:connect.
+  sources: [],
   runtime: { node: 'detected', probed: null },
   thresholds: { corroboration: 2, derived_min_samples: 5, stale_months: 9 }
 })

@@ -57,20 +57,6 @@ const share = (count, total) => (total > 0 ? round(count / total, 3) : null)
 const per1000 = (count, words) => (words > 0 ? round((count * 1000) / words, 2) : null)
 const countMatches = (text, pattern) => (text.match(pattern) || []).length
 
-function median (numbers) {
-  if (numbers.length === 0) return null
-  const sorted = [...numbers].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
-}
-
-function stdDev (numbers) {
-  if (numbers.length === 0) return null
-  const mean = numbers.reduce((a, b) => a + b, 0) / numbers.length
-  const variance = numbers.reduce((sum, n) => sum + (n - mean) ** 2, 0) / numbers.length
-  return Math.sqrt(variance)
-}
-
 function isTitleCase (heading) {
   const words = splitWords(heading)
   if (words.length < 2) return null
@@ -79,91 +65,237 @@ function isTitleCase (heading) {
   return significant.every((w) => /^[\p{Lu}\p{N}]/u.test(w))
 }
 
-export function universalMetrics ({ strings = [], headings = [], locale = 'en' } = {}) {
+/**
+ * Sentence-length buckets. Coarse on purpose: the median they reconstruct is
+ * only ever compared against the brand's own baseline, never an absolute
+ * threshold, so bucket accuracy is enough. Spec section 6.3.
+ */
+export const SENT_LEN_BUCKETS = ['1-5', '6-10', '11-20', '21-40', '41+']
+const BUCKET_MIDPOINT = { '1-5': 3, '6-10': 8, '11-20': 15.5, '21-40': 30.5, '41+': 41 }
+
+function bucketFor (n) {
+  if (n <= 5) return '1-5'
+  if (n <= 10) return '6-10'
+  if (n <= 20) return '11-20'
+  if (n <= 40) return '21-40'
+  return '41+'
+}
+
+const NUMERIC_KEYS = [
+  'strings', 'words', 'sentences', 'paragraphs',
+  'sumWordLen', 'sumSentLen', 'sumSentLenSq', 'sumParaSent',
+  'exclamations', 'questions', 'emoji', 'emDash', 'semicolon',
+  'firstPerson', 'secondPerson', 'headingsTotal', 'headingsTitleCase'
+]
+const ENGLISH_KEYS = [
+  'syllables', 'contractions', 'passiveSentences', 'imperativeOpeners',
+  'hedges', 'intensifiers', 'oxfordLists', 'oxfordHits', 'longWords'
+]
+
+export function emptyStats () {
+  const out = { sentLenHist: {}, personMarkers: true, english: null }
+  for (const key of NUMERIC_KEYS) out[key] = 0
+  for (const bucket of SENT_LEN_BUCKETS) out.sentLenHist[bucket] = 0
+  return out
+}
+
+function emptyEnglish () {
+  const out = {}
+  for (const key of ENGLISH_KEYS) out[key] = 0
+  return out
+}
+
+/**
+ * Counts for ONE unit - one file, one PDF, one fetched page. Never for a
+ * concatenation of several.
+ *
+ * Measuring per unit and merging counts is what makes the index a sufficient
+ * statistic (spec section 6). It is also more correct than the join-then-
+ * measure approach it replaces: joining two unrelated documents let text-level
+ * patterns such as SERIAL_LIST match across the seam between them, inventing a
+ * hit that exists in neither document.
+ */
+export function statsFor ({ strings = [], headings = [], locale = 'en' } = {}) {
+  const out = emptyStats()
   const text = strings.join('\n\n')
   const sentences = strings.flatMap((s) => splitSentences(s))
   const words = splitWords(text)
   const paragraphs = splitParagraphs(text)
-  const sentenceLengths = sentences.map((s) => splitWords(s).length)
-  const wordCount = words.length
+  const lowerWords = words.map((w) => w.toLowerCase())
+
+  out.strings = strings.length
+  out.words = words.length
+  out.sentences = sentences.length
+  out.paragraphs = paragraphs.length
+  out.sumWordLen = words.reduce((sum, w) => sum + w.length, 0)
+  out.sumParaSent = paragraphs.reduce((sum, p) => sum + splitSentences(p).length, 0)
+
+  for (const sentence of sentences) {
+    const n = splitWords(sentence).length
+    out.sumSentLen += n
+    out.sumSentLenSq += n * n
+    out.sentLenHist[bucketFor(n)] += 1
+  }
+
+  out.exclamations = sentences.filter((s) => /!\p{P}*$/u.test(s)).length
+  out.questions = sentences.filter((s) => /\?\p{P}*$/u.test(s)).length
+  out.emoji = countMatches(text, /\p{Extended_Pictographic}/gu)
+  out.emDash = countMatches(text, /—|\s-\s/g)
+  out.semicolon = countMatches(text, /;/g)
 
   const markers = PERSON_MARKERS[String(locale).slice(0, 2).toLowerCase()] ?? null
-  const lowerWords = words.map((w) => w.toLowerCase())
-  const countIn = (set) => lowerWords.filter((w) => set.includes(w)).length
-
-  // Title Case is a stylistic choice only in languages that don't already
-  // capitalize by grammar. German capitalizes every noun regardless of
-  // styling, so a heading list of ordinary nouns with no brand styling at
-  // all ("Berichte", "Einstellungen") scores 1.0 under the raw heuristic -
-  // a false signal. Czech doesn't title-case headings at all, so the same
-  // heuristic trends to 0 for an axis that doesn't exist in the language.
-  // Gate this the same way PERSON_MARKERS gates person rates: compute only
-  // where title case is a real editorial decision (English), null elsewhere.
-  const isEnglishLocale = String(locale).toLowerCase().startsWith('en')
-  const headingVerdicts = isEnglishLocale ? headings.map(isTitleCase).filter((v) => v !== null) : []
-
-  return {
-    sentenceCount: sentences.length,
-    wordCount,
-    paragraphCount: paragraphs.length,
-    meanSentenceLength: sentences.length ? round(sentenceLengths.reduce((a, b) => a + b, 0) / sentences.length, 2) : null,
-    medianSentenceLength: round(median(sentenceLengths), 2),
-    sentenceLengthSd: round(stdDev(sentenceLengths), 2),
-    meanParagraphLength: paragraphs.length
-      ? round(paragraphs.reduce((sum, p) => sum + splitSentences(p).length, 0) / paragraphs.length, 2)
-      : null,
-    meanWordLength: wordCount ? round(words.reduce((sum, w) => sum + w.length, 0) / wordCount, 2) : null,
-    exclamationRate: share(sentences.filter((s) => /!\p{P}*$/u.test(s)).length, sentences.length),
-    questionRate: share(sentences.filter((s) => /\?\p{P}*$/u.test(s)).length, sentences.length),
-    emojiPer1000Words: per1000(countMatches(text, /\p{Extended_Pictographic}/gu), wordCount),
-    emDashPer1000Words: per1000(countMatches(text, /—|\s-\s/g), wordCount),
-    semicolonPer1000Words: per1000(countMatches(text, /;/g), wordCount),
-    headingTitleCaseRatio: isEnglishLocale ? share(headingVerdicts.filter(Boolean).length, headingVerdicts.length) : null,
-    firstPersonPer1000Words: markers ? per1000(countIn(markers.first), wordCount) : null,
-    secondPersonPer1000Words: markers ? per1000(countIn(markers.second), wordCount) : null
+  out.personMarkers = markers !== null
+  if (markers) {
+    out.firstPerson = lowerWords.filter((w) => markers.first.includes(w)).length
+    out.secondPerson = lowerWords.filter((w) => markers.second.includes(w)).length
   }
+
+  // Title case is only an editorial decision in languages that do not
+  // capitalize by grammar. Outside English no verdicts are recorded, which
+  // leaves headingsTotal at 0 and makes the ratio null by construction.
+  if (String(locale).toLowerCase().startsWith('en')) {
+    for (const verdict of headings.map(isTitleCase)) {
+      if (verdict === null) continue
+      out.headingsTotal += 1
+      if (verdict) out.headingsTitleCase += 1
+    }
+
+    const en = emptyEnglish()
+    en.syllables = words.reduce((sum, w) => sum + countSyllablesEn(w), 0)
+    en.contractions = countMatches(text, CONTRACTION)
+    en.passiveSentences = sentences.filter((s) => PASSIVE.test(s)).length
+    en.imperativeOpeners = sentences.filter((sentence) => {
+      const first = (splitWords(sentence)[0] || '').toLowerCase()
+      return EN_IMPERATIVE_OPENERS.has(first)
+    }).length
+    en.hedges = lowerWords.filter((w) => EN_HEDGES.has(w)).length
+    en.intensifiers = lowerWords.filter((w) => EN_INTENSIFIERS.has(w)).length
+
+    const listCandidates = text.match(SERIAL_LIST) || []
+    en.oxfordLists = listCandidates.length
+    en.oxfordHits = listCandidates.filter((candidate) => OXFORD.test(candidate)).length
+    en.longWords = words.filter((w) => countSyllablesEn(w) > 3).length
+    out.english = en
+  }
+
+  return out
 }
 
-export function englishMetrics ({ strings = [] } = {}) {
-  const text = strings.join('\n\n')
-  const sentences = strings.flatMap((s) => splitSentences(s))
-  const words = splitWords(text)
-  const wordCount = words.length
-  const lowerWords = words.map((w) => w.toLowerCase())
-  const syllables = words.reduce((sum, w) => sum + countSyllablesEn(w), 0)
+/** Associative and commutative. Merge only within one locale (spec 5.3). */
+export function mergeStats (statsList) {
+  const items = (statsList || []).filter(Boolean)
+  const out = emptyStats()
+  if (items.length === 0) return out
 
-  const listCandidates = text.match(SERIAL_LIST) || []
-  const oxfordCount = listCandidates.filter((candidate) => OXFORD.test(candidate)).length
-
-  const imperativeOpeners = sentences.filter((sentence) => {
-    const first = (splitWords(sentence)[0] || '').toLowerCase()
-    return EN_IMPERATIVE_OPENERS.has(first)
-  }).length
-
-  return {
-    contractionPer1000Words: per1000(countMatches(text, CONTRACTION), wordCount),
-    readingGrade: sentences.length && wordCount
-      ? round(0.39 * (wordCount / sentences.length) + 11.8 * (syllables / wordCount) - 15.59, 2)
-      : null,
-    passiveRate: share(sentences.filter((s) => PASSIVE.test(s)).length, sentences.length),
-    imperativeOpenerRate: share(imperativeOpeners, sentences.length),
-    hedgePer1000Words: per1000(lowerWords.filter((w) => EN_HEDGES.has(w)).length, wordCount),
-    intensifierPer1000Words: per1000(lowerWords.filter((w) => EN_INTENSIFIERS.has(w)).length, wordCount),
-    oxfordCommaRate: share(oxfordCount, listCandidates.length),
-    longWordRate: share(words.filter((w) => countSyllablesEn(w) > 3).length, wordCount)
+  // english.* is summed only over items that carry an english block, but
+  // s.words / s.sentences sum over ALL items. A mixed merge would divide
+  // English-only sums by an inflated denominator and silently report a
+  // deflated, wrong (never null, never an error) rate. Refuse rather than
+  // guess: this is the load-bearing merge of a design whose stated failure
+  // mode is confidently-reported fictitious numbers.
+  //
+  // A unit with zero words (emptyStats(), or any other genuinely empty unit)
+  // is exempt: it is the merge identity and contributes nothing to either
+  // side of the ratio, so it cannot be the source of a mismatched
+  // denominator regardless of its own locale.
+  const withContent = items.filter((s) => s.words > 0)
+  if (withContent.some((s) => s.english) && withContent.some((s) => !s.english)) {
+    throw new Error('mergeStats: refusing to merge English and non-English units - rates would be silently deflated by the mismatched denominator')
   }
+
+  out.personMarkers = items.every((s) => s.personMarkers !== false)
+  if (items.some((s) => s.english)) out.english = emptyEnglish()
+
+  for (const item of items) {
+    for (const key of NUMERIC_KEYS) out[key] += item[key] ?? 0
+    for (const bucket of SENT_LEN_BUCKETS) {
+      out.sentLenHist[bucket] += item.sentLenHist?.[bucket] ?? 0
+    }
+    if (item.english && out.english) {
+      for (const key of ENGLISH_KEYS) out.english[key] += item.english[key] ?? 0
+    }
+  }
+  return out
 }
 
-export function computeFingerprint ({ strings = [], headings = [], locale = 'en' } = {}) {
+function sdFromSums (sum, sumSq, n) {
+  if (!n) return null
+  const variance = sumSq / n - (sum / n) ** 2
+  return round(Math.sqrt(Math.max(variance, 0)), 2)
+}
+
+function medianFromHist (hist, n) {
+  if (!n) return null
+  const target = n / 2
+  let seen = 0
+  for (const bucket of SENT_LEN_BUCKETS) {
+    seen += hist[bucket] ?? 0
+    if (seen >= target) return BUCKET_MIDPOINT[bucket]
+  }
+  return BUCKET_MIDPOINT['41+']
+}
+
+/** Arithmetic only. Every input comes from a Stats block; no text is needed. */
+export function fingerprintFromStats (stats, locale = 'en') {
+  const s = stats ?? emptyStats()
   const isEnglish = String(locale).toLowerCase().startsWith('en')
+  const en = isEnglish && s.english ? s.english : null
+
   return {
     locale,
-    sample: {
-      strings: strings.length,
-      words: splitWords(strings.join('\n\n')).length,
-      sentences: strings.flatMap((s) => splitSentences(s)).length
+    // Stated rather than hidden: the median is reconstructed from a bucketed
+    // histogram because a median cannot be merged from sums. Spec 6.3.
+    approximations: ['medianSentenceLength'],
+    sample: { strings: s.strings, words: s.words, sentences: s.sentences },
+    universal: {
+      sentenceCount: s.sentences,
+      wordCount: s.words,
+      paragraphCount: s.paragraphs,
+      meanSentenceLength: s.sentences ? round(s.sumSentLen / s.sentences, 2) : null,
+      medianSentenceLength: medianFromHist(s.sentLenHist, s.sentences),
+      sentenceLengthSd: sdFromSums(s.sumSentLen, s.sumSentLenSq, s.sentences),
+      meanParagraphLength: s.paragraphs ? round(s.sumParaSent / s.paragraphs, 2) : null,
+      meanWordLength: s.words ? round(s.sumWordLen / s.words, 2) : null,
+      exclamationRate: share(s.exclamations, s.sentences),
+      questionRate: share(s.questions, s.sentences),
+      emojiPer1000Words: per1000(s.emoji, s.words),
+      emDashPer1000Words: per1000(s.emDash, s.words),
+      semicolonPer1000Words: per1000(s.semicolon, s.words),
+      headingTitleCaseRatio: isEnglish ? share(s.headingsTitleCase, s.headingsTotal) : null,
+      firstPersonPer1000Words: s.personMarkers ? per1000(s.firstPerson, s.words) : null,
+      secondPersonPer1000Words: s.personMarkers ? per1000(s.secondPerson, s.words) : null
     },
-    universal: universalMetrics({ strings, headings, locale }),
-    english: isEnglish ? englishMetrics({ strings }) : null
+    english: en
+      ? {
+          contractionPer1000Words: per1000(en.contractions, s.words),
+          readingGrade: s.sentences && s.words
+            ? round(0.39 * (s.words / s.sentences) + 11.8 * (en.syllables / s.words) - 15.59, 2)
+            : null,
+          passiveRate: share(en.passiveSentences, s.sentences),
+          imperativeOpenerRate: share(en.imperativeOpeners, s.sentences),
+          hedgePer1000Words: per1000(en.hedges, s.words),
+          intensifierPer1000Words: per1000(en.intensifiers, s.words),
+          oxfordCommaRate: share(en.oxfordHits, en.oxfordLists),
+          longWordRate: share(en.longWords, s.words)
+        }
+      : null
   }
+}
+
+/** Kept for callers that hold the text and want a fingerprint in one step. */
+export function computeFingerprint ({ strings = [], headings = [], locale = 'en' } = {}) {
+  return fingerprintFromStats(statsFor({ strings, headings, locale }), locale)
+}
+
+/**
+ * Kept as thin wrappers over the statistics layer rather than removed:
+ * test/metrics.test.mjs asserts against them directly, and those assertions
+ * are the regression net proving this refactor preserves behaviour.
+ */
+export function universalMetrics ({ strings = [], headings = [], locale = 'en' } = {}) {
+  return fingerprintFromStats(statsFor({ strings, headings, locale }), locale).universal
+}
+
+export function englishMetrics ({ strings = [], headings = [], locale = 'en' } = {}) {
+  return fingerprintFromStats(statsFor({ strings, headings, locale }), locale).english
 }

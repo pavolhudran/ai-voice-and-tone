@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  normalizeEol, splitParagraphs, splitSentences, splitWords, countSyllablesEn
+  normalizeEol, splitParagraphs, splitSentences, splitWords, countSyllablesEn,
+  stripControlChars
 } from '../scripts/lib/text.mjs'
 
 test('normalizeEol folds CRLF and lone CR', () => {
@@ -47,6 +48,19 @@ test('English syllable counting is close enough for a reading grade', () => {
   assert.equal(countSyllablesEn('marketing'), 3)
   assert.equal(countSyllablesEn('accessibility'), 6)
   assert.equal(countSyllablesEn(''), 0)
+})
+
+test('stripControlChars drops C0 and C1/DEL bytes but keeps tab, LF, and CR', () => {
+  // Built with fromCharCode, never a literal \u escape typed into this test
+  // file - that escape has re-collapsed into the raw byte in this codebase
+  // before, which is exactly the defect class this function guards against.
+  const nul = String.fromCharCode(0)
+  const del = String.fromCharCode(0x7f)
+  const c1 = String.fromCharCode(0x99) // trademark range, cp1252 0x99
+  assert.equal(stripControlChars(`A${nul}B${del}C${c1}D`), 'ABCD')
+  assert.equal(stripControlChars('Save\tit'), 'Save\tit')
+  assert.equal(stripControlChars('Line1\nLine2'), 'Line1\nLine2')
+  assert.equal(stripControlChars('A\rB'), 'A\rB')
 })
 
 test('the syllable heuristic over-counts -uled words, a known blind spot', () => {

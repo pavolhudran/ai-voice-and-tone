@@ -1,0 +1,23 @@
+{
+  "libraries": {
+    "pdfjs-dist": {
+      "version": "4.10.38",
+      "license": "Apache-2.0",
+      "source": "https://github.com/mozilla/pdf.js",
+      "files": {
+        "pdfjs/pdf.min.mjs": "44ec6f011027ee77791386b66c14876a5fc29e20bf0433c07c6726fff7212b72",
+        "pdfjs/pdf.worker.min.mjs": "bd88805178a26c729db8c0107a5b630cb900ec070f4d8c7529a3e45530afd41d",
+        "pdfjs/LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      }
+    },
+    "officeparser": {
+      "version": "7.8.0",
+      "license": "MIT",
+      "source": "https://github.com/harshankur/officeParser",
+      "files": {
+        "officeparser/LICENSE": "f7b176a1baf2fc244f24078764a89919d1a01208fa98507997c041e7f6062649",
+        "officeparser/officeparser.cjs": "3aad046540494522315a27c230af7e65777183bdd1b9a036f2dbbe048d720a7c"
+      }
+    }
+  }
+}

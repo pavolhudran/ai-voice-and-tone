@@ -3,9 +3,11 @@
  * Zero dependencies by design (see spec section 9).
  *
  * Supported: nested block maps (2-space indent), block sequences of scalars,
- * inline flow sequences [a, b], block scalars (| literal, > folded) with an
- * optional chomping indicator, single/double-quoted strings, integers,
- * true/false, null (~ or empty), # comments, blank lines.
+ * block sequences of maps (`- key: value` opening an item, with its other
+ * fields as plain `key: value` lines indented under it), inline flow
+ * sequences [a, b], block scalars (| literal, > folded) with an optional
+ * chomping indicator, single/double-quoted strings, integers, true/false,
+ * null (~ or empty), # comments, blank lines.
  *
  * Chomping: | and > set the block style - literal keeps newlines, folded
  * joins lines with spaces. A trailing + appends a single trailing newline.
@@ -17,8 +19,14 @@
  * frontmatter uses `description: >` (and sometimes `description: >-`), and
  * this plugin parses its own frontmatter.
  *
+ * Sequences of maps are in the subset because config.yml's `sources:` list
+ * (register.mjs) is exactly that shape once /voice-and-tone:connect writes
+ * to it - task-11 is the first caller that round-trips it through
+ * saveConfig/loadConfig rather than only ever building it as a literal JS
+ * object, and that is where the gap first had to be closed.
+ *
  * Unsupported and rejected with a line number: anchors and aliases, multiple
- * documents, sequences of maps, tab indentation.
+ * documents, tab indentation.
  */
 
 const UNSUPPORTED = [
@@ -51,8 +59,8 @@ function stripComment (raw) {
 }
 
 // True if text contains a colon-space pair outside of quotes - the marker of
-// a "- key: value" sequence-of-maps item, which this subset does not support.
-// A quoted scalar like "note: important" must not trip this.
+// a "- key: value" sequence-of-maps item, as opposed to a plain scalar
+// sequence item. A quoted scalar like "note: important" must not trip this.
 function hasUnquotedColonSpace (text) {
   let quote = null
   for (let i = 0; i < text.length; i++) {
@@ -80,9 +88,34 @@ function parseScalar (raw, lineNo) {
     if (inner === '') return []
     return inner.split(',').map((part) => parseScalar(part, lineNo))
   }
-  if (text.startsWith('{')) fail(lineNo, 'flow mappings are not supported')
+  if (text.startsWith('{')) {
+    // The empty flow mapping is the one case this subset needs to round-trip
+    // an empty plain object (as a bare value, and as a sequence item) without
+    // silently losing it - stringifyYaml emits exactly this for `{}`. A
+    // non-empty flow mapping is genuinely out of scope.
+    if (text === '{}') return {}
+    fail(lineNo, 'flow mappings are not supported')
+  }
   const quoted = /^"(.*)"$|^'(.*)'$/.exec(text)
   if (quoted) return quoted[1] !== undefined ? quoted[1] : quoted[2]
+  return text
+}
+
+// A key must be either a single, complete quoted token ("key" or 'key') or a
+// plain token with no quote character in it at all - anything in between (a
+// quoted fragment followed by trailing text, a lone unmatched quote) has no
+// well-defined meaning here. Reject it with a line number instead of
+// stripping whichever quote happens to sit at either end and silently
+// handing back a mangled key.
+function parseKeyText (raw, lineNo) {
+  const text = raw.trim()
+  const quote = text[0]
+  if (quote === '"' || quote === "'") {
+    const closed = quote === '"' ? /^"([^"]*)"$/.exec(text) : /^'([^']*)'$/.exec(text)
+    if (!closed) fail(lineNo, `malformed quoted key "${text}"`)
+    return closed[1]
+  }
+  if (text.includes('"') || text.includes("'")) fail(lineNo, `malformed key "${text}"`)
   return text
 }
 
@@ -107,22 +140,42 @@ export function parseYaml (source) {
 
     const indent = line.length - line.trimStart().length
     if (indent % 2 !== 0) fail(lineNo, 'indentation must be a multiple of two spaces')
-    const body = line.trim()
+    let body = line.trim()
 
     while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop()
-    const parent = stack[stack.length - 1].container
+    let parent = stack[stack.length - 1].container
 
     if (body.startsWith('- ') || body === '-') {
       if (!Array.isArray(parent)) fail(lineNo, 'sequence item outside a sequence')
       const item = body === '-' ? null : body.slice(2)
-      if (item !== null && hasUnquotedColonSpace(item)) fail(lineNo, 'sequences of maps are not supported')
-      parent.push(parseScalar(item ?? '', lineNo))
-      return
+
+      if (item !== null && hasUnquotedColonSpace(item)) {
+        // "- key: value" opens a block map as a sequence item. The dash's
+        // own indent becomes that map's threshold: every later line more
+        // deeply indented than the dash belongs to it (a continuation field
+        // lines up two columns further right, exactly where content after
+        // "- " sits), and anything back at the dash's indent or shallower -
+        // a sibling item, or a dedent out of the sequence - ends it.
+        // Repointing `parent` at the new map and `body` at the part after
+        // "- ", then falling through to the ordinary key: value handling
+        // below (rather than returning), is what makes that work: every
+        // later check in this function reads the CURRENT line's `indent`
+        // against the stack, and the dash's indent is exactly what gets
+        // pushed here.
+        const map = {}
+        parent.push(map)
+        stack.push({ indent, container: map })
+        parent = map
+        body = item
+      } else {
+        parent.push(parseScalar(item ?? '', lineNo))
+        return
+      }
     }
 
     const split = /^([^:]+):(.*)$/.exec(body)
     if (!split) fail(lineNo, `cannot parse "${body}"`)
-    const key = split[1].trim().replace(/^["']|["']$/g, '')
+    const key = parseKeyText(split[1], lineNo)
     const rest = split[2].trim()
 
     if (Array.isArray(parent)) fail(lineNo, 'mapping key inside a sequence')
@@ -200,6 +253,33 @@ function stringifyScalar (value) {
   return needsQuotes ? `"${text.replace(/"/g, '\\"')}"` : text
 }
 
+// One item of a block sequence, at the indent depth the dash itself sits at
+// (one deeper than the key introducing the sequence). A plain scalar item
+// renders as `- value`, unchanged. An object item renders as a block map
+// whose first field shares the dash's line and whose remaining fields are
+// indented two columns further right, under it - the mirror image of how
+// parseYaml reads that same shape back: stringifyYaml(item, depth + 1)
+// already produces every field at that deeper indent, so the first line
+// only needs its own leading indent swapped for "- ".
+function stringifySequenceItem (item, depth) {
+  const itemPad = '  '.repeat(depth)
+  if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+    return `${itemPad}- ${stringifyScalar(item)}\n`
+  }
+  // An empty object has no fields to hang the dash's first line on -
+  // stringifyYaml(item, ...) would render as the empty string, the line
+  // filter below would then discard it, and the sequence item would vanish
+  // from the output entirely, taking the whole array's shape with it on the
+  // next parse. `- {}` is the one flow-mapping form parseScalar accepts
+  // back, so the pair round-trips instead of losing data silently.
+  if (Object.keys(item).length === 0) return `${itemPad}- {}\n`
+  const rendered = stringifyYaml(item, depth + 1)
+  const lines = rendered.split('\n').filter((line) => line !== '')
+  const stripLen = itemPad.length + 2
+  const withDash = lines.map((line, i) => (i === 0 ? `${itemPad}- ${line.slice(stripLen)}` : line))
+  return `${withDash.join('\n')}\n`
+}
+
 export function stringifyYaml (value, depth = 0) {
   const pad = '  '.repeat(depth)
   let out = ''
@@ -207,10 +287,16 @@ export function stringifyYaml (value, depth = 0) {
     if (Array.isArray(child)) {
       if (child.length === 0) { out += `${pad}${key}: []\n`; continue }
       out += `${pad}${key}:\n`
-      for (const item of child) out += `${pad}  - ${stringifyScalar(item)}\n`
+      for (const item of child) out += stringifySequenceItem(item, depth + 1)
       continue
     }
     if (child && typeof child === 'object') {
+      // Same loss as the empty-sequence-item case above, for a plain object
+      // sitting directly at a key rather than inside an array: with no
+      // fields, `stringifyYaml` would render nothing after `key:`, and that
+      // parses back as an empty scalar (null), not `{}`. The empty flow
+      // mapping form keeps it distinguishable, mirroring `key: []` just above.
+      if (Object.keys(child).length === 0) { out += `${pad}${key}: {}\n`; continue }
       out += `${pad}${key}:\n${stringifyYaml(child, depth + 1)}`
       continue
     }

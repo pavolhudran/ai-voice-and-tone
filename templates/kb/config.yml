@@ -8,21 +8,37 @@ profiles:
     name: "Unnamed"
     primary_locale: en
     locales: [en]
-scan:
-  include:
-    - "content/**/*.md"
-    - "content/**/*.mdx"
-    - "docs/**/*.md"
-    - "locales/**/*.json"
-    - "locales/**/*.yml"
-    - "locales/**/*.po"
-    - "README.md"
-  exclude:
-    - "node_modules/**"
-    - "dist/**"
-    - "build/**"
-    - ".git/**"
-    - ".voice-and-tone/**"
+# Where brand material comes from - the only place this is configured.
+# There is no separate `scan:` key: the `project` entry below IS the scan,
+# via its own include/exclude globs. `inbox` is the folder you drop files
+# into. Add `local` entries for anything elsewhere on disk and `url` entries
+# for pages, with /voice-and-tone:connect.
+sources:
+  - id: s01
+    kind: project
+    label: "Project files"
+    include:
+      - "content/**/*.md"
+      - "content/**/*.mdx"
+      - "docs/**/*.md"
+      - "locales/**/*.json"
+      - "locales/**/*.yml"
+      - "locales/**/*.po"
+      - "README.md"
+    exclude:
+      - "node_modules/**"
+      - "dist/**"
+      - "build/**"
+      - ".git/**"
+      - ".voice-and-tone/**"
+  - id: s02
+    kind: inbox
+    label: "Dropped-in files"
+    path: "sources/"
+    # Keeps this folder's own instructions out of the corpus. Delete this
+    # line if you genuinely want a file named README.md analysed as a source.
+    exclude:
+      - "README.md"
 runtime:
   node: detected
   probed: ~

@@ -20,6 +20,33 @@ export function normalizeEol (s) {
   return String(s).replace(/\r\n?/g, '\n')
 }
 
+// C0 (0x00-0x1F) and the DEL/C1 range (0x7F-0x9F), with tab (0x09), LF
+// (0x0A) and CR (0x0D) carved out - those are legitimate content, already
+// normalized to \n or collapsed to a space upstream, and a quoted CSV cell
+// is allowed to carry a real embedded newline. Nothing else in either range
+// should ever reach a corpus string: it is invisible in every editor and in
+// a diff, and has leaked in before - a malformed RTF hex escape decoded
+// straight through String.fromCharCode, a stray byte pasted into subtitle
+// or CSV source text. Shared here (rather than duplicated in extract.mjs
+// and textish.mjs) so the one definition is what both are checked against.
+//
+// Built from numeric character codes at runtime rather than a literal escape
+// typed into this file: that escape has re-collapsed into the raw byte in
+// this exact codebase more than once. fromCharCode sidesteps it entirely.
+function charRange (from, to) {
+  let out = ''
+  for (let code = from; code <= to; code++) out += String.fromCharCode(code)
+  return out
+}
+const CONTROL_CHARS = new RegExp(
+  '[' + charRange(0, 8) + charRange(11, 12) + charRange(14, 31) + charRange(127, 159) + ']',
+  'g'
+)
+
+export function stripControlChars (text) {
+  return String(text).replace(CONTROL_CHARS, '')
+}
+
 export function splitParagraphs (text) {
   return normalizeEol(text)
     .split(/\n[ \t]*\n+/)
