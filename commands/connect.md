@@ -1,6 +1,6 @@
 ---
 description: Register brand material, see what has already been analysed, and ingest what is new
-argument-hint: "[<path|url>] [--ingest] [--refresh [<id>]] [--forget <id>]"
+argument-hint: "[<path|url>] [--ingest] [--refresh [--only <id|url>]] [--forget <id>]"
 ---
 
 # /voice-and-tone:connect
@@ -13,14 +13,21 @@ exactly what has been analysed.
 ## Usage
 
 ```
-/voice-and-tone:connect                  what is new, changed, or missing
-/voice-and-tone:connect <path>           register a file or folder, anywhere on disk
-/voice-and-tone:connect <url>            register a page - fetching it is a separate step
-/voice-and-tone:connect --ingest         analyse everything new or changed, including
-                                          anything just dropped into the inbox
-/voice-and-tone:connect --refresh [<id>] re-fetch registered URLs and record what changed
-/voice-and-tone:connect --forget <id>    retract a source and reopen its rules
+/voice-and-tone:connect                        what is new, changed, or missing
+/voice-and-tone:connect <path>                 register a file or folder, anywhere on disk
+/voice-and-tone:connect <url>                  register a page - fetching it is a separate step
+/voice-and-tone:connect --ingest               analyse everything new or changed, including
+                                                anything just dropped into the inbox
+/voice-and-tone:connect --refresh              re-fetch every registered URL and record what changed
+/voice-and-tone:connect --refresh --only <id>  re-fetch just that one registered URL - <id> is
+                                                either its register id (e.g. s04) or its url itself
+/voice-and-tone:connect --forget <id>          retract a source and reopen its rules
 ```
+
+Scoping a refresh to one URL is `--refresh --only <id>`, not `--refresh <id>` -
+`--only` is a real, separate flag on `sources.mjs`, and a bare id placed
+straight after `--refresh` is silently ignored: nothing is scoped, yet the
+command still exits 0 and prints as if it worked.
 
 Two different mechanisms re-read something that changed, and each covers only
 its own kind of source: `--refresh` re-fetches `url` sources over the network

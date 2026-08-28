@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
 import { STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
+import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const surfaceFile = (...parts) => path.join(root, ...parts)
@@ -336,6 +337,62 @@ test('every flag connect.md documents actually exists on sources.mjs --help', ()
   const real = new Set([...help.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]))
   for (const flag of documented) {
     assert.ok(real.has(flag), `connect.md documents ${flag}, which sources.mjs --help does not list`)
+  }
+})
+
+test('every literal flag sequence connect.md shows in its usage block is accepted by the real parser', () => {
+  // Task 15 fix round 3: "--refresh <id>" was documented, and the parser
+  // accepts a bare positional there without complaint - it just silently
+  // ignores it. That means "does the parser accept this token" cannot be
+  // the whole check (round 3's defect would sail straight through it); it
+  // is still worth running for the class round 2's --inbox belonged to,
+  // where a doc names a flag the parser rejects outright. Whether a flag
+  // that IS accepted actually does what its line claims is pinned instead
+  // by targeted behavioural tests (sources.test.mjs's --refresh --only
+  // tests, the --forget test above).
+  //
+  // Two usage rows are deliberately skipped: the bare `<path>` and `<url>`
+  // rows are user-facing shorthand for the skill to translate into
+  // `--add <path>` / `--add <url>` - they were never meant to be typed at
+  // sources.mjs directly, so running them literally would test a mapping
+  // this file does not claim to make. Every OTHER row in the usage block is
+  // asserted to consist only of real flags and the `<id>` placeholder,
+  // which is what keeps this from silently degrading into a test that only
+  // ever checks the two rows that happen to already be flag-only today.
+  const body = readFileSync(surfaceFile('commands', 'connect.md'), 'utf8')
+  const usageStart = body.indexOf('## Usage')
+  assert.ok(usageStart !== -1, 'connect.md has no Usage section')
+  const block = between(body.slice(usageStart), '```\n', '\n```')
+  const lines = block.split('\n').filter((l) => l.startsWith('/voice-and-tone:connect'))
+  assert.ok(lines.length >= 5, 'expected the usage block to still list its documented invocations')
+
+  const dir = makeTmpProject({})
+  try {
+    let literalLines = 0
+    for (const line of lines) {
+      const rest = line.slice('/voice-and-tone:connect'.length).trim()
+      const rawTokens = rest.length ? rest.split(/\s{2,}/)[0].trim().split(/\s+/) : []
+      if (!rawTokens.every((t) => t === '<id>' || /^--[a-z][a-z-]*$/.test(t))) continue // <path>/<url> shorthand
+      literalLines++
+      const tokens = rawTokens.map((t) => (t === '<id>' ? 's01' : t))
+      // A line like "--forget <id>" legitimately exits 1 here (no such id in
+      // an empty project) - that is a domain error, not a parse failure, and
+      // execFileSync throws on any non-zero exit. Only "Unknown option" (the
+      // real parser's own rejection message) means the flag itself is bad.
+      let out
+      try {
+        out = execFileSync(
+          process.execPath, [surfaceFile('scripts', 'sources.mjs'), '--root', dir, ...tokens],
+          { encoding: 'utf8' }
+        )
+      } catch (error) {
+        out = `${error.stdout ?? ''}${error.stderr ?? ''}`
+      }
+      assert.ok(!/unknown option/i.test(out), `"${line}" is rejected by the real parser`)
+    }
+    assert.ok(literalLines >= 3, 'expected at least the bare/--ingest/--refresh rows to be checked as literal invocations')
+  } finally {
+    cleanup(dir)
   }
 })
 
