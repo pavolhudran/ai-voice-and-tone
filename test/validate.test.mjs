@@ -1,16 +1,58 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadKb, STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
+import { statsFor } from '../scripts/lib/metrics.mjs'
+import { readTextFile } from '../scripts/lib/fsx.mjs'
 import { validateKb } from '../scripts/validate.mjs'
 
 const codesOf = (report) => report.findings.map((f) => f.code)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 function kbFrom (files) {
   const dir = makeTmpProject(files)
   return { dir, kb: loadKb(path.join(dir, 'kb')) }
 }
+
+// --- fixtures for the source-index checks (Task 14) -----------------------
+//
+// Mirrors the `entry()` helper test/sourceindex.test.mjs already uses to
+// build sources.json entries, adapted to write through kbFrom's plain-text
+// files map rather than through saveIndex - these tests exercise validateKb
+// reading evidence/sources.json off disk, not the writer.
+const sourceEntry = (over = {}) => ({
+  id: 'f001',
+  sha256: 'a'.repeat(64),
+  kind: 'file',
+  from: 's01',
+  origin: 'sources/a.txt',
+  label: 'A',
+  format: 'text',
+  bytes: 10,
+  locale: 'en',
+  tier: 'script',
+  extractor: null,
+  fidelity: 'measured',
+  quality: { passed: true },
+  stats: statsFor({ strings: ['We write plainly.'], headings: [], locale: 'en' }),
+  added: '2026-08-27',
+  analysed: '2026-08-27',
+  status: 'used',
+  produced: [],
+  ...over
+})
+
+function sourcesJson (entries) {
+  return `${JSON.stringify({ generated: '2026-08-27T00:00:00.000Z', sources: entries }, null, 2)}\n`
+}
+
+// The real, pinned version of a real vendored library - read once so the
+// "matches" and "is stale" fixtures below stay true regardless of which
+// library vendor.mjs happens to pin, or at what version.
+const REAL_MANIFEST = JSON.parse(readTextFile(path.join(ROOT, 'vendor', 'manifest.json')))
+const [REAL_LIBRARY, REAL_LIBRARY_INFO] = Object.entries(REAL_MANIFEST.libraries)[0]
 
 test('a clean knowledge base reports nothing', () => {
   const { dir, kb } = kbFrom({
@@ -485,4 +527,169 @@ test('validateKb tolerates a partial kb object with only some top-level fields p
   })
   assert.equal(cellsOnly.errors, 0)
   assert.equal(cellsOnly.counts.cells, 1)
+})
+
+// --- Task 14: evidence/sources.json integrity ------------------------------
+//
+// These checks read straight off disk (loadIndex, the vendor manifest, the
+// extract cache), so - unlike every check above - they only run when kb
+// carries a real kbRoot. Every fixture below goes through kbFrom, exactly
+// like the rest of this file, so kb.kbRoot is always the tmp project's `kb`
+// directory.
+
+test('a produced rule id that does not exist in the knowledge base is reported', () => {
+  const { dir, kb } = kbFrom({
+    'kb/voice.md': '### V1 · Plainspoken `confirmed` ev: e1\n\n**Means:** Clear.\n',
+    'kb/evidence/ledger.md': '### e1 — 2026-08-26 — interview\n\n**Produced:** V1\n',
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ produced: ['V1', 'V9'] })])
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'E_DANGLING_PRODUCED_ID')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'error')
+    assert.match(finding.message, /V9/)
+    assert.equal(finding.file, 'evidence/sources.json')
+    assert.ok(report.errors > 0, 'a dangling produced id must fail the build')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a rule citing source-type evidence with nothing in the index behind it is reported', () => {
+  // No sources.json at all: the ledger claims a source was read, but the
+  // sourcing pipeline that would have recorded it never ran - exactly the
+  // "model-read style guide left no trace" gap this check closes.
+  const { dir, kb } = kbFrom({
+    'kb/voice.md': '### V1 · Plainspoken `confirmed` ev: e1\n\n**Means:** Clear.\n',
+    'kb/evidence/ledger.md': '### e1 — 2026-08-26 — source\n\n**Produced:** V1\n'
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'E_SOURCE_NOT_INDEXED')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'error')
+    assert.match(finding.message, /V1/)
+    assert.equal(finding.file, 'voice.md')
+    assert.ok(report.errors > 0)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('two index entries with the same sha256 are reported', () => {
+  const { dir, kb } = kbFrom({
+    'kb/evidence/sources.json': sourcesJson([
+      sourceEntry({ id: 'f001', sha256: 'a'.repeat(64) }),
+      sourceEntry({ id: 'f002', sha256: 'a'.repeat(64), origin: 'sources/b.txt' })
+    ])
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'E_DUPLICATE_SHA')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'error')
+    assert.match(finding.message, /f001/)
+    assert.match(finding.message, /f002/)
+    assert.equal(finding.file, 'evidence/sources.json')
+    assert.ok(report.errors > 0, 'duplicate identity must fail the build, not just warn')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a used entry with no stats block is reported', () => {
+  const { dir, kb } = kbFrom({
+    'kb/evidence/sources.json': sourcesJson([sourceEntry({ status: 'used', stats: null })])
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'E_NO_STATS')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'error')
+    assert.match(finding.message, /f001/)
+    assert.equal(finding.file, 'evidence/sources.json')
+    assert.ok(report.errors > 0, 'a used source with no stats silently drops out of the fingerprint')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an orphaned extract cache file is reported as a warning, not an error', () => {
+  const orphanSha = 'b'.repeat(64)
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': '\n',
+    [`kb/.cache/extracts/${orphanSha}.txt`]: 'extracted text nobody indexed\n'
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'W_ORPHAN_CACHE')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'warning')
+    assert.match(finding.message, new RegExp(orphanSha))
+    assert.equal(report.errors, 0, 'an orphaned cache file is harmless, not fatal')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an entry produced by an extractor version vendor/manifest.json no longer pins is a warning', () => {
+  const { dir, kb } = kbFrom({
+    'kb/config.yml': '\n',
+    'kb/evidence/sources.json': sourcesJson([
+      sourceEntry({ extractor: { name: REAL_LIBRARY, version: '0.0.0-not-real' } })
+    ])
+  })
+  try {
+    const report = validateKb(kb)
+    const finding = report.findings.find((f) => f.code === 'W_STALE_EXTRACTOR')
+    assert.ok(finding, JSON.stringify(report.findings))
+    assert.equal(finding.severity, 'warning')
+    assert.match(finding.message, new RegExp(REAL_LIBRARY))
+    assert.equal(report.errors, 0, 'a version bump is a prompt to re-ingest, not a broken build')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a well-formed source index produces none of the six new findings', () => {
+  const { dir, kb } = kbFrom({
+    'kb/voice.md': '### V1 · Plainspoken `confirmed` ev: e1\n\n**Means:** Clear.\n',
+    'kb/evidence/ledger.md': '### e1 — 2026-08-26 — source\n\n**Produced:** V1\n',
+    'kb/evidence/sources.json': sourcesJson([
+      sourceEntry({ produced: ['V1'], extractor: { name: REAL_LIBRARY, version: REAL_LIBRARY_INFO.version } })
+    ])
+  })
+  try {
+    const report = validateKb(kb)
+    const codes = codesOf(report)
+    for (const bad of [
+      'E_DANGLING_PRODUCED_ID', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
+      'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
+    ]) {
+      assert.ok(!codes.includes(bad), `${bad} fired on a well-formed index: ${codes.join(', ')}`)
+    }
+    assert.equal(report.errors, 0)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a hand-built kb with no kbRoot skips every source-index check rather than throwing', () => {
+  // The gate that keeps this file's many hand-built-kb tests (above) from
+  // needing a kbRoot of their own: no directory to read sources.json, the
+  // vendor manifest, or the cache out of is silence, not a crash. This kb
+  // still produces its ordinary W_NO_EVIDENCE finding (a confirmed rule
+  // citing no evidence) - the point here is only that none of the six new
+  // codes ever appear, since there is nothing on disk for them to check.
+  const report = validateKb({
+    rules: [{ id: 'V1', file: 'voice', line: 1, confidence: 'confirmed', evidence: [] }]
+  })
+  const codes = codesOf(report)
+  for (const bad of [
+    'E_DANGLING_PRODUCED_ID', 'E_SOURCE_NOT_INDEXED', 'E_DUPLICATE_SHA',
+    'E_NO_STATS', 'W_ORPHAN_CACHE', 'W_STALE_EXTRACTOR'
+  ]) {
+    assert.ok(!codes.includes(bad), `${bad} fired despite no kbRoot: ${codes.join(', ')}`)
+  }
 })
