@@ -71,6 +71,67 @@ export function inferStages ({ manifest, index, register, fingerprint, kb, valid
   return { at, reached }
 }
 
+const MS_PER_DAY = 86400000
+
+function ageDays (fromMs, now) {
+  if (fromMs === null || fromMs === undefined || Number.isNaN(fromMs)) return null
+  const nowMs = Date.parse(now)
+  if (Number.isNaN(nowMs)) return null
+  return Math.max(0, Math.floor((nowMs - fromMs) / MS_PER_DAY))
+}
+
+/**
+ * The five files compileContext() actually reads. Comparing the card's mtime
+ * against exactly these is five statSync calls and is EXACT: any one of them
+ * newer than the card means the card is behind, and we can name which.
+ */
+export const CARD_SOURCES = ['voice.md', 'tone.md', 'lexicon.md', 'mechanics.md', 'config.yml']
+
+export function cardFreshness (kbRoot, now) {
+  const cardMs = mtimeMs(path.join(kbRoot, 'CONTEXT.md'))
+  if (cardMs === null) return null
+  const staleAgainst = []
+  for (const name of CARD_SOURCES) {
+    const sourceMs = mtimeMs(path.join(kbRoot, name))
+    if (sourceMs !== null && sourceMs > cardMs) staleAgainst.push(name)
+  }
+  return { generated: new Date(cardMs).toISOString(), staleAgainst, ageDays: ageDays(cardMs, now) }
+}
+
+/**
+ * Approximate by design, and the renderer says so. Detecting files created
+ * since the manifest was written would mean re-globbing the register, which
+ * IS the scan - that is what --refresh is for. What is cheap and exact is the
+ * other half: how many of the manifest's OWN listed files have changed.
+ *
+ * A number with its limit attached is worth more than a number that quietly
+ * lies, so `checked` travels with `changedSince` rather than being folded in.
+ */
+export function manifestFreshness (projectRoot, manifest, now) {
+  if (!manifest) return null
+  const cutoff = Date.parse(manifest.generated)
+  let changedSince = 0
+  let checked = 0
+  for (const file of manifest.files ?? []) {
+    const abs = path.join(projectRoot, ...String(file.path).split('/'))
+    const fileMs = mtimeMs(abs)
+    if (fileMs === null) continue // vanished since the scan; not checkable
+    checked += 1
+    if (!Number.isNaN(cutoff) && fileMs > cutoff) changedSince += 1
+  }
+  return { generated: manifest.generated, ageDays: ageDays(cutoff, now), changedSince, checked }
+}
+
+function countBy (items, keyOf) {
+  const out = {}
+  for (const item of items) {
+    const key = keyOf(item)
+    if (key === null || key === undefined) continue
+    out[key] = (out[key] ?? 0) + 1
+  }
+  return out
+}
+
 export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now }) {
   const profile = activeProfile(config, profileName)
   const kb = loadKb(kbRoot)
@@ -99,6 +160,19 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       locales: profile.locales ?? [profile.primary_locale ?? 'en'],
       primaryLocale: profile.primary_locale ?? 'en'
     },
-    stage
+    stage,
+    integrity: {
+      errors: validation.errors ?? 0,
+      warnings: validation.warnings ?? 0,
+      byCode: countBy(validation.findings ?? [], (f) => f.code),
+      findings: validation.findings ?? []
+    },
+    freshness: {
+      card: cardFreshness(kbRoot, now),
+      manifest: manifestFreshness(projectRoot, manifest, now),
+      fingerprint: fingerprint
+        ? { generated: fingerprint.generated ?? null, ageDays: ageDays(Date.parse(fingerprint.generated), now) }
+        : null
+    }
   }
 }

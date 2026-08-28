@@ -1,9 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { utimesSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig } from '../scripts/lib/config.mjs'
-import { STAGES, inferStages, collect } from '../scripts/lib/state.mjs'
+import {
+  STAGES, inferStages, collect, CARD_SOURCES, cardFreshness, manifestFreshness
+} from '../scripts/lib/state.mjs'
 
 const NOW = '2026-08-28T00:00:00.000Z'
 
@@ -199,4 +202,109 @@ test('stage.at is the furthest stage reached, not a count of reached stages', ()
     cardExists: false
   })
   assert.equal(at, 'draft')
+})
+
+test('the card compiles from exactly five files, and freshness compares against all of them', () => {
+  assert.deepEqual(CARD_SOURCES, ['voice.md', 'tone.md', 'lexicon.md', 'mechanics.md', 'config.yml'])
+})
+
+test('a card newer than every source it compiles from is fresh', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': '# Tone\n',
+    '.voice-and-tone/CONTEXT.md': '# Card\n'
+  })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const old = new Date('2026-08-01T00:00:00Z')
+    for (const name of ['config.yml', 'voice.md', 'tone.md']) utimesSync(path.join(kb, name), old, old)
+    const fresh = new Date('2026-08-20T00:00:00Z')
+    utimesSync(path.join(kb, 'CONTEXT.md'), fresh, fresh)
+
+    const out = cardFreshness(kb, NOW)
+    assert.deepEqual(out.staleAgainst, [])
+    assert.equal(out.ageDays, 8)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a card older than a source it compiles from names that source', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': '# Tone\n',
+    '.voice-and-tone/CONTEXT.md': '# Card\n'
+  })
+  const kb = path.join(dir, '.voice-and-tone')
+  try {
+    const old = new Date('2026-08-01T00:00:00Z')
+    for (const name of ['CONTEXT.md', 'config.yml', 'voice.md']) utimesSync(path.join(kb, name), old, old)
+    const newer = new Date('2026-08-15T00:00:00Z')
+    utimesSync(path.join(kb, 'tone.md'), newer, newer)
+
+    assert.deepEqual(cardFreshness(kb, NOW).staleAgainst, ['tone.md'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an absent card yields null freshness rather than a fabricated date', () => {
+  const dir = makeTmpProject({ '.voice-and-tone/config.yml': MINIMAL_CONFIG })
+  try {
+    assert.equal(cardFreshness(path.join(dir, '.voice-and-tone'), NOW), null)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('manifest freshness counts listed files modified since the manifest was written', () => {
+  const dir = makeTmpProject({ 'content/a.md': '# A\n', 'content/b.md': '# B\n' })
+  try {
+    const manifest = {
+      generated: '2026-08-10T00:00:00.000Z',
+      files: [{ path: 'content/a.md' }, { path: 'content/b.md' }]
+    }
+    const older = new Date('2026-08-01T00:00:00Z')
+    utimesSync(path.join(dir, 'content', 'a.md'), older, older)
+    const newer = new Date('2026-08-20T00:00:00Z')
+    utimesSync(path.join(dir, 'content', 'b.md'), newer, newer)
+
+    const out = manifestFreshness(dir, manifest, NOW)
+    assert.equal(out.checked, 2)
+    assert.equal(out.changedSince, 1)
+    assert.equal(out.ageDays, 18)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('manifest freshness skips a listed file that no longer exists rather than throwing', () => {
+  const dir = makeTmpProject({ 'content/a.md': '# A\n' })
+  try {
+    const manifest = {
+      generated: '2026-08-10T00:00:00.000Z',
+      files: [{ path: 'content/a.md' }, { path: 'content/deleted.md' }]
+    }
+    const out = manifestFreshness(dir, manifest, NOW)
+    assert.equal(out.checked, 1, 'a vanished file is not checkable and must not be counted')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('integrity carries validate findings verbatim, grouped by code', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n\n## V01 · plain   `confirmed`\n\n**Means:** short words\n',
+    '.voice-and-tone/tone.md': '# Tone\n'
+  })
+  assert.equal(typeof state.integrity.errors, 'number')
+  assert.equal(typeof state.integrity.warnings, 'number')
+  assert.ok(Array.isArray(state.integrity.findings))
+  assert.equal(typeof state.integrity.byCode, 'object')
+  // V01 is confirmed and cites no evidence, so validate emits W_NO_EVIDENCE -
+  // proof the findings really come from validateKb and are not fabricated here.
+  assert.equal(state.integrity.byCode.W_NO_EVIDENCE, 1)
 })
