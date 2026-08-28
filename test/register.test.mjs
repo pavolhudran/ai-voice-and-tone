@@ -74,6 +74,53 @@ test('an inbox entry resolves under the KB and reports paths relative to it', ()
   }
 })
 
+test('an inbox entry honours its own exclude, keeping the shipped README out of the corpus', () => {
+  // The template config ships `sources: [{ ..., exclude: ['README.md'] }]`
+  // precisely so this plugin's own placeholder is never analysed as brand
+  // material. This pins the general mechanism the template relies on.
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/README.md': 'Drop brand material here.',
+    '.voice-and-tone/sources/newsletter.txt': 'A real newsletter.'
+  })
+  try {
+    const resolved = resolveEntry(
+      { id: 's02', kind: 'inbox', path: 'sources/', exclude: ['README.md'] },
+      ctxFor(dir)
+    )
+    assert.deepEqual(resolved.files.map((f) => f.origin), ['sources/newsletter.txt'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an inbox exclude pattern of the user\'s own is honoured, not just the README special case', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/keep.txt': 'Keep this.',
+    '.voice-and-tone/sources/archive/old.txt': 'Not this.'
+  })
+  try {
+    const resolved = resolveEntry(
+      { id: 's02', kind: 'inbox', path: 'sources/', exclude: ['archive/**'] },
+      ctxFor(dir)
+    )
+    assert.deepEqual(resolved.files.map((f) => f.origin), ['sources/keep.txt'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('removing the inbox exclude line lets README.md be analysed again - the escape hatch actually opens', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/README.md': 'Drop brand material here.'
+  })
+  try {
+    const resolved = resolveEntry({ id: 's02', kind: 'inbox', path: 'sources/' }, ctxFor(dir))
+    assert.deepEqual(resolved.files.map((f) => f.origin), ['sources/README.md'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('a local entry reaches outside the project root, which globs cannot', () => {
   const outside = makeTmpProject({ 'brand/guide.md': 'Our voice.' })
   const dir = makeTmpProject({})

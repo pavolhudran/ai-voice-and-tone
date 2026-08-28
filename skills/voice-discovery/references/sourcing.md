@@ -32,9 +32,14 @@ sources:   model  sources/scan.jpg (no-text-layer)
 Each `origin` listed there is what needs your attention next.
 
 `sources/README.md` is this plugin's own placeholder, copied in with the rest
-of the templates so an empty inbox still explains itself. It will appear as a
-plain new source the first time `--check` runs - do not derive any rule from
-it, and do not count it as brand material when reporting totals to the user.
+of the templates so an empty inbox still explains itself. The template
+config's inbox entry excludes it by default (`exclude: [README.md]`), which
+is the actual mechanism that keeps it out of `--check`/`--ingest` - this note
+is belt-and-braces, not the fix. If a project's config has had that exclude
+line removed (its own README genuinely wanted, or an older KB predating this
+default), `sources/README.md` will resolve as an ordinary new source; do not
+derive any rule from it in that case, and do not count it as brand material
+when reporting totals to the user.
 
 ## What to do on an escalation
 

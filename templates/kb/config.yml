@@ -49,6 +49,10 @@ sources:
     kind: inbox
     label: "Dropped-in files"
     path: "sources/"
+    # Keeps this folder's own instructions out of the corpus. Delete this
+    # line if you genuinely want a file named README.md analysed as a source.
+    exclude:
+      - "README.md"
 runtime:
   node: detected
   probed: ~

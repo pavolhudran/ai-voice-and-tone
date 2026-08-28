@@ -63,7 +63,13 @@ function rootAndGlobs (entry, { projectRoot, kbRoot }) {
   }
   if (entry.kind === 'inbox') {
     const root = path.resolve(kbRoot, entry.path ?? 'sources')
-    return { root, include: ALL_FILES, exclude: [], relativeTo: root, prefix: `${toPosix(entry.path ?? 'sources').replace(/\/$/, '')}/` }
+    return {
+      root,
+      include: ALL_FILES,
+      exclude: entry.exclude ?? [],
+      relativeTo: root,
+      prefix: `${toPosix(entry.path ?? 'sources').replace(/\/$/, '')}/`
+    }
   }
   const target = path.resolve(expandHome(entry.path ?? ''))
   return { root: target, include: ALL_FILES, exclude: entry.exclude ?? [], relativeTo: target, prefix: null }

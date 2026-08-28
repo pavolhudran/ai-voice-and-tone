@@ -106,3 +106,9 @@ test('the template config declares a register that reproduces current behaviour'
   assert.equal(config.sources[0].kind, 'project')
   assert.ok(config.sources.some((s) => s.kind === 'inbox'))
 })
+
+test('the template inbox entry excludes its own shipped README from the corpus', () => {
+  const config = parseYaml(readFileSync(path.join(templates, 'config.yml'), 'utf8'))
+  const inbox = config.sources.find((s) => s.kind === 'inbox')
+  assert.ok(inbox.exclude?.includes('README.md'), 'the inbox must exclude its own placeholder by default')
+})

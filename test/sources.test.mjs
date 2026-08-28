@@ -37,6 +37,28 @@ test('check reports new sources before anything is analysed', () => {
   }
 })
 
+test('an inbox exclude on the shipped README keeps --check from reporting the plugin\'s own placeholder', () => {
+  const dir = makeTmpProject({})
+  const kb = path.join(dir, '.voice-and-tone')
+  mkdirSync(path.join(kb, 'sources'), { recursive: true })
+  writeFileSync(path.join(kb, 'sources', 'README.md'), 'Drop brand material here.')
+  writeFileSync(path.join(kb, 'sources', 'newsletter.txt'), 'We write plainly. We keep it short.\n')
+  saveConfig(kb, {
+    ...DEFAULT_CONFIG,
+    // The same shape templates/kb/config.yml ships: an inbox entry that
+    // excludes its own README so a fresh KB does not fold the plugin's
+    // instructions into the corpus.
+    sources: [{ id: 's02', kind: 'inbox', path: 'sources/', label: 'Inbox', exclude: ['README.md'] }]
+  })
+  try {
+    const ctx = { projectRoot: dir, kbRoot: kb, config: loadConfig(kb), profileName: 'default', now: NOW }
+    const report = runCheck(ctx)
+    assert.deepEqual(report.fresh.map((f) => f.origin), ['sources/newsletter.txt'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
 test('ingest writes index entries and check then reports them as known', async () => {
   const { dir, kb, ctx } = project({ 'a.txt': 'We write plainly. We keep it short.\n' })
   try {
