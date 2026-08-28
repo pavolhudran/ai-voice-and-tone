@@ -71,3 +71,71 @@ export function row (left, right, width) {
   const l = truncate(String(left), budget)
   return pad(l, budget + 1) + r
 }
+
+/**
+ * A centre-less magnitude bar: length is the size of the change, and the
+ * glyph carries its direction ('>' grew, '<' shrank). 100 percent fills the
+ * bar and anything beyond saturates, because a 4000 percent delta and a 400
+ * percent delta are both simply "enormous" and neither deserves more pixels.
+ *
+ * A null pct is NOT an empty bar. Null means the arithmetic was undefined - a
+ * zero baseline, or a metric present on one side only - and an empty bar reads
+ * as "no drift", a materially different and far more comforting claim.
+ */
+export function deltaBar (pct, width) {
+  const w = Math.max(0, width)
+  if (pct === null || pct === undefined) {
+    const label = 'n/a'
+    const left = Math.max(0, Math.floor((w - label.length) / 2))
+    return `[${' '.repeat(left)}${label}${' '.repeat(Math.max(0, w - left - label.length))}]`
+  }
+  const glyph = pct < 0 ? '<' : '>'
+  const filled = Math.min(w, Math.round((Math.abs(pct) / 100) * w))
+  return `[${glyph.repeat(filled)}${' '.repeat(w - filled)}]`
+}
+
+/**
+ * Abbreviated so all six stages fit across 72 columns. The pipeline strip is
+ * the first thing read on the screen and has to survive the narrowest
+ * supported width without wrapping.
+ */
+const STAGE_LABEL = {
+  scan: 'scan', ingest: 'ingst', measure: 'meas', draft: 'draft', interview: 'intvw', canonize: 'canon'
+}
+
+/** Two lines: the stage names, and the filled/dotted boxes beneath them. */
+export function pipeline (stages, reached) {
+  const labels = []
+  const boxes = []
+  for (const stage of stages) {
+    const label = STAGE_LABEL[stage] ?? stage
+    const cell = reached[stage] ? '[##]' : '[..]'
+    const cellWidth = Math.max(label.length, cell.length) + 2
+    labels.push(pad(label, cellWidth))
+    boxes.push(pad(cell, cellWidth))
+  }
+  return [labels.join('').trimEnd(), boxes.join('').trimEnd()]
+}
+
+const MATRIX_LABEL_WIDTH = 20
+const MATRIX_CELL_WIDTH = 4
+
+/**
+ * The tone grid. `cellAt(row, col)` returns a single marker character and
+ * `tallyAt(row)` the trailing 'N/8'. Both are supplied by the caller so this
+ * function never learns what a tone cell is - it lays out a grid, nothing more.
+ */
+export function matrix ({ rows, cols, cellAt, tallyAt }) {
+  const header = ' '.repeat(MATRIX_LABEL_WIDTH) +
+    cols.map((c) => pad(c, MATRIX_CELL_WIDTH)).join('').trimEnd()
+  const body = rows.map((r) => {
+    const cells = cols.map((c) => pad(cellAt(r, c), MATRIX_CELL_WIDTH)).join('')
+    return `${pad(truncate(r, MATRIX_LABEL_WIDTH - 1), MATRIX_LABEL_WIDTH)}${cells}  ${tallyAt(r)}`
+  })
+  return [header, ...body]
+}
+
+/** A titled block. Lines longer than the width are truncated, never wrapped. */
+export function panel (title, lines, width = WIDTH) {
+  return [` ${truncate(title, width - 1)}`, ...lines.map((l) => truncate(l, width))]
+}

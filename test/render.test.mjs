@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WIDTH, MIN_WIDTH, MAX_WIDTH, clampWidth, rule, truncate, bar, pad, row } from '../scripts/lib/render.mjs'
+import {
+  WIDTH, MIN_WIDTH, MAX_WIDTH, clampWidth, rule, truncate, bar, pad, row,
+  matrix, pipeline, deltaBar, panel
+} from '../scripts/lib/render.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -69,4 +72,60 @@ test('render.mjs performs no file I/O', () => {
   const source = readFileSync(path.join(root, 'scripts', 'lib', 'render.mjs'), 'utf8')
   assert.ok(!/from 'node:fs'/.test(source), 'render.mjs must not import node:fs')
   assert.ok(!/require\(['"]fs['"]\)/.test(source))
+})
+
+test('deltaBar points right for growth, left for shrinkage, and fills at 100 percent', () => {
+  assert.equal(deltaBar(50, 10), '[>>>>>     ]')
+  assert.equal(deltaBar(-50, 10), '[<<<<<     ]')
+  assert.equal(deltaBar(100, 10), '[>>>>>>>>>>]')
+  assert.equal(deltaBar(250, 10), '[>>>>>>>>>>]', 'beyond 100 percent it saturates')
+  assert.equal(deltaBar(0, 10), '[          ]')
+})
+
+test('deltaBar renders a null delta as an explicit n/a, never as zero', () => {
+  // A null delta means the arithmetic was undefined (a zero baseline, or a
+  // metric absent from one side). Drawing it as an empty bar would read as
+  // "no drift", which is a different and much more reassuring claim.
+  assert.equal(deltaBar(null, 10), '[   n/a    ]')
+  assert.equal(deltaBar(null, 10).length, 12)
+})
+
+test('pipeline marks reached stages filled and unreached stages dotted', () => {
+  const out = pipeline(['scan', 'ingest'], { scan: true, ingest: false })
+  assert.equal(out.length, 2)
+  assert.match(out[0], /scan/)
+  assert.match(out[0], /ingst/, 'stage labels are abbreviated so six fit across 72 columns')
+  assert.match(out[1], /\[##\]/)
+  assert.match(out[1], /\[\.\.\]/)
+})
+
+test('matrix renders one marker per cell with a per-row tally', () => {
+  const out = matrix({
+    rows: ['product-ui', 'system-error'],
+    cols: ['del', 'cur'],
+    cellAt: (r, c) => (r === 'system-error' || c === 'del' ? '#' : '.'),
+    tallyAt: (r) => (r === 'system-error' ? '2/2' : '1/2')
+  })
+  assert.equal(out.length, 3, 'a header row plus one row per context')
+  assert.match(out[0], /del\s+cur/)
+  assert.match(out[1], /product-ui\s+#\s+\./)
+  assert.match(out[1], /1\/2$/)
+  assert.match(out[2], /system-error\s+#\s+#/)
+})
+
+test('panel emits a titled block whose every line fits the width', () => {
+  const out = panel('DRIFT', ['one', 'two'], 40)
+  for (const line of out) assert.ok(line.length <= 40, `line overruns: ${JSON.stringify(line)}`)
+  assert.match(out[0], /DRIFT/)
+})
+
+test('every composite emits ASCII only', () => {
+  const samples = [
+    ...pipeline(['scan'], { scan: true }),
+    ...matrix({ rows: ['a'], cols: ['b'], cellAt: () => '#', tallyAt: () => '1/1' }),
+    ...panel('T', ['x'], 40),
+    deltaBar(-33, 12),
+    deltaBar(null, 12)
+  ]
+  for (const sample of samples) assert.ok(!NON_ASCII.test(sample), `non-ASCII in ${JSON.stringify(sample)}`)
 })
