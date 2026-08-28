@@ -82,6 +82,23 @@ test('plugin logic never shells out to unix text tools', () => {
   }
 })
 
+test('plugin logic never uses the newer built-in dirname shorthand on import.meta', () => {
+  // That shorthand needs Node >= 20.11. package.json's "engines" (and
+  // test/manifest.test.mjs, which pins it) declare a floor of >= 18.13, where
+  // the shorthand is undefined and the next path.join(undefined, ...) throws
+  // - a real crash for a user on the declared floor, not a style nit. Four
+  // scripts reached for it anyway (fixed alongside this sweep); this postdates
+  // that fix and exists so the next file that needs a directory path cannot
+  // silently reintroduce the same crash. The portable replacement is
+  // path.dirname(fileURLToPath(import.meta.url)).
+  for (const abs of allPluginScripts()) {
+    const source = readFileSync(abs, 'utf8')
+    assert.ok(!source.includes('import.meta.dirname'),
+      `${path.relative(root, abs)} uses import.meta.dirname (needs Node >= 20.11); ` +
+      'use path.dirname(fileURLToPath(import.meta.url)) to stay on the declared >= 18.13 floor')
+  }
+})
+
 test('plugin logic builds paths with path.join, never by concatenating a separator', () => {
   const concatenated = /['"`]\s*\+\s*['"`]\/|\/['"`]\s*\+\s*(?!\/)/
   for (const abs of walkPluginLogic()) {

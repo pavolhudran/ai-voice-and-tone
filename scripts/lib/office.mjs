@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { readTextFile } from './fsx.mjs'
 
 /**
@@ -17,7 +18,8 @@ import { readTextFile } from './fsx.mjs'
  */
 
 const require = createRequire(import.meta.url)
-const VENDOR = path.resolve(import.meta.dirname, '..', '..', 'vendor')
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const VENDOR = path.resolve(HERE, '..', '..', 'vendor')
 
 export const OFFICE_FORMATS = new Set(['docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods'])
 

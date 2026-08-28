@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { readTextFile } from '../scripts/lib/fsx.mjs'
 import { sha256File } from '../scripts/lib/hash.mjs'
 import { makeMinimalDocx, makeMinimalOdt } from './helpers/officeFixtures.mjs'
 
 const require = createRequire(import.meta.url)
-const ROOT = path.resolve(import.meta.dirname, '..')
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(HERE, '..')
 const manifest = () => JSON.parse(readTextFile(path.join(ROOT, 'vendor', 'manifest.json')))
 
 test('every vendored library records its version, license and origin', () => {

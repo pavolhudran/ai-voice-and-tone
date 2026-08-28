@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { existsSync, readdirSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   loadKb, STATES, CONTEXTS, DIALS, CONFIDENCE_LEVELS, EVIDENCE_TYPES, ID_PREFIXES,
   HUMOR_ZERO_STATES, cellId
@@ -14,7 +14,13 @@ import { parseCliArgs, resolveRoots, die, printHelp, writeOut } from './lib/cli.
 // lib/pdf.mjs resolve the vendored bundles themselves: relative to this
 // script's own location, not to whatever --root/--kb a caller passed. It
 // ships with the plugin, one level up from scripts/, and is never per-project.
-const VENDOR_MANIFEST = path.resolve(import.meta.dirname, '..', 'vendor', 'manifest.json')
+//
+// Derived via fileURLToPath rather than the newer built-in dirname shorthand
+// on import.meta: that shorthand needs Node >= 20.11, and this plugin's
+// declared floor (package.json's "engines") is 18.13. test/conformance.test.mjs
+// sweeps for the newer form so it cannot creep back in.
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const VENDOR_MANIFEST = path.resolve(HERE, '..', 'vendor', 'manifest.json')
 
 // Absent or corrupt degrades to an empty manifest rather than throwing - the
 // same posture loadIndex already takes toward a missing or corrupt

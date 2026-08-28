@@ -28,7 +28,8 @@ import { readTextFile } from './fsx.mjs'
  * quality.mjs's QUALITY_THRESHOLDS doc comment for how the gate treats it.
  */
 
-const VENDOR = path.resolve(import.meta.dirname, '..', '..', 'vendor')
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const VENDOR = path.resolve(HERE, '..', '..', 'vendor')
 
 export const PDF_EXTRACTOR = Object.freeze({
   name: 'pdfjs-dist',

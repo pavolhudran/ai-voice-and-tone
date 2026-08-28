@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mkdirSync, cpSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { writeTextFile } from './lib/fsx.mjs'
 import { sha256File } from './lib/hash.mjs'
@@ -19,7 +19,8 @@ import { parseCliArgs, writeOut, die, printHelp } from './lib/cli.mjs'
  * bytes are the bytes this script produced.
  */
 
-const ROOT = path.resolve(import.meta.dirname, '..')
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(HERE, '..')
 const VENDOR = path.join(ROOT, 'vendor')
 const WORK = path.join(VENDOR, '.work')
 
