@@ -7,6 +7,7 @@ import { loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, cellId } f
 import { loadRegister, resolveRegister } from './register.mjs'
 import { loadIndex } from './sourceindex.mjs'
 import { sha256File } from './hash.mjs'
+import { detectGaps } from './gaps.mjs'
 import { validateKb } from '../validate.mjs'
 
 /**
@@ -372,7 +373,7 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
     ? inferStages({ manifest, index, register, fingerprint, kb, validation, cardExists })
     : { at: null, reached: Object.fromEntries(STAGES.map((s) => [s, false])) }
 
-  return {
+  const state = {
     generated: now,
     kb: {
       root: kbRoot,
@@ -425,6 +426,14 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       register: register.map((entry) => ({ id: entry.id, kind: entry.kind, label: entry.label ?? null })),
       runtime: config.runtime ?? {},
       vendor: loadVendorPins()
-    }
+    },
+    localePacks: Object.keys(kb.locales ?? {}),
+    cardTokens: cardExists ? Math.ceil(readTextFile(path.join(kbRoot, 'CONTEXT.md')).length / 4) : 0
   }
+
+  // Computed last, from the assembled object: every detector is a pure
+  // predicate over the rings above, so gaps cannot disagree with what the
+  // panels show.
+  state.gaps = detectGaps(state)
+  return state
 }
