@@ -1,8 +1,8 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, statSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { readTextFile } from './fsx.mjs'
 import { activeProfile } from './config.mjs'
-import { loadKb } from './kb.mjs'
+import { loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, cellId } from './kb.mjs'
 import { loadRegister } from './register.mjs'
 import { loadIndex } from './sourceindex.mjs'
 import { validateKb } from '../validate.mjs'
@@ -132,6 +132,74 @@ function countBy (items, keyOf) {
   return out
 }
 
+/**
+ * Attribute a file's words to a context by path segment. Deliberately crude:
+ * this feeds one gap detector ("traffic but no authored cells"), never a
+ * statistic anyone reports. A wrong attribution costs at worst a suggestion
+ * to author a cell the project may not need - cheap, and easy to ignore.
+ */
+function contextOfPath (relPath) {
+  const segments = String(relPath).toLowerCase().split('/')
+  for (const context of CONTEXTS) {
+    const bare = context.replace('-', '')
+    if (segments.some((s) => s === context || s === bare || s.startsWith(`${context}.`))) return context
+  }
+  if (segments.includes('marketing') || segments.includes('content')) return 'marketing-page'
+  if (segments.includes('docs') || segments.includes('help')) return 'help-doc'
+  if (segments.includes('locales') || segments.includes('ui')) return 'product-ui'
+  return null
+}
+
+export function coverageOf (kb, manifest) {
+  const authoredIds = new Set((kb.cells ?? []).map((cell) => cellId(cell.context, cell.state)))
+
+  const traffic = Object.fromEntries(CONTEXTS.map((c) => [c, 0]))
+  for (const file of manifest?.files ?? []) {
+    const context = contextOfPath(file.path)
+    if (context) traffic[context] += Number(file.words) || 0
+  }
+
+  const byContext = CONTEXTS.map((context) => {
+    const cells = STATES.map((state) => (authoredIds.has(cellId(context, state)) ? 'authored' : 'computed'))
+    return {
+      context,
+      authored: cells.filter((c) => c === 'authored').length,
+      of: STATES.length,
+      cells,
+      traffic: traffic[context]
+    }
+  })
+
+  return {
+    authored: byContext.reduce((sum, c) => sum + c.authored, 0),
+    possible: CONTEXTS.length * STATES.length,
+    byContext
+  }
+}
+
+function countDrafts (kbRoot) {
+  const dir = path.join(kbRoot, '.drafts')
+  if (!existsSync(dir)) return 0
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).length
+  } catch {
+    return 0
+  }
+}
+
+/** Every conflicts.md heading of the form '## <id>' is one open dispute. */
+function countConflicts (kbRoot) {
+  const abs = path.join(kbRoot, 'evidence', 'conflicts.md')
+  if (!existsSync(abs)) return 0
+  const body = readTextFile(abs).replace(/<!--[\s\S]*?-->/g, '')
+  return (body.match(/^#{2,4}\s+\S+/gm) ?? []).length
+}
+
+/** Zero-filled so an unused level is 0, never absent - a renderer must not have to guess. */
+function zeroFilled (keys, counts) {
+  return Object.fromEntries(keys.map((key) => [key, counts[key] ?? 0]))
+}
+
 export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now }) {
   const profile = activeProfile(config, profileName)
   const kb = loadKb(kbRoot)
@@ -173,6 +241,18 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       fingerprint: fingerprint
         ? { generated: fingerprint.generated ?? null, ageDays: ageDays(Date.parse(fingerprint.generated), now) }
         : null
+    },
+    coverage: coverageOf(kb, manifest),
+    rules: {
+      total: (kb.rules ?? []).length,
+      byConfidence: zeroFilled(CONFIDENCE_LEVELS, countBy(kb.rules ?? [], (r) => r.confidence)),
+      byFile: countBy(kb.rules ?? [], (r) => r.file)
+    },
+    evidence: {
+      total: (kb.evidence ?? []).length,
+      byType: zeroFilled(EVIDENCE_TYPES, countBy(kb.evidence ?? [], (e) => e.type)),
+      conflicts: countConflicts(kbRoot),
+      drafts: countDrafts(kbRoot)
     }
   }
 }

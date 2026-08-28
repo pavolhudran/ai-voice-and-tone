@@ -4,8 +4,9 @@ import path from 'node:path'
 import { utimesSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig } from '../scripts/lib/config.mjs'
+import { CONTEXTS, STATES } from '../scripts/lib/kb.mjs'
 import {
-  STAGES, inferStages, collect, CARD_SOURCES, cardFreshness, manifestFreshness
+  STAGES, inferStages, collect, CARD_SOURCES, cardFreshness, manifestFreshness, coverageOf
 } from '../scripts/lib/state.mjs'
 
 const NOW = '2026-08-28T00:00:00.000Z'
@@ -307,4 +308,106 @@ test('integrity carries validate findings verbatim, grouped by code', () => {
   // V01 is confirmed and cites no evidence, so validate emits W_NO_EVIDENCE -
   // proof the findings really come from validateKb and are not fabricated here.
   assert.equal(state.integrity.byCode.W_NO_EVIDENCE, 1)
+})
+
+const TONE_WITH_TWO_CELLS = [
+  '# Tone',
+  '',
+  '## T-system-error/frustrated   `confirmed`',
+  '',
+  '**Dials:** warmth 3 - humor 0 - directness 4 - detail 2 - urgency 3 - formality 2',
+  '',
+  '## T-product-ui/delighted   `assumed`',
+  '',
+  '**Dials:** warmth 3 - humor 2 - directness 3 - detail 2 - urgency 1 - formality 2',
+  ''
+].join('\n')
+
+test('coverage counts authored cells against the full ten-by-eight matrix', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': TONE_WITH_TWO_CELLS
+  })
+  assert.equal(state.coverage.possible, CONTEXTS.length * STATES.length)
+  assert.equal(state.coverage.possible, 80)
+  assert.equal(state.coverage.authored, 2)
+  assert.equal(state.coverage.byContext.length, CONTEXTS.length)
+})
+
+test('every context appears in coverage, including those with no authored cell', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': TONE_WITH_TWO_CELLS
+  })
+  const names = state.coverage.byContext.map((c) => c.context)
+  assert.deepEqual(names, CONTEXTS, 'contexts are reported in the canonical order, never only the populated ones')
+  const social = state.coverage.byContext.find((c) => c.context === 'social')
+  assert.equal(social.authored, 0)
+  assert.deepEqual(social.cells, new Array(8).fill('computed'))
+})
+
+test('a cell marked authored sits at its state index, not merely somewhere in the row', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': TONE_WITH_TWO_CELLS
+  })
+  const errors = state.coverage.byContext.find((c) => c.context === 'system-error')
+  assert.equal(errors.cells[STATES.indexOf('frustrated')], 'authored')
+  assert.equal(errors.cells[STATES.indexOf('delighted')], 'computed')
+  assert.equal(errors.authored, 1)
+  assert.equal(errors.of, 8)
+})
+
+test('coverageOf attributes corpus traffic to a context by manifest word counts', () => {
+  const kb = { cells: [], config: {} }
+  const manifest = { files: [{ path: 'content/marketing/a.md', words: 900 }, { path: 'docs/help/b.md', words: 100 }] }
+  const coverage = coverageOf(kb, manifest)
+  const marketing = coverage.byContext.find((c) => c.context === 'marketing-page')
+  assert.ok(marketing.traffic >= 900, 'a path segment naming the context attributes its words')
+})
+
+test('coverage traffic is zero, never null, when there is no manifest', () => {
+  // Zero is a number the gap detectors can compare. Null would make every
+  // "traffic and no cells" comparison silently false.
+  const coverage = coverageOf({ cells: [] }, null)
+  for (const entry of coverage.byContext) assert.equal(entry.traffic, 0)
+})
+
+test('rules are counted by confidence with every level present as a key', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/tone.md': '# Tone\n',
+    '.voice-and-tone/voice.md': [
+      '# Voice',
+      '',
+      '## V01 · plain   `confirmed`',
+      '',
+      '**Means:** short words',
+      '',
+      '## V02 · warm   `assumed`',
+      '',
+      '**Means:** friendly',
+      ''
+    ].join('\n')
+  })
+  assert.equal(state.rules.byConfidence.confirmed, 1)
+  assert.equal(state.rules.byConfidence.assumed, 1)
+  assert.equal(state.rules.byConfidence.derived, 0, 'an unused level is zero, not absent')
+  assert.equal(state.rules.byConfidence.disputed, 0)
+  assert.equal(state.rules.total, 2)
+})
+
+test('evidence counts conflicts and pending drafts', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# Voice\n',
+    '.voice-and-tone/tone.md': '# Tone\n',
+    '.voice-and-tone/.drafts/d1.md': '---\ncell: T-email/curious\n---\n\nhi\n',
+    '.voice-and-tone/.drafts/d2.md': '---\ncell: T-email/curious\n---\n\nhi\n'
+  })
+  assert.equal(state.evidence.drafts, 2)
+  assert.equal(typeof state.evidence.conflicts, 'number')
 })
