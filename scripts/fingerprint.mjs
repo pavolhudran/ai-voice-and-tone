@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
+import { readTextFile, writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
 import { loadConfig, kbRootFor } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
 import { statsFor, mergeStats, fingerprintFromStats } from './lib/metrics.mjs'
@@ -117,7 +117,7 @@ function main (argv) {
     )
   }
   if (fingerprint.baseline) lines.push(`fingerprint: baseline ${fingerprint.baseline.generated}`)
-  lines.push(`fingerprint: wrote ${toPosix(path.relative(projectRoot, out))}`)
+  lines.push(`fingerprint: wrote ${displayPath(projectRoot, out)}`)
   writeOut(`${lines.join('\n')}\n`)
 }
 

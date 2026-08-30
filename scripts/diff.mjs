@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { readTextFile, writeTextFile, toPosix } from './lib/fsx.mjs'
+import { readTextFile, writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
 import { splitWords, splitSentences } from './lib/text.mjs'
 import { stripFrontmatter } from './lib/extract.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -138,7 +138,7 @@ function main (argv) {
     `length ${result.summary.wordDelta >= 0 ? '+' : ''}${result.summary.wordDelta} ` +
     `(${result.summary.wordDeltaPct ?? 'n/a'}%)\n` +
     `diff: ${result.wordSwaps.length} single-word swaps\n` +
-    `diff: wrote ${toPosix(path.relative(projectRoot, out))}\n`
+    `diff: wrote ${displayPath(projectRoot, out)}\n`
   )
 }
 

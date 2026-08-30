@@ -137,7 +137,7 @@ test('a registered non-project source with no index entry leaves ingest unreache
   assert.equal(reached.ingest, false)
 })
 
-test('interview is reached by a non-assumed rule or by interview evidence, and by nothing else', () => {
+test('interview is reached by a confirmed rule or by interview evidence, and by nothing else', () => {
   const base = {
     manifest: { totals: { files: 1 } },
     index: { sources: [] },
@@ -158,6 +158,18 @@ test('interview is reached by a non-assumed rule or by interview evidence, and b
     kb: { rules: [{ confidence: 'assumed' }], evidence: [{ type: 'interview' }] }
   })
   assert.equal(byEvidence.reached.interview, true)
+
+  // A derived rule is what the corpus said, inferred without anyone being
+  // asked. Counting it as an interview let a knowledge base built entirely
+  // from a scan report the interview stage complete having never put a single
+  // question to anyone - the pipeline strip said [##] while the evidence
+  // panel beside it said 'interview 0'.
+  const derivedOnly = inferStages({
+    ...base,
+    kb: { rules: [{ confidence: 'derived' }, { confidence: 'assumed' }], evidence: [{ type: 'corpus' }] }
+  })
+  assert.equal(derivedOnly.reached.draft, true, 'the rules are real, so drafting happened')
+  assert.equal(derivedOnly.reached.interview, false, 'but nobody was interviewed')
 })
 
 test('canonize needs the card, zero validation errors, and a baseline together', () => {

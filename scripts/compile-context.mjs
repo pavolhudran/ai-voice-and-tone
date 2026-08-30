@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { writeTextFile, toPosix } from './lib/fsx.mjs'
+import { writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
 import { loadConfig, activeProfile } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
 import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
@@ -166,7 +166,7 @@ function main (argv) {
     writeOut(`${JSON.stringify({ tokens, bytes: md.length })}\n`)
     return
   }
-  const lines = [`compile-context: wrote ${toPosix(path.relative(projectRoot, out))} (~${tokens} tokens)`]
+  const lines = [`compile-context: wrote ${displayPath(projectRoot, out)} (~${tokens} tokens)`]
   if (tokens > 900) lines.push('compile-context: WARNING over the ~600 token target; trim rules or shorten Means lines')
   writeOut(`${lines.join('\n')}\n`)
 }

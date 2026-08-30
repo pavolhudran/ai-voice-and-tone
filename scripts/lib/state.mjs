@@ -66,7 +66,14 @@ export function inferStages ({ manifest, index, register, fingerprint, kb, valid
     ingest: indexed > 0 || (scan && pendingKinds.length === 0),
     measure: Object.keys(fingerprint?.byLocale ?? {}).length > 0,
     draft: rules.length > 0,
-    interview: rules.some((r) => r.confidence && r.confidence !== 'assumed') ||
+    // `confirmed` or interview evidence - never merely `derived`. A derived
+    // rule is what the corpus said, inferred without anyone being asked; a
+    // knowledge base built entirely from a scan would otherwise report the
+    // interview stage complete having never put a single question to anyone.
+    // `confirmed` stays a qualifying signal because it takes user-supplied
+    // ground truth to reach - a preference pair, or a rule an existing style
+    // guide states outright.
+    interview: rules.some((r) => r.confidence === 'confirmed') ||
       evidence.some((e) => e.type === 'interview'),
     canonize: Boolean(cardExists) && (validation?.errors ?? 0) === 0 && Boolean(fingerprint?.baseline)
   }
