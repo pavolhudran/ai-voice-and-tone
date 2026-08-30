@@ -9,3 +9,9 @@ Thumbs.db
 # that made them. This repository is public.
 *-demo-runbook.md
 *.cast
+
+# Worktrees Claude Code creates for isolated sessions. These are full nested
+# checkouts, node_modules and all, living inside the repository - so an
+# unguarded `git add -A` from the root would stage an entire second copy of
+# the project. Ignored rather than moved: the location is the tool's, not ours.
+.claude/
