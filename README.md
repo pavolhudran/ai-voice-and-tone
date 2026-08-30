@@ -171,7 +171,7 @@ dashboard, no account:
 
 ```
 .voice-and-tone/
-  config.yml         profiles, locales, scan paths, thresholds
+  config.yml         profiles, locales, thresholds, and the source register
   CONTEXT.md         GENERATED digest, ~600 tokens - the always-loaded card
   voice.md           characteristics (constant), each with what it rules out
   tone.md            authored cells + eight state vectors + ten context offsets
@@ -181,9 +181,12 @@ dashboard, no account:
   channels/          per-channel playbooks, generated on second use
   locales/           per-language packs; typography seeded, register asked
   examples/          approved, rejected, and before/after pairs
+  sources/           where you drop brand material; gitignored, never committed
   evidence/
     ledger.md        numbered, dated, and bidirectional
     fingerprint.json measured metrics, and the baseline drift is measured against
+    manifest.json    which files carry copy, and their per-locale totals
+    sources.json     every source's hash, statistics, and the rules it produced
     conflicts.md     sources that genuinely disagree
   CHANGELOG.md       appended on every approved change
 ```
