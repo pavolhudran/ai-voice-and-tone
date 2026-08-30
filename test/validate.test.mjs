@@ -864,3 +864,41 @@ test('produced as null or absent is treated as empty, with no finding at all', (
     }
   }
 })
+
+// --- F8: two parsers, one format contract
+
+test('a prose rule in a table file is warned about, not silently dropped', () => {
+  // lexicon.md and mechanics.md are read by compile-context with
+  // parseTableRules ALONE. A rule written there in the prose shape that
+  // voice.md, tone.md and every pack use was parsed and counted here, reported
+  // clean, and then missing from the always-loaded card - so a knowledge base
+  // could pass with 0 errors while its Lexicon and Mechanics sections both
+  // compiled to "_None yet._".
+  const report = validateKb({
+    rules: [
+      { id: 'L01', file: 'lexicon', kind: 'prose', line: 3, confidence: 'derived', evidence: ['e1'] },
+      { id: 'M01', file: 'mechanics', kind: 'prose', line: 9, confidence: 'derived', evidence: ['e1'] }
+    ],
+    evidence: [{ id: 'e1', type: 'corpus', produced: ['L01', 'M01'], line: 1 }]
+  })
+
+  const flagged = report.findings.filter((f) => f.code === 'W_PROSE_RULE_IN_TABLE_FILE')
+  assert.equal(flagged.length, 2)
+  assert.deepEqual(flagged.map((f) => f.file).sort(), ['lexicon.md', 'mechanics.md'])
+  assert.deepEqual(flagged.map((f) => f.line).sort(), [3, 9])
+  assert.equal(report.errors, 0, 'a warning, not an error - the KB still works, it is just incomplete')
+})
+
+test('table rules in a table file, and prose rules elsewhere, are both left alone', () => {
+  const report = validateKb({
+    rules: [
+      { id: 'L01', file: 'lexicon', kind: 'table', line: 6, confidence: 'derived', evidence: ['e1'] },
+      { id: 'M01', file: 'mechanics', kind: 'table', line: 9, confidence: 'derived', evidence: ['e1'] },
+      { id: 'V1', file: 'voice', kind: 'prose', line: 4, confidence: 'derived', evidence: ['e1'] },
+      { id: 'X01', file: 'cs', kind: 'prose', line: 7, confidence: 'derived', evidence: ['e1'] }
+    ],
+    evidence: [{ id: 'e1', type: 'corpus', produced: ['L01', 'M01', 'V1', 'X01'], line: 1 }]
+  })
+
+  assert.ok(!codesOf(report).includes('W_PROSE_RULE_IN_TABLE_FILE'))
+})

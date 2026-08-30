@@ -138,8 +138,29 @@ function currentSection (lines, upto) {
   return null
 }
 
+/**
+ * Split a markdown table row, honouring the `\|` escape.
+ *
+ * mechanics.md documents a `Pattern` column holding a regular expression, and
+ * alternation - the single most common regex construct - is written with the
+ * same character markdown uses to end a cell. Splitting on a bare `|` made
+ * that column unable to express alternation at all: an unescaped pipe broke
+ * the row, and the escaped `\|` every markdown writer reaches for broke it
+ * too, shifting every column to its right by one and dropping the evidence
+ * reference off the end. The two consumers then disagreed about the wreckage -
+ * validate.mjs reported a confidence of `v?s\` while compile-context.mjs
+ * raised no error at all and wrote the corruption into the always-loaded
+ * card.
+ *
+ * A negative lookbehind splits on unescaped pipes only; the escape is then
+ * unwritten, so the rule sees the pattern its author meant.
+ */
 function splitRow (line) {
-  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+  return line.trim()
+    .replace(/^\|/, '')
+    .replace(/(?<!\\)\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, '|'))
 }
 
 export function parseTables (md) {

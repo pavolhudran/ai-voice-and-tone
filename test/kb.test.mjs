@@ -270,3 +270,59 @@ test('an unterminated HTML comment masks to end of file, not just to the next st
 
   assert.deepEqual(parseProseRules(md), [])
 })
+
+// --- F4: the Pattern column holds regexes, and regexes contain pipes
+
+test('an escaped pipe stays inside its cell instead of shifting every column right', () => {
+  // mechanics.md documents `Pattern` as a regular expression, and alternation
+  // uses the same character that ends a markdown cell. Splitting on a bare
+  // pipe made the column unable to express alternation at all: the escaped
+  // form every markdown writer reaches for shifted Conf into Pattern and
+  // pushed Ev off the end entirely.
+  const md = [
+    '| ID | Rule | Pattern | Conf | Ev |',
+    '|---|---|---|---|---|',
+    '| M01 | escaped pipe | a\\|b | derived | e02 |'
+  ].join('\n')
+
+  const [row] = parseTables(md)[0].rows
+  assert.equal(row.row.Pattern, 'a|b', 'the escape is unwritten, so the rule sees the pattern meant')
+  assert.equal(row.row.Conf, 'derived')
+  assert.equal(row.row.Ev, 'e02', 'the evidence reference used to fall off the end of the row')
+})
+
+test('a real alternation regex round-trips through a mechanics table', () => {
+  const md = [
+    '| ID | Rule | Pattern | Conf | Ev |',
+    '|---|---|---|---|---|',
+    '| M01 | vykani | \\b(vy\\|vas\\|vase\\|vam)\\b | derived | e02 |'
+  ].join('\n')
+
+  const [rule] = parseTableRules(md)
+  assert.equal(rule.id, 'M01')
+  assert.equal(rule.confidence, 'derived')
+  assert.deepEqual(rule.evidence, ['e02'])
+  assert.equal(rule.cells.Pattern, '\\b(vy|vas|vase|vam)\\b')
+  assert.doesNotThrow(() => new RegExp(rule.cells.Pattern), 'and it must actually compile')
+})
+
+test('a row with no escapes is unaffected', () => {
+  const md = [
+    '| ID | Rule | Pattern | Conf | Ev |',
+    '|---|---|---|---|---|',
+    '| M02 | plain | abc | assumed | e01 |'
+  ].join('\n')
+  const [row] = parseTables(md)[0].rows
+  assert.deepEqual(row.row, { ID: 'M02', Rule: 'plain', Pattern: 'abc', Conf: 'assumed', Ev: 'e01' })
+})
+
+test('an escaped pipe at the end of a cell does not swallow the row terminator', () => {
+  const md = [
+    '| ID | Rule | Pattern | Conf | Ev |',
+    '|---|---|---|---|---|',
+    '| M03 | trailing | ab\\| | derived | e02 |'
+  ].join('\n')
+  const [row] = parseTables(md)[0].rows
+  assert.equal(row.row.Pattern, 'ab|')
+  assert.equal(row.row.Ev, 'e02')
+})
