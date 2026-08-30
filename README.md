@@ -48,8 +48,9 @@ Or from a local checkout, point the marketplace at the directory instead:
 ```
 
 **Requires Node 18 or newer.** `/voice-and-tone:init`, `:connect`, `:learn`,
-`:audit`, and `:sync` run scripts directly and will not complete without it -
-`:init` calls `scan.mjs` at its first step, `:connect` calls `sources.mjs`. The
+`:audit`, `:status`, and `:sync` run scripts directly and will not complete
+without it - `:init` calls `scan.mjs` at its first step, `:connect` calls
+`sources.mjs`, `:status` calls `status.mjs`. The
 writing and review commands - `:write`, `:rewrite`, `:localize`, `:review` -
 read the compiled knowledge base and need no runtime once it exists.
 
@@ -205,6 +206,7 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | `/voice-and-tone:rewrite` | off-brand text to on-brand, showing what changed and why |
 | `/voice-and-tone:learn` | turn your corrections into rules, once corroborated |
 | `/voice-and-tone:audit` | coverage, drift, rule health, scored inventory |
+| `/voice-and-tone:status` | what you have, what it is set to, and what is missing |
 | `/voice-and-tone:sync` | validate and recompile the card |
 | `/voice-and-tone:localize` | apply a locale pack |
 
@@ -215,6 +217,7 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | `microcopy` | buttons, errors, empty states, notifications |
 | `voice-discovery` | no knowledge base exists, or you offer new material |
 | `voice-maintenance` | you edited a draft, or asked how healthy the guide is |
+| `voice-observability` | you ask what state the guide is in, or what is missing |
 
 ### The critic
 

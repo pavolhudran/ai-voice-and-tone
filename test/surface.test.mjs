@@ -344,10 +344,13 @@ test('learn, audit, and sync commands route to the maintenance skill', () => {
   assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
 })
 
-test('every command file the plugin ships is one of the nine in the spec', () => {
+test('every command file the plugin ships is one of the ten in the spec', () => {
+  // Ten since the observability spec added :status. The list stays explicit
+  // rather than derived: a command file appearing here that no spec named is
+  // exactly what this test exists to catch.
   const expected = [
     'audit.md', 'connect.md', 'init.md', 'learn.md', 'localize.md',
-    'review.md', 'rewrite.md', 'sync.md', 'write.md'
+    'review.md', 'rewrite.md', 'status.md', 'sync.md', 'write.md'
   ]
   const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
   assert.deepEqual(actual, expected)
@@ -483,4 +486,81 @@ test('the discovery skill tells the model what to do on an escalation', () => {
   assert.match(body, /estimated/)
   assert.match(body, /never .*derived/i)
   assert.match(body, /sources\.mjs/)
+})
+
+test('every flag commands/status.md documents is accepted by the real parser', () => {
+  // The same agreement already enforced for :connect and :init. A flag a
+  // command advertises and the parser rejects is a bug the user finds, not us.
+  const body = readFileSync(surfaceFile('commands', 'status.md'), 'utf8')
+  const dir = makeTmpProject({ 'content/a.md': '# Hi\n', '.voice-and-tone/config.yml': 'version: 1\n' })
+  let checked = 0
+  try {
+    for (const line of body.split('\n')) {
+      const match = /^\/voice-and-tone:status\s+(.+)$/.exec(line.trim())
+      if (!match) continue
+      const args = match[1].split(/\s+/).filter((a) => !a.startsWith('<'))
+      checked += 1
+      assert.doesNotThrow(
+        () => execFileSync(
+          process.execPath,
+          [surfaceFile('scripts', 'status.mjs'), '--root', dir, '--now', '2026-08-28T00:00:00.000Z', ...args],
+          { encoding: 'utf8', stdio: 'pipe' }
+        ),
+        `status.md advertises "${match[1]}" but the parser rejects it`
+      )
+    }
+    assert.ok(checked >= 10, 'expected every documented invocation to be checked, not an empty loop')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('every panel name the command documents exists in PANELS', async () => {
+  const { PANELS } = await import('../scripts/lib/render.mjs')
+  const body = readFileSync(surfaceFile('commands', 'status.md'), 'utf8')
+  for (const name of PANELS) {
+    if (name === 'all') continue
+    assert.ok(body.includes(name), `commands/status.md never mentions the ${name} panel`)
+  }
+})
+
+test('the observability skill declares itself read-only and names the script', () => {
+  const body = readFileSync(surfaceFile('skills', 'voice-observability', 'SKILL.md'), 'utf8')
+  assert.match(body, /scripts\/status\.mjs/)
+  assert.match(body, /read-only|never writes|writes nothing/i)
+})
+
+test('the skill forbids restating numbers and drawing panels', () => {
+  // Both are the hand-maintained-summary defect. If the skill may paraphrase a
+  // metric or improvise a block, the generated dashboard stops being generated.
+  const body = readFileSync(surfaceFile('skills', 'voice-observability', 'SKILL.md'), 'utf8')
+  assert.match(body, /never restate/i)
+  assert.match(body, /never draw|never improvise/i)
+})
+
+test('the gap catalogue reference documents every shipped detector', async () => {
+  const { DETECTORS } = await import('../scripts/lib/gaps.mjs')
+  const body = readFileSync(
+    surfaceFile('skills', 'voice-observability', 'references', 'gap-catalogue.md'), 'utf8'
+  )
+  for (const detector of DETECTORS) {
+    assert.ok(body.includes(detector.id), `gap-catalogue.md omits ${detector.id}`)
+  }
+})
+
+test('the gap catalogue records the five things that must never be reported as gaps', () => {
+  const body = readFileSync(
+    surfaceFile('skills', 'voice-observability', 'references', 'gap-catalogue.md'), 'utf8'
+  )
+  assert.match(body, /absent from this machine/i)
+  assert.match(body, /commit/i, 'the reason absent sources are not a gap must survive in the docs')
+  assert.match(body, /computed cell/i)
+  assert.match(body, /no extractor/i)
+  assert.match(body, /disputed/i)
+})
+
+test('README lists :status among the commands and voice-observability among the skills', () => {
+  const readme = readFileSync(surfaceFile('README.md'), 'utf8')
+  assert.ok(readme.includes('/voice-and-tone:status'))
+  assert.ok(readme.includes('voice-observability'))
 })
