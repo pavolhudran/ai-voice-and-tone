@@ -34,9 +34,27 @@ export function rule (char = '-', width = WIDTH) {
   return `+${String(char)[0].repeat(inner)}+`
 }
 
+/**
+ * Measure the string that will actually be printed, not the one handed in.
+ *
+ * Widths are decided here; the ASCII fold happens later, in cli.mjs, on the
+ * finished line. Any fold that changes length therefore silently breaks the
+ * column it was measured for - and two of them do. Transliteration drops
+ * combining marks, so a decomposed `masáže` arrives eight code units long and
+ * leaves six, which matters because macOS hands out decomposed filenames.
+ * An ellipsis expands to three periods and gains two.
+ *
+ * Folding first makes the measurement exact by construction rather than by
+ * a list of exceptions kept in step by hand, and it retires the whole class
+ * of bug: a future substitution that changes width cannot misalign anything,
+ * because nothing is measured before it runs. The later fold in writeOut is
+ * then a no-op - toAscii of ASCII is ASCII.
+ */
+const measurable = (text) => toAscii(text)
+
 /** Right-pad to `width`. Longer input is returned untouched, never silently cut. */
 export function pad (text, width) {
-  const s = String(text)
+  const s = measurable(text)
   return s.length >= width ? s : s + ' '.repeat(width - s.length)
 }
 
@@ -47,10 +65,27 @@ export function pad (text, width) {
  * layout bug, and printing '...' alone would carry no information at all.
  */
 export function truncate (text, width) {
-  const s = String(text)
+  const s = measurable(text)
   if (s.length <= width) return s
   if (width <= 3) return s.slice(0, Math.max(0, width))
   return `${s.slice(0, width - 3)}...`
+}
+
+/**
+ * Truncate a path from the FRONT, keeping its tail.
+ *
+ * Head-truncation is right for prose and wrong for paths: everything that
+ * distinguishes one source from another lives at the end. A registered folder
+ * elsewhere on disk gives every row the same long prefix, so the sources panel
+ * rendered twenty rows that all read
+ * `/private/tmp/claude-501/-Users-pavolhudran-Sites-ai...` - twenty lines
+ * saying nothing, having spent the whole column on the one part they shared.
+ */
+export function truncatePath (text, width) {
+  const s = measurable(text)
+  if (s.length <= width) return s
+  if (width <= 3) return s.slice(s.length - Math.max(0, width))
+  return `...${s.slice(s.length - (width - 3))}`
 }
 
 /**
@@ -275,6 +310,20 @@ function driftPanel (state, width) {
   const locales = Object.entries(state.drift.byLocale)
   if (locales.length === 0) lines.push(`${INDENT}no fingerprint yet - nothing to compare`)
 
+  const moveOf = (metric) =>
+    metric.from === null || metric.to === null ? '-' : `${metric.from} -> ${metric.to}`
+
+  // The move column is measured, not fixed. 'mean sentence 10.94 -> 10.94' is
+  // exactly 14 characters, so a hard 14 leaves no separating space and the
+  // value fuses into the delta - '10.94' and '0%' render as '10.940%', which
+  // reads as a single number. This is the same failure the label column above
+  // already guards against, one column over. Widening on demand keeps the
+  // familiar 14 for ordinary data and never lets the two fields touch.
+  const moveWidth = Math.max(
+    14,
+    ...locales.flatMap(([, value]) => (value.metrics ?? []).map((metric) => moveOf(metric).length + 1))
+  )
+
   for (const [locale, value] of locales) {
     if (value.baseline === null) {
       lines.push(`${INDENT}${pad(locale, 5)}no baseline - drift cannot be measured here`)
@@ -282,7 +331,7 @@ function driftPanel (state, width) {
     }
     lines.push(`${INDENT}${pad(locale, 5)}baseline ${String(value.baseline).slice(0, 10)}`)
     for (const metric of value.metrics) {
-      const move = metric.from === null || metric.to === null ? '-' : `${metric.from} -> ${metric.to}`
+      const move = moveOf(metric)
       const shown = metric.deltaPct === null ? 'n/a' : `${metric.deltaPct > 0 ? '+' : ''}${metric.deltaPct}%`
       // The label column is 18 wide, not 16: 'contractions /1k' is exactly 16
       // and would butt straight against the numbers with no separating space.
@@ -292,7 +341,7 @@ function driftPanel (state, width) {
       // the finding - trailing it would truncate away the one word a reader
       // scans this panel for.
       lines.push(
-        `${SUB}${pad(metric.label, 18)}${pad(move, 14)}${pad(shown, 7)}` +
+        `${SUB}${pad(metric.label, 18)}${pad(move, moveWidth)}${pad(shown, 7)}` +
         `${pad(metric.flagged ? 'FLAG' : '', 5)}${deltaBar(metric.deltaPct, barWidth)}`
       )
     }
@@ -303,12 +352,19 @@ function driftPanel (state, width) {
 function sourcesPanel (state, width) {
   const s = state.sources
   const lines = []
-  for (const entry of s.entries.slice(0, 20)) {
+  const SHOWN = 20
+  const originWidth = Math.max(8, width - 44)
+  for (const entry of s.entries.slice(0, SHOWN)) {
     lines.push(
       `${INDENT}${pad(entry.id ?? '?', 5)}${pad(entry.kind ?? '?', 9)}` +
-      `${pad(truncate(entry.origin ?? '', Math.max(8, width - 44)), Math.max(8, width - 44) + 1)}` +
+      `${pad(truncatePath(entry.origin ?? '', originWidth), originWidth + 1)}` +
       `${pad(entry.status ?? '', 9)}${entry.fidelity ?? ''}`
     )
+  }
+  // Say that the list was cut. Twenty rows and then nothing reads as the whole
+  // index, which is wrong the moment a real corpus is registered.
+  if (s.entries.length > SHOWN) {
+    lines.push(`${INDENT}... and ${s.entries.length - SHOWN} more (${s.entries.length} entries in total)`)
   }
   if (s.unindexed > 0) lines.push(`${INDENT}${s.unindexed} registered file(s) NOT INGESTED`)
   lines.push(s.freshness === 'checked'

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { walk, readTextFile, writeTextFile, toPosix } from '../scripts/lib/fsx.mjs'
+import { walk, readTextFile, writeTextFile, toPosix, displayPath} from '../scripts/lib/fsx.mjs'
 
 test('walk includes matches, prunes excluded directories, and sorts', () => {
   const dir = makeTmpProject({
@@ -94,4 +94,24 @@ test('writeTextFile creates parent directories and writes LF endings', () => {
 test('toPosix converts Windows separators', () => {
   assert.equal(toPosix('a\\b\\c.md'), 'a/b/c.md')
   assert.equal(toPosix('a/b/c.md'), 'a/b/c.md')
+})
+
+// --- F13: a path outside the root is shown absolute, not as a ladder of '..'
+
+test('displayPath keeps a path inside the root relative', () => {
+  assert.equal(displayPath('/a/b', '/a/b/c/d.json'), 'c/d.json')
+  assert.equal(displayPath('/a/b', '/a/b/d.json'), 'd.json')
+})
+
+test('displayPath prints an outside path absolutely instead of climbing out', () => {
+  // `path.relative` will happily climb out of the root, so an --out pointed
+  // elsewhere printed as '../../../../../../../private/tmp/...': correct,
+  // unreadable, and not copy-pasteable from where the reader is standing.
+  const out = displayPath('/a/b/c/d/e/f/g', '/private/tmp/out.diff.json')
+  assert.equal(out, '/private/tmp/out.diff.json')
+  assert.ok(!out.startsWith('..'))
+})
+
+test('displayPath handles the root itself', () => {
+  assert.equal(displayPath('/a/b', '/a/b'), '/a/b', 'empty relative is not a useful answer')
 })

@@ -44,6 +44,20 @@ function isPrunedDir (relPosix, exclude) {
          matchesAny(`${relPosix}/${PROBE}/${PROBE}`, exclude)
 }
 
+/**
+ * A path to show a human: relative to `from` when it is genuinely inside it,
+ * absolute otherwise.
+ *
+ * `path.relative` will happily climb out of the root, and an --out pointed
+ * anywhere else on disk then printed as
+ * `../../../../../../../private/tmp/...` - a path that is technically correct,
+ * unreadable, and not copy-pasteable from wherever the reader is standing.
+ */
+export function displayPath (from, target) {
+  const rel = toPosix(path.relative(from, target))
+  return rel && !rel.startsWith('..') ? rel : toPosix(target)
+}
+
 export function walk (rootDir, { include = [], exclude = [] } = {}) {
   if (include.length === 0) return []
   const found = []

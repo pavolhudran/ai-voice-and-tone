@@ -3,7 +3,7 @@ import { walk, readTextFile, toPosix } from './fsx.mjs'
 import { extractStrings, extractHeadings, formatFor, isBinaryFormat } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
 import { loadRegister, resolveRegister } from './register.mjs'
-import { loadIndex, statsByLocale, STATS_REQUIRED } from './sourceindex.mjs'
+import { loadIndex, statsByLocale, STATS_REQUIRED, originsOf } from './sourceindex.mjs'
 
 /**
  * Read every copy-bearing file the config points at, in a stable order.
@@ -145,7 +145,11 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
   const register = loadRegister(config)
   const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
   const index = loadIndex(kbRoot)
-  const indexedOrigins = new Set((index.sources ?? []).map((s) => s.origin))
+  // Aliases count as indexed. A byte-identical duplicate folds into one entry
+  // (see recordAlias), and without its extra paths here the fold would read as
+  // "registered but never ingested" on every scan, forever - a gap no command
+  // could close, because the bytes were already analysed.
+  const indexedOrigins = new Set((index.sources ?? []).flatMap(originsOf))
 
   const files = []
   const skipped = []

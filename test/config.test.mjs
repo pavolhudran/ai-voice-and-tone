@@ -94,3 +94,33 @@ test('localeOf reads the locale from the path, else falls back to primary', () =
   assert.equal(localeOf('content/index.md', locales, 'en'), 'en')
   assert.equal(localeOf('content/csv/index.md', locales, 'en'), 'en', 'csv is not the cs locale')
 })
+
+// --- F7: locale suffixes are written in either case in real export folders
+
+test('an uppercase locale suffix is matched, and the declared casing is returned', () => {
+  // `B2B_presentation_EN.pdf` used to fall through to the primary locale, so
+  // an English deck was filed as Czech and carried English-only statistics
+  // into a Czech fingerprint.
+  assert.equal(localeOf('B2B/B2B_presentation_EN.pdf', ['cs', 'en'], 'cs'), 'en')
+  assert.equal(localeOf('B2B/B2B_presentation_CZ.pdf', ['cs', 'en'], 'cs'), 'cs')
+  assert.equal(localeOf('docs/GUIDE-DE.md', ['de', 'en'], 'en'), 'de')
+  assert.equal(localeOf('EN/index.md', ['cs', 'en'], 'cs'), 'en')
+})
+
+test('lowercase suffixes keep working exactly as before', () => {
+  assert.equal(localeOf('emails/email_cancel_cs.txt', ['cs', 'en'], 'en'), 'cs')
+  assert.equal(localeOf('social/linkedin_messaging_en.txt', ['cs', 'en'], 'cs'), 'en')
+  assert.equal(localeOf('content/en/page.md', ['cs', 'en'], 'cs'), 'en')
+})
+
+test('case-insensitivity does not create new false positives', () => {
+  // Whole segments only: a CSV directory is still not Czech, in any casing.
+  assert.equal(localeOf('content/CSV/x.md', ['cs', 'en'], 'en'), 'en')
+  assert.equal(localeOf('docs/SPECS.md', ['cs', 'en'], 'en'), 'en')
+  assert.equal(localeOf('notes/DEN.md', ['de', 'en'], 'en'), 'en')
+})
+
+test('a region-tagged locale matches in either case', () => {
+  assert.equal(localeOf('content/pt-BR/page.md', ['pt-br', 'en'], 'en'), 'pt-br')
+  assert.equal(localeOf('page_PT-BR.md', ['pt-BR', 'en'], 'en'), 'pt-BR', 'declared casing is returned')
+})

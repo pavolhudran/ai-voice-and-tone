@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { loadIndex } from '../scripts/lib/sourceindex.mjs'
-import { runCheck, runIngest, runAdd, runForget, filterVanished, runRefresh, main } from '../scripts/sources.mjs'
+import {
+  runCheck, runIngest, runAdd, runForget, filterVanished, runRefresh, main, reattributeLocales
+} from '../scripts/sources.mjs'
 
 const NOW = '2026-08-27T00:00:00.000Z'
 const SOURCES_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'sources.mjs')
@@ -937,4 +939,66 @@ test('an inbox source with a --label on its register entry carries that label on
   } finally {
     cleanup(dir)
   }
+})
+
+// --- F5: a locale declared after the fact used to be unrecoverable
+
+test('re-attribution corrects a locale decided before the locale was declared', () => {
+  // The shipped template declares locales: [en]. Ingesting a Czech corpus
+  // before naming its locales filed all of it as English, and declaring `cs`
+  // afterwards changed nothing: every file matched by hash, none was
+  // re-processed, and the wrong label stayed for the life of the index.
+  const index = {
+    sources: [
+      { id: 'f001', kind: 'file', origin: 'sources/claims_cs.txt', locale: 'en' },
+      { id: 'f002', kind: 'file', origin: 'sources/note_en.txt', locale: 'en' }
+    ]
+  }
+  const resolved = [{
+    id: 's02',
+    files: [
+      { origin: 'sources/claims_cs.txt', locale: 'cs' },
+      { origin: 'sources/note_en.txt', locale: 'en' }
+    ]
+  }]
+
+  const changed = reattributeLocales(index, resolved)
+
+  assert.equal(changed.length, 1)
+  assert.deepEqual(changed[0], { id: 'f001', origin: 'sources/claims_cs.txt', from: 'en', to: 'cs' })
+  assert.equal(index.sources[0].locale, 'cs')
+  assert.equal(index.sources[1].locale, 'en', 'a correct attribution is left alone')
+})
+
+test('re-attribution is idempotent - a second pass reports nothing', () => {
+  const index = { sources: [{ id: 'f001', kind: 'file', origin: 'a_cs.txt', locale: 'en' }] }
+  const resolved = [{ id: 's02', files: [{ origin: 'a_cs.txt', locale: 'cs' }] }]
+
+  assert.equal(reattributeLocales(index, resolved).length, 1)
+  assert.equal(reattributeLocales(index, resolved).length, 0, 'nothing left to correct')
+})
+
+test('an entry whose file is not on disk keeps its locale and its statistics', () => {
+  // There is nothing to re-resolve a missing file from, and guessing would be
+  // worse than leaving a label that at least matches the statistics beside it.
+  const index = { sources: [{ id: 'f001', kind: 'file', origin: 'gone_cs.txt', locale: 'en' }] }
+  assert.deepEqual(reattributeLocales(index, []), [])
+  assert.equal(index.sources[0].locale, 'en')
+})
+
+test('a url source is never re-attributed - it has no path convention to read', () => {
+  const index = { sources: [{ id: 'u001', kind: 'url', origin: 'https://example.com/cs', locale: 'en' }] }
+  const resolved = [{ id: 's04', files: [{ origin: 'https://example.com/cs', locale: 'cs' }] }]
+  assert.deepEqual(reattributeLocales(index, resolved), [])
+  assert.equal(index.sources[0].locale, 'en')
+})
+
+test('a folded duplicate is re-attributed through its alias', () => {
+  const index = {
+    sources: [{ id: 'f001', kind: 'file', origin: 'b.txt', aliases: ['a_cs.txt'], locale: 'en' }]
+  }
+  const resolved = [{ id: 's02', files: [{ origin: 'a_cs.txt', locale: 'cs' }] }]
+
+  assert.equal(reattributeLocales(index, resolved).length, 1)
+  assert.equal(index.sources[0].locale, 'cs')
 })

@@ -8,7 +8,7 @@ import { statsFor, mergeStats, fingerprintFromStats } from '../scripts/lib/metri
 import { readTextFile } from '../scripts/lib/fsx.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, bySha, diffIndex, statsByLocale, indexPathFor,
-  staleByExtractor
+  staleByExtractor, recordAlias, originsOf
 } from '../scripts/lib/sourceindex.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -95,6 +95,86 @@ test('identity is the hash, so the same bytes at a new path update rather than d
   assert.equal(index.sources.length, 1, 'no duplicate created')
   assert.equal(updated.id, 'f001', 'the original id is kept')
   assert.equal(index.sources[0].origin, '/Users/other/Downloads/a.txt', 'origin is refreshed as a hint')
+})
+
+test('the path an upsert displaces is kept as an alias, not dropped', () => {
+  // Two byte-identical files fold into one entry, which is right - one
+  // document, counted once. But the displaced path used to be known to
+  // nothing afterwards, so gatherAll reported it as a registered file nobody
+  // had ever ingested, and the gap catalogue ranked that above every real
+  // gap, pointing at a command that could not clear it.
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  upsertEntry(index, entry({ id: 'f002', origin: 'sources/b-copy.txt' }))
+
+  assert.equal(index.sources.length, 1)
+  assert.equal(index.sources[0].origin, 'sources/b-copy.txt')
+  assert.deepEqual(index.sources[0].aliases, ['sources/a.txt'])
+  assert.deepEqual(originsOf(index.sources[0]).sort(), ['sources/a.txt', 'sources/b-copy.txt'])
+})
+
+test('an index with no duplicates carries no aliases key at all', () => {
+  const index = { sources: [] }
+  upsertEntry(index, entry())
+  assert.ok(!('aliases' in index.sources[0]), 'absent, not an empty array')
+})
+
+test('re-upserting the same path twice does not alias a file to itself', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  upsertEntry(index, entry({ origin: 'sources/a.txt' }))
+  assert.ok(!('aliases' in index.sources[0]))
+})
+
+test('the canonical origin is never also listed as an alias', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  upsertEntry(index, entry({ origin: 'sources/b.txt' }))
+  upsertEntry(index, entry({ origin: 'sources/a.txt' }))
+  assert.equal(index.sources[0].origin, 'sources/a.txt')
+  assert.deepEqual(index.sources[0].aliases, ['sources/b.txt'])
+})
+
+test('recordAlias adds a second path and keeps the list sorted and unique', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  recordAlias(index, 'a'.repeat(64), 'sources/z.txt')
+  recordAlias(index, 'a'.repeat(64), 'sources/m.txt')
+  recordAlias(index, 'a'.repeat(64), 'sources/z.txt')
+  assert.deepEqual(index.sources[0].aliases, ['sources/m.txt', 'sources/z.txt'])
+})
+
+test('recordAlias is a no-op for the canonical origin and for an unknown hash', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  assert.equal(recordAlias(index, 'a'.repeat(64), 'sources/a.txt'), null)
+  assert.equal(recordAlias(index, 'f'.repeat(64), 'sources/x.txt'), null)
+  assert.ok(!('aliases' in index.sources[0]))
+})
+
+test('diffIndex separates a second copy of known bytes from a re-sighting of them', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt' })] }
+  const resolved = [{
+    id: 's02',
+    files: [
+      { origin: 'sources/a.txt', abs: '/abs/a.txt', format: 'text' },
+      { origin: 'sources/b-copy.txt', abs: '/abs/b-copy.txt', format: 'text' }
+    ]
+  }]
+  const diff = diffIndex(index, resolved, () => 'a'.repeat(64))
+
+  assert.equal(diff.known.length, 1, 'the entry\'s own path is a re-sighting')
+  assert.equal(diff.known[0].origin, 'sources/a.txt')
+  assert.equal(diff.duplicate.length, 1, 'the other path is a duplicate, not silence')
+  assert.equal(diff.duplicate[0].file.origin, 'sources/b-copy.txt')
+  assert.equal(diff.duplicate[0].entry.id, 'f001')
+})
+
+test('a path already recorded as an alias counts as known, not as a fresh duplicate', () => {
+  const index = { sources: [entry({ origin: 'sources/a.txt', aliases: ['sources/b-copy.txt'] })] }
+  const resolved = [{
+    id: 's02',
+    files: [{ origin: 'sources/b-copy.txt', abs: '/abs/b-copy.txt', format: 'text' }]
+  }]
+  const diff = diffIndex(index, resolved, () => 'a'.repeat(64))
+
+  assert.equal(diff.duplicate.length, 0, 'already recorded - reporting it again is noise')
+  assert.equal(diff.known.length, 1)
 })
 
 test('different bytes create a separate entry', () => {

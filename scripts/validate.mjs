@@ -71,6 +71,24 @@ export function validateKb (kb = {}) {
       heading.file, heading.line)
   }
 
+  // lexicon.md and mechanics.md are TABLE files. compile-context.mjs reads
+  // them with parseTableRules alone, so a rule written there in the §4.3 prose
+  // shape - the shape voice.md, tone.md, the channel packs and the locale packs
+  // all use, and therefore the natural thing to reach for - is parsed here,
+  // counted here, and reported clean here, while being invisible to the card
+  // that every write and review actually loads. A knowledge base could pass
+  // validation with 0 errors and compile an always-loaded card whose Lexicon
+  // and Mechanics sections both read "_None yet._", silently unenforcing the
+  // most mechanically checkable rules it had.
+  for (const rule of rules) {
+    if (rule.kind !== 'prose') continue
+    if (rule.file !== 'lexicon' && rule.file !== 'mechanics') continue
+    add('warning', 'W_PROSE_RULE_IN_TABLE_FILE',
+      `rule ${rule.id} is written in the prose rule shape, but ${rule.file}.md is a table file - ` +
+      'compile-context reads only its tables, so this rule would be missing from CONTEXT.md',
+      rule.file, rule.line)
+  }
+
   const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]))
   const ruleIds = new Set()
 
@@ -420,7 +438,8 @@ function main (argv) {
       `validate: ${report.counts.rules} rules, ${report.counts.cells} authored cells of ` +
       `${report.counts.possibleCells}, ${report.counts.evidence} evidence entries`
     )
-    lines.push(`validate: ${report.errors} errors, ${report.warnings} warnings`)
+    const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
+    lines.push(`validate: ${count(report.errors, 'error')}, ${count(report.warnings, 'warning')}`)
     writeOut(`${lines.join('\n')}\n`)
   }
 

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { writeTextFile, toPosix } from './lib/fsx.mjs'
+import { writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
 import { splitSentences, splitWords } from './lib/text.mjs'
 import { loadConfig, kbRootFor } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
@@ -127,7 +127,11 @@ function main (argv) {
   }
   const noExtractor = manifest.skipped.files.filter((f) => f.reason === 'no-extractor')
   const containers = manifest.skipped.files.filter((f) => f.reason === 'container')
-  const extsOf = (files) => [...new Set(files.map((f) => f.ext))].sort().join(', ')
+  // A file with no extension has no `ext`, so the list rendered as
+  // "(no extractor: )" - an empty parenthesis that named nothing and left the
+  // reader with no idea which files had been skipped.
+  const extsOf = (files) =>
+    [...new Set(files.map((f) => f.ext || '(no extension)'))].sort().join(', ')
 
   writeOut(
     `scan: ${manifest.totals.files} files, ${manifest.totals.strings} strings, ` +
@@ -147,7 +151,7 @@ function main (argv) {
     (manifest.missing
       ? `scan: ${manifest.missing} source(s) not present locally; statistics intact\n`
       : '') +
-    `scan: wrote ${toPosix(path.relative(projectRoot, out))}\n`
+    `scan: wrote ${displayPath(projectRoot, out)}\n`
   )
 }
 

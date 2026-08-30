@@ -87,15 +87,24 @@ export function saveConfig (kbRoot, config) {
 /**
  * Attribute a file to a locale by path segment or by basename.
  * Matches whole segments only, so "content/csv/x.md" is not Czech.
+ *
+ * Matching is case-insensitive, because the uppercase convention is at least
+ * as common as the lowercase one in real export folders: a deck exported as
+ * `B2B_presentation_EN.pdf` was silently filed under the primary locale, so an
+ * English document landed in a Czech corpus and took English-only statistics
+ * with it. The locale returned is always the one as DECLARED in config, never
+ * the casing found in the path, so nothing downstream has to normalise again.
  */
 export function localeOf (relPosixPath, locales, primaryLocale) {
   const segments = relPosixPath.split('/')
+  const lowerSegments = segments.slice(0, -1).map((s) => s.toLowerCase())
   const basename = segments[segments.length - 1]
-  const stem = basename.replace(/\.[^.]+$/, '')
+  const stem = basename.replace(/\.[^.]+$/, '').toLowerCase()
   for (const locale of locales) {
-    if (segments.slice(0, -1).includes(locale)) return locale
-    if (stem === locale) return locale
-    if (stem.endsWith(`.${locale}`) || stem.endsWith(`-${locale}`) || stem.endsWith(`_${locale}`)) return locale
+    const needle = String(locale).toLowerCase()
+    if (lowerSegments.includes(needle)) return locale
+    if (stem === needle) return locale
+    if (stem.endsWith(`.${needle}`) || stem.endsWith(`-${needle}`) || stem.endsWith(`_${needle}`)) return locale
   }
   return primaryLocale
 }

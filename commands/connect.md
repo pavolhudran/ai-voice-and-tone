@@ -1,6 +1,6 @@
 ---
 description: Register brand material, see what has already been analysed, and ingest what is new
-argument-hint: "[<path|url>] [--ingest] [--refresh [--only <id|url>]] [--forget <id>]"
+argument-hint: "[<path|url>] [--ingest] [--refresh [--only <id|url>]] [--forget <entry-id>]"
 ---
 
 # /voice-and-tone:connect
@@ -21,7 +21,9 @@ exactly what has been analysed.
 /voice-and-tone:connect --refresh              re-fetch every registered URL and record what changed
 /voice-and-tone:connect --refresh --only <id>  re-fetch just that one registered URL - <id> is
                                                 either its register id (e.g. s04) or its url itself
-/voice-and-tone:connect --forget <id>          retract a source and reopen its rules
+/voice-and-tone:connect --forget <entry-id>     retract one analysed source and reopen its rules
+                                                <entry-id> is an ANALYSED-ENTRY id (e.g. f001),
+                                                not a register id - --check lists them
 ```
 
 Scoping a refresh to one URL is `--refresh --only <id>`, not `--refresh <id>` -

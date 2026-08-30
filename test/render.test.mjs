@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  WIDTH, MIN_WIDTH, MAX_WIDTH, clampWidth, rule, truncate, bar, pad, row,
+  WIDTH, MIN_WIDTH, MAX_WIDTH, clampWidth, rule, truncate, truncatePath, bar, pad, row,
   matrix, pipeline, deltaBar, panel, PANELS, render
 } from '../scripts/lib/render.mjs'
+import { toAscii } from '../scripts/lib/cli.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -282,6 +283,55 @@ test('the drift panel shows the unbaselined locale explicitly, never a zero delt
   assert.match(out, /no baseline/)
 })
 
+test('a drift move that exactly fills the column keeps a space before the delta', () => {
+  // '10.94 -> 10.94' is exactly 14 characters. Against a hard-coded pad of 14
+  // the padding contributed nothing and the value fused into the delta, so
+  // '10.94' followed by '0%' printed as '10.940%' - one number, and the wrong
+  // one. The original fixture used '14.2 -> 19.8' (13 chars) and so never
+  // reached the boundary, which is why this shipped.
+  const out = render(fakeState({
+    drift: {
+      thresholdPct: 25,
+      byLocale: {
+        en: {
+          baseline: '2026-03-02T00:00:00.000Z',
+          metrics: [
+            { key: 'meanSentenceLength', label: 'mean sentence', from: 10.94, to: 10.94, deltaPct: 0, flagged: false },
+            { key: 'contractions', label: 'contractions /1k', from: 15.63, to: 15.63, deltaPct: 0, flagged: false }
+          ]
+        }
+      }
+    }
+  }), { panel: 'drift', width: 72 })
+
+  assert.doesNotMatch(out, /10\.940%/, 'value fused into the delta')
+  assert.doesNotMatch(out, /15\.630%/, 'value fused into the delta')
+  assert.match(out, /10\.94 -> 10\.94\s+0%/)
+  assert.match(out, /15\.63 -> 15\.63\s+0%/)
+})
+
+test('every drift row stays column-aligned when one move is wider than the rest', () => {
+  const out = render(fakeState({
+    drift: {
+      thresholdPct: 25,
+      byLocale: {
+        en: {
+          baseline: '2026-03-02T00:00:00.000Z',
+          metrics: [
+            { key: 'a', label: 'short', from: 8, to: 8, deltaPct: 0, flagged: false },
+            { key: 'b', label: 'long', from: 1234.56, to: 1234.56, deltaPct: 0, flagged: false }
+          ]
+        }
+      }
+    }
+  }), { panel: 'drift', width: 72 })
+
+  const columns = out.split('\n')
+    .filter((line) => /->/.test(line))
+    .map((line) => line.indexOf('0%'))
+  assert.equal(new Set(columns).size, 1, 'the delta column must not move between rows')
+})
+
 test('read-only mode says source freshness was not checked', () => {
   const out = render(fakeState(), { panel: 'sources', width: 72 })
   assert.match(out, /not checked/)
@@ -309,4 +359,114 @@ test('the missing panel caps at ten and says how many more there are', () => {
 
 test('an unknown panel name throws so the CLI can report it', () => {
   assert.throws(() => render(fakeState(), { panel: 'nope', width: 72 }), /unknown panel/)
+})
+
+// --- F10: a path is identified by its tail, not its prefix
+
+test('truncatePath keeps the end of a path, where the basename lives', () => {
+  const long = '/private/tmp/claude-501/-Users-x/scratchpad/vivido/brand-material/blog/blog-1.txt'
+  const out = truncatePath(long, 30)
+  assert.equal(out.length, 30)
+  assert.ok(out.startsWith('...'), 'the marker goes at the front')
+  assert.ok(out.endsWith('blog-1.txt'), 'the distinguishing part survives')
+})
+
+test('two paths sharing a long prefix stay distinguishable after truncation', () => {
+  // Head-truncation rendered twenty rows that all read the same shared prefix
+  // and nothing else - a column spent on the one part they had in common.
+  const base = '/private/tmp/claude-501/-Users-pavolhudran-Sites-ai-voice-and-tone/material/'
+  const a = truncatePath(`${base}alpha.txt`, 28)
+  const b = truncatePath(`${base}beta.txt`, 28)
+  assert.notEqual(a, b)
+  assert.ok(a.endsWith('alpha.txt'))
+  assert.ok(b.endsWith('beta.txt'))
+})
+
+test('a path shorter than the budget is returned untouched', () => {
+  assert.equal(truncatePath('sources/a.txt', 40), 'sources/a.txt')
+})
+
+// --- the NFD trap: macOS filenames decompose, and the ASCII fold recomposes
+
+test('a decomposed filename pads to the same width as its precomposed twin', () => {
+  // The fold in cli.mjs drops combining marks, so an NFD string leaves shorter
+  // than it arrived. Padding measured on the raw length therefore rendered the
+  // row short and pulled everything after it left. macOS hands out NFD paths,
+  // so this is the ordinary case on the platform, not an exotic one.
+  const nfc = 'masáže.txt'
+  const nfd = nfc.normalize('NFD')
+  assert.notEqual(nfc.length, nfd.length, 'the fixture must actually be decomposed')
+  assert.equal(pad(nfd, 20).length, pad(nfc, 20).length)
+  assert.equal(toAscii(pad(nfd, 20)).length, toAscii(pad(nfc, 20)).length)
+})
+
+test('every row of the sources panel is exactly the same width, decomposed names included', () => {
+  const state = fakeState({
+    sources: {
+      registered: 2,
+      analysed: 3,
+      missing: 0,
+      unindexed: 0,
+      freshness: 'unchecked',
+      stale: null,
+      fresh: null,
+      entries: [
+        { id: 'f001', kind: 'file', origin: 'sources/plain.txt', status: 'used', fidelity: 'measured' },
+        { id: 'f002', kind: 'file', origin: 'sources/masáže.txt'.normalize('NFD'), status: 'used', fidelity: 'measured' },
+        { id: 'f003', kind: 'file', origin: 'sources/vyčistěte.txt'.normalize('NFD'), status: 'used', fidelity: 'measured' }
+      ]
+    }
+  })
+  const rows = render(state, { panel: 'sources', width: 78 })
+    .split('\n')
+    .filter((line) => /^\s+f\d{3} /.test(line))
+
+  assert.equal(rows.length, 3)
+  assert.equal(new Set(rows.map((r) => r.length)).size, 1, 'a decomposed name must not shorten its row')
+})
+
+test('the sources panel says when it stopped listing', () => {
+  const entries = Array.from({ length: 71 }, (_, i) => ({
+    id: `f${String(i + 1).padStart(3, '0')}`,
+    kind: 'file',
+    origin: `sources/file-${i + 1}.txt`,
+    status: 'used',
+    fidelity: 'measured'
+  }))
+  const out = render(fakeState({
+    sources: { registered: 1, analysed: 71, missing: 0, unindexed: 0, freshness: 'unchecked', stale: null, fresh: null, entries }
+  }), { panel: 'sources', width: 78 })
+
+  assert.match(out, /and 51 more \(71 entries in total\)/, 'twenty rows then silence reads as the whole index')
+})
+
+test('a width-changing fold cannot misalign a column, because measuring happens after it', () => {
+  // The ellipsis is the substitution that is not one-to-one: it becomes three
+  // periods. Measuring the folded string is what keeps that from shifting a
+  // row's right border two columns left.
+  const withEllipsis = pad('a…b', 12)
+  const plain = pad('a...b', 12)
+  assert.equal(toAscii(withEllipsis).length, toAscii(plain).length)
+  assert.equal(toAscii(withEllipsis).length, 12)
+})
+
+test('panels stay exactly `width` wide whatever the text carries', () => {
+  for (const label of ['plain', 'masáže'.normalize('NFD'), 'a…b', 'Łódź', '日本語']) {
+    const out = render(fakeState({
+      sources: {
+        registered: 1,
+        analysed: 1,
+        missing: 0,
+        unindexed: 0,
+        freshness: 'unchecked',
+        stale: null,
+        fresh: null,
+        entries: [{ id: 'f001', kind: 'file', origin: `sources/${label}.txt`, status: 'used', fidelity: 'measured' }]
+      }
+    }), { panel: 'sources', width: 72 })
+
+    for (const line of out.split('\n')) {
+      assert.ok(line.length <= 72, `"${label}" produced a ${line.length}-column line: ${line}`)
+    }
+  }
 })
