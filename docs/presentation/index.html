@@ -258,12 +258,21 @@ table.list td { color: var(--ink-soft); line-height: 1.5; }
   border-radius: var(--r-md); padding: 1.05rem 1.25rem;
   width: 60%; margin-left: 0;
 }
-.gstep:nth-child(2) { margin-left: 6.667%; }
-.gstep:nth-child(3) { margin-left: 13.333%; }
-.gstep:nth-child(4) { margin-left: 20%; }
-.gstep:nth-child(5) { margin-left: 26.667%; }
-.gstep:nth-child(6) { margin-left: 33.333%; }
-.gstep:nth-child(7) { margin-left: 40%; }
+/* The staircase. Each tile is 60% wide and the last one sits at 40%, so its
+   right edge lands flush with the container's - that is the whole geometry.
+   The increment is therefore 40 / (steps - 1), currently 40/7 for eight.
+   Adding a step means re-dividing, not appending one more rule.
+
+   The n+8 rule is a guard, not a step: any tile past the eighth holds the
+   maximum indent rather than snapping back to zero. That snap is exactly how
+   the previous six-rule version broke the day an eighth step landed. */
+.gstep:nth-child(2) { margin-left: 5.714%; }
+.gstep:nth-child(3) { margin-left: 11.429%; }
+.gstep:nth-child(4) { margin-left: 17.143%; }
+.gstep:nth-child(5) { margin-left: 22.857%; }
+.gstep:nth-child(6) { margin-left: 28.571%; }
+.gstep:nth-child(7) { margin-left: 34.286%; }
+.gstep:nth-child(n+8) { margin-left: 40%; }
 @media (max-width: 68rem) {
   /* Below this the tiles are too narrow to read, so the staircase collapses. */
   .gstep { width: 100%; margin-left: 0 !important; }
@@ -324,11 +333,11 @@ footer p + p { margin-top: .7rem; }
   <h1>A brand voice guide your tooling can prove.</h1>
   <p class="lede">Most style guides are opinions nobody can check. Here, every rule records where it came from and how sure it is.</p>
   <div class="specs">
-    <span class="spec"><b>9</b> commands</span>
-    <span class="spec"><b>5</b> skills</span>
+    <span class="spec"><b>10</b> commands</span>
+    <span class="spec"><b>6</b> skills</span>
     <span class="spec"><b>1</b> independent critic</span>
-    <span class="spec"><b>6</b> CLI scripts</span>
-    <span class="spec"><b>20</b> shared modules</span>
+    <span class="spec"><b>7</b> CLI scripts</span>
+    <span class="spec"><b>23</b> shared modules</span>
     <span class="spec">Node 18+</span>
     <span class="spec disclaim">Not affiliated with Mailchimp</span>
   </div>
@@ -464,6 +473,15 @@ footer p + p { margin-top: .7rem; }
   <blockquote style="margin-top:1.6rem;max-width:56ch">The failure mode of a computed cell must be &ldquo;a bit flat&rdquo;, never &ldquo;joked at someone whose payment just failed&rdquo;.</blockquote>
 
   <p class="note measure" style="margin-top:1.6rem">Both gates are functions in code, not instructions in a document. A rule written in prose is one a language model can reason its way around. A function that returns zero cannot be argued with.</p>
+
+  <div class="plate" style="margin-top:1.8rem">
+    <span class="plate-label">Always on, under every rule</span>
+    <div class="cols">
+      <p class="note"><b>Accessibility.</b> No directional language, links that name their destination, plain words, acronyms defined, headings nested, alt text, most important thing first.</p>
+      <p class="note"><b>Translation-readiness.</b> Active voice, no double negatives, no idioms, one term per concept, spelled-out units, ISO currency codes.</p>
+      <p class="note">Applied to every draft and every review, not as a checklist at the end. Both are <strong>always blockers</strong> - whatever confidence the rule they break carries, and even when no rule mentions them at all. The one thing here that does not answer to the confidence axis.</p>
+    </div>
+  </div>
 </section>
 
 <section id="kb" class="wrap">
@@ -484,11 +502,14 @@ footer p + p { margin-top: .7rem; }
   <b>mechanics.md</b>      <i>Grammar, casing, punctuation.</i>
   <b>channels/</b>         <i>Per-channel playbooks, generated on second use.</i>
   <b>locales/</b>          <i>Typography seeded automatically; register and anglicisms asked.</i>
+  <b>examples/</b>         <i>Approved, rejected, and before/after pairs.</i>
   <b>sources/</b>          <i>Where you drop brand material. Never committed - that is the point.</i>
   <b>evidence/</b>
     <b>ledger.md</b>       <i>Numbered, dated, and bidirectional.</i>
     <b>fingerprint.json</b> <i>Measured metrics, and the baseline drift is measured against.</i>
+    <b>manifest.json</b>   <i>Which files carry copy, and their per-locale totals.</i>
     <b>sources.json</b>    <i>What was analysed and what it proved - so the material above can be safely thrown away.</i>
+    <b>conflicts.md</b>    <i>Where two sources genuinely disagree. Both sides kept, neither enforced.</i>
   <b>CHANGELOG.md</b>      <i>Appended on every approved change.</i></pre>
   </div>
 
