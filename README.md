@@ -68,11 +68,16 @@ markdown, so voice changes arrive as pull requests you can read and revert.
 ["Where your material goes"](#where-your-material-goes) below for why.
 
 ```
+/voice-and-tone:status         # what you have, what it is set to, what is missing
 /voice-and-tone:write an error for a file over the upload limit
 /voice-and-tone:review content/pricing.md
 /voice-and-tone:learn          # after you edit what it drafted
 /voice-and-tone:audit          # coverage, drift, rules broken so often they are not rules
 ```
+
+`:status` reads and never writes, so it is the safe thing to run first on a
+knowledge base you did not build. `:audit` refreshes the numbers and ends by
+asking you to decide something; `:status` only ever tells you where you are.
 
 ## Discovery: it reads what you have already written
 

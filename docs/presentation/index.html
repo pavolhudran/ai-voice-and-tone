@@ -507,7 +507,7 @@ footer p + p { margin-top: .7rem; }
 <section id="surface" class="wrap">
   <p class="eyebrow">What you actually type</p>
   <div class="stack measure">
-    <h2>Nine commands, five skills that need no command.</h2>
+    <h2>Ten commands, six skills that need no command.</h2>
     <p>Commands are explicit. Skills trigger themselves. Ask for a button label and the microcopy skill loads uncalled.</p>
   </div>
 
@@ -523,6 +523,7 @@ footer p + p { margin-top: .7rem; }
           <tr><td>:rewrite</td><td>Off-brand text to on-brand, showing what changed and why.</td></tr>
           <tr><td>:learn</td><td>Turn your edits into rules, once corroborated.</td></tr>
           <tr><td>:audit</td><td>Coverage, drift, rule health, scored inventory.</td></tr>
+          <tr><td>:status</td><td>What you have, what it is set to, and what is missing.</td></tr>
           <tr><td>:sync</td><td>Validate and recompile the card.</td></tr>
           <tr><td>:localize</td><td>Apply a locale pack.</td></tr>
         </tbody>
@@ -537,6 +538,7 @@ footer p + p { margin-top: .7rem; }
           <tr><td>microcopy</td><td>Buttons, errors, empty states, notifications.</td></tr>
           <tr><td>voice-discovery</td><td>No knowledge base exists, or you offer new material.</td></tr>
           <tr><td>voice-maintenance</td><td>You edited a draft, or asked how healthy the guide is.</td></tr>
+          <tr><td>voice-observability</td><td>You ask what state the guide is in, or what is missing.</td></tr>
         </tbody>
       </table>
     </div>
@@ -589,7 +591,7 @@ footer p + p { margin-top: .7rem; }
 <section id="start" class="wrap">
   <p class="eyebrow">Get started</p>
   <div class="stack measure">
-    <h2>Seven steps, and the first four are the whole thing.</h2>
+    <h2>Eight steps, and the first four are the whole thing.</h2>
     <p>Nothing to configure before you begin. The plugin reads your project and asks about what it cannot work out on its own.</p>
   </div>
 
@@ -628,13 +630,21 @@ footer p + p { margin-top: .7rem; }
     <div class="gstep">
       <span class="num">5</span>
       <div>
+        <h3>See where you stand</h3>
+        <p>One screen: coverage, drift, sources, settings, and a ranked list of what is missing - each with the command that closes it. It reads only. Nothing on it can change what it reports on, so a stale number stays visible instead of quietly correcting itself every time you look.</p>
+        <span class="cmd">/voice-and-tone:status</span>
+      </div>
+    </div>
+    <div class="gstep">
+      <span class="num">6</span>
+      <div>
         <h3>Check something</h3>
         <p>Findings carry <span class="mono">file:line</span> anchors and a severity from the rule they break. Add <span class="mono">--critic</span> for the independent reviewer.</p>
         <span class="cmd">/voice-and-tone:review content/pricing.md</span>
       </div>
     </div>
     <div class="gstep">
-      <span class="num">6</span>
+      <span class="num">7</span>
       <div>
         <h3>Edit freely, then teach it</h3>
         <p>Rewrite whatever it drafted. Your changes become evidence; two independent ones become a proposed rule. Nothing is written without your approval.</p>
@@ -642,10 +652,10 @@ footer p + p { margin-top: .7rem; }
       </div>
     </div>
     <div class="gstep">
-      <span class="num">7</span>
+      <span class="num">8</span>
       <div>
         <h3>Keep it honest</h3>
-        <p>Audit reports coverage, drift, and rules broken so often they are not rules. Sync validates and recompiles the card.</p>
+        <p>Audit reports coverage, drift, and rules broken so often they are not rules, then asks you to decide. Sync validates and recompiles the card.</p>
         <span class="cmd">/voice-and-tone:audit</span><span class="cmd">/voice-and-tone:sync</span>
       </div>
     </div>
