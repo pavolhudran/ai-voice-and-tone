@@ -5,7 +5,8 @@ import { loadConfig, saveConfig, activeProfile } from './lib/config.mjs'
 import { isBinaryFormat } from './lib/extract.mjs'
 import { loadRegister, resolveRegister, nextRegisterId, expandHome } from './lib/register.mjs'
 import {
-  loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale
+  loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale,
+  recordAlias, originsOf
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
 import { ingestUrl, snapshotPathFor } from './lib/fetchurl.mjs'
@@ -109,6 +110,53 @@ function restrictProjectFilesToIngestible (resolved) {
   }
 }
 
+/**
+ * Re-attribute every indexed entry's locale from the register as it is
+ * configured RIGHT NOW.
+ *
+ * Locale was decided once, at first ingest, from whatever `locales` happened
+ * to be declared at that moment - and the shipped template declares `[en]`.
+ * Ingesting a Czech corpus before naming its locales therefore filed all of it
+ * as English, and declaring `cs` afterwards fixed nothing: re-running
+ * `--ingest` matches every file by hash, never re-processes it, and the wrong
+ * attribution stayed for the life of the index. The only escape was deleting
+ * evidence/sources.json by hand. The script even warned this could happen
+ * while offering no way back from it.
+ *
+ * Re-attribution is safe to do unconditionally and costs nothing: locale is
+ * metadata on the entry, not an input to the statistics. `statsFor` computes
+ * the English block for every source regardless, and `fingerprintFromStats`
+ * decides whether to EXPOSE it from the locale at read time - so correcting
+ * the label is genuinely all that is required, with no re-extraction.
+ *
+ * Attribution reuses the resolved file's own `locale`, computed by
+ * `resolveEntry` from the same relative path it used the first time, so this
+ * can never disagree with what a fresh ingest would have decided. An entry
+ * whose file is not on disk right now is left alone - there is nothing to
+ * re-resolve it from, and its statistics are still intact.
+ */
+export function reattributeLocales (index, resolved) {
+  const byOrigin = new Map()
+  for (const entry of resolved ?? []) {
+    for (const file of entry.files ?? []) byOrigin.set(file.origin, file.locale)
+  }
+
+  const changed = []
+  for (const source of index.sources ?? []) {
+    if (source.kind === 'url') continue // a URL has no path convention to read
+    for (const origin of originsOf(source)) {
+      if (!byOrigin.has(origin)) continue
+      const next = byOrigin.get(origin)
+      if (next && next !== source.locale) {
+        changed.push({ id: source.id, origin: source.origin, from: source.locale, to: next })
+        source.locale = next
+      }
+      break
+    }
+  }
+  return changed
+}
+
 export function runCheck (ctx) {
   const register = loadRegister(ctx.config)
   const resolved = resolveRegister(register, ctx)
@@ -124,9 +172,17 @@ export function runCheck (ctx) {
   const knownShas = new Set(diff.known.map((f) => f.sha256))
   const escalate = (index.sources ?? []).filter((entry) => knownShas.has(entry.sha256) && needsModelTier(entry))
 
+  // Reported, not applied: --check never writes. Computed on a throwaway copy
+  // so the caller can say "N source(s) are filed under the wrong locale" and
+  // point at --ingest, which does apply it.
+  const relocale = reattributeLocales(
+    JSON.parse(JSON.stringify({ sources: index.sources ?? [] })), resolved
+  )
+
   const total = index.sources.length
   return {
     ...diff,
+    relocale,
     escalate,
     register,
     resolved,
@@ -184,6 +240,7 @@ export async function runIngest (ctx, { only = null } = {}) {
   const ingested = []
   const escalate = []
   const reopened = []
+  const folded = []
   const errors = [...report.errors]
 
   const wants = (origin, from, id) => !only || origin === only || from === only || id === only
@@ -198,8 +255,15 @@ export async function runIngest (ctx, { only = null } = {}) {
   for (const file of wantedFresh) {
     const entry = await ingestOne(file, ctx, index, errors)
     if (!entry) continue
+    // Two byte-identical files in the same batch both arrive as `fresh`; the
+    // second folds into the first. Catch that here rather than letting it
+    // pass as an ordinary ingest, so the run can say a duplicate was folded
+    // instead of reporting a file it did not actually add.
+    const prior = (index.sources ?? []).find((s) => s.sha256 === entry.sha256)
+    const priorOrigin = prior?.origin
     upsertEntry(index, entry)
-    ingested.push(entry)
+    if (prior) folded.push({ origin: entry.origin, sameAs: priorOrigin, id: prior.id })
+    else ingested.push(entry)
     if (needsModelTier(entry)) escalate.push(entry)
   }
 
@@ -229,6 +293,20 @@ export async function runIngest (ctx, { only = null } = {}) {
     }
   }
 
+  // A second file holding bytes already in the index is one document at two
+  // paths, not a new source: it must not be ingested again (that would double
+  // it in the fingerprint), but it must be recorded, or `gatherAll` keeps
+  // reporting the extra path as a registered file nobody ever ingested and
+  // the gap catalogue ranks that above every real gap. Recording the alias is
+  // what makes `--ingest` - the command the gap tells you to run - actually
+  // close it.
+  for (const item of report.duplicate ?? []) {
+    if (!wants(item.file.origin, item.file.from, item.entry.id)) continue
+    if (recordAlias(index, item.file.sha256, item.file.origin)) {
+      folded.push({ origin: item.file.origin, sameAs: item.entry.origin, id: item.entry.id })
+    }
+  }
+
   // `known` entries are matched by hash and never re-processed - but a
   // source recorded with needsModelTier true (a Canva PDF, a JS-rendered
   // page) does not stop needing it just because nothing about it changed.
@@ -251,8 +329,12 @@ export async function runIngest (ctx, { only = null } = {}) {
     if (orphan.status !== 'skipped') orphan.status = 'missing'
   }
 
+  // Applied here, where the index is persisted. Declaring a locale after the
+  // fact used to be unrecoverable; now the next --ingest heals it.
+  const relocale = reattributeLocales(index, report.resolved)
+
   saveIndex(ctx.kbRoot, index, ctx.now)
-  return { ...report, ingested, escalate, reopened, errors }
+  return { ...report, ingested, escalate, reopened, folded, relocale, errors }
 }
 
 // Passed to ingestUrl as a placeholder `id` for every fetch: the real id is
@@ -491,7 +573,22 @@ export function runAdd (ctx, { target, label = null }) {
 export function runForget (ctx, { id }) {
   const index = loadIndex(ctx.kbRoot)
   const at = (index.sources ?? []).findIndex((s) => s.id === id)
-  if (at < 0) throw new Error(`no source with id ${id}`)
+  if (at < 0) {
+    // Two id spaces meet at this flag, and the docs used the same `<id>`
+    // placeholder for both on adjacent lines: `--refresh --only` takes a
+    // REGISTER id (s04), while --forget takes an ANALYSED-ENTRY id (f001).
+    // Reaching for s03 here is the natural mistake, so the error names the
+    // other namespace rather than only denying this one.
+    const register = loadRegister(ctx.config)
+    if (register.some((entry) => entry.id === id)) {
+      throw new Error(
+        `${id} is a registered source, not an analysed entry - --forget takes an entry id ` +
+        `(e.g. ${index.sources?.[0]?.id ?? 'f001'}), which --check lists. To stop reading a ` +
+        `registered source entirely, remove its entry from config.yml's sources: list.`
+      )
+    }
+    throw new Error(`no source with id ${id}`)
+  }
 
   const [removed] = index.sources.splice(at, 1)
   saveIndex(ctx.kbRoot, index, ctx.now)
@@ -529,7 +626,8 @@ async function main (argv, { fetchImpl } = {}) {
       '  --ingest             analyse everything new or changed',
       '  --add <path|url>     register a source',
       '  --label <text>       a human label for --add',
-      '  --forget <id>        retract a source and name the rules to reopen',
+      '  --forget <entry-id>  retract one analysed source (e.g. f001, as listed by --check)',
+      '                       and name the rules it produced, so they can be re-derived',
       '  --refresh            fetch every registered url source and record what changed',
       '  --only <id|url>      scope --refresh to one registered url source',
       '  --root <dir>         project root (default: cwd)',
@@ -633,13 +731,27 @@ async function main (argv, { fetchImpl } = {}) {
       ingested: result.ingested?.length ?? 0,
       escalate: result.escalate?.map((e) => e.origin) ?? [],
       reopened: result.reopened?.map((r) => ({ id: r.id, origin: r.origin, produced: r.produced })) ?? [],
+      duplicate: result.duplicate?.map((d) => ({ origin: d.file.origin, sameAs: d.entry.origin, id: d.entry.id })) ?? [],
+      folded: result.folded?.map((f) => f.origin) ?? [],
+      relocale: result.relocale?.map((r) => ({ id: r.id, from: r.from, to: r.to })) ?? [],
       unnamedProfile
     })}\n`)
   }
 
+  // One line, one moment in time. This used to read
+  // "71 known, 0 matched, 72 new" after a successful ingest, because `known`
+  // was the index size AFTER ingesting while `new`/`matched` came from the
+  // diff taken BEFORE it - two different instants in the same sentence, so
+  // the summary of a run that had just analysed 71 files said nothing had
+  // been analysed. An ingest now reports what it DID, and says separately
+  // where the index ended up; a check still reports the diff it found.
   const lines = [
-    `sources: ${result.index.sources.length} known, ${result.known.length} matched, ` +
-    `${result.fresh.length} new, ${result.stale.length} stale, ${result.missing.length} missing`
+    result.ingested
+      ? `sources: ingested ${result.ingested.length}, folded ${result.folded?.length ?? 0}, ` +
+        `unchanged ${result.known.length}, missing ${result.missing.length}; ` +
+        `index now holds ${result.index.sources.length}`
+      : `sources: ${result.index.sources.length} indexed, ${result.known.length} matched, ` +
+        `${result.fresh.length} new, ${result.stale.length} stale, ${result.missing.length} missing`
   ]
   if (unnamedProfile) {
     lines.push(
@@ -649,6 +761,12 @@ async function main (argv, { fetchImpl } = {}) {
     )
   }
   for (const file of result.fresh.slice(0, 20)) lines.push(`sources:   new    ${file.origin} (${file.format})`)
+  // A duplicate is never silent. Folding it is correct - one document, one
+  // entry, counted once in the fingerprint - but a file that simply stops
+  // being mentioned is exactly what made this fold look like data loss.
+  for (const item of (result.duplicate ?? []).slice(0, 20)) {
+    lines.push(`sources:   dup    ${item.file.origin} = ${item.entry.id} ${item.entry.origin}`)
+  }
   for (const item of result.stale.slice(0, 20)) lines.push(`sources:   stale  ${item.entry.id} ${item.entry.origin}`)
   for (const item of result.skipped.slice(0, 20)) lines.push(`sources:   skip   ${item.origin} (${item.ext})`)
   for (const item of result.errors.slice(0, 20)) lines.push(`sources:   error  ${item.origin} (${item.reason})`)
@@ -672,6 +790,21 @@ async function main (argv, { fetchImpl } = {}) {
     } else {
       lines.push(`sources: ${result.missing.length} source(s) not present locally; statistics intact`)
     }
+  }
+  if (result.relocale?.length) {
+    lines.push(
+      `sources: ${result.relocale.length} source(s) re-attributed to a declared locale` +
+      (result.ingested ? '' : ' (run --ingest to apply)') + ':'
+    )
+    for (const item of result.relocale.slice(0, 20)) {
+      lines.push(`sources:   locale ${item.id} ${item.origin}: ${item.from} -> ${item.to}`)
+    }
+  }
+  if (result.folded?.length) {
+    lines.push(
+      `sources: ${result.folded.length} file(s) identical to an already-analysed source; ` +
+      'recorded as additional paths, counted once'
+    )
   }
   if (result.reopened?.length) {
     lines.push(`sources: ${result.reopened.length} stale source(s) were superseded; rules to re-derive:`)

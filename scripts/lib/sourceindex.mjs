@@ -94,7 +94,12 @@ export function bySha (index) {
   return map
 }
 
-/** Matched on hash. An existing entry keeps its id and gains a fresh origin. */
+/**
+ * Matched on hash. An existing entry keeps its id and gains a fresh origin.
+ *
+ * `aliases` survives the assign: the incoming entry never carries one, so
+ * `Object.assign` leaves whatever `recordAlias` has accumulated in place.
+ */
 export function upsertEntry (index, entry) {
   index.sources = index.sources ?? []
   const existing = index.sources.find((s) => s.sha256 === entry.sha256)
@@ -102,8 +107,57 @@ export function upsertEntry (index, entry) {
     index.sources.push(entry)
     return entry
   }
+  // The origin is still refreshed as a hint, but the path it replaces is kept
+  // rather than dropped. Two byte-identical files ingested in the same run
+  // both arrive here as `fresh` - the second one folds into the first - and
+  // without this the displaced path was known to nothing afterwards, so
+  // `gatherAll` reported it as a registered file nobody had ever ingested and
+  // the gap catalogue ranked that above every real gap. See recordAlias.
+  const aliases = new Set(existing.aliases ?? [])
+  if (existing.origin && existing.origin !== entry.origin) aliases.add(existing.origin)
+  aliases.delete(entry.origin)
   Object.assign(existing, entry, { id: existing.id, added: existing.added ?? entry.added })
+  // Absent rather than empty, so an index with no duplicates keeps its shape.
+  if (aliases.size) existing.aliases = [...aliases].sort()
+  else delete existing.aliases
   return existing
+}
+
+/**
+ * Note a second path holding bytes this index has already analysed.
+ *
+ * Identity here is the hash, so two byte-identical files are one document and
+ * get one entry - which is right, and is what keeps a duplicated export from
+ * counting twice in the fingerprint. But an entry records a single `origin`,
+ * so the second path was previously known to nothing: `gatherAll` saw a
+ * registered file with no index entry and reported it as never ingested, the
+ * gap catalogue ranked that the highest-leverage problem in the knowledge
+ * base, and the command it pointed at - `connect --ingest` - could not clear
+ * it, because the bytes were already matched. A permanent, top-ranked, unfixable
+ * nag, produced by the index working exactly as designed.
+ *
+ * Recording the extra path as an alias closes that loop: the file is now
+ * accounted for, `--ingest` genuinely resolves the gap, and the fold becomes
+ * something a caller can report ("identical to an already-analysed source")
+ * rather than something the user has to infer from a file going quiet.
+ *
+ * Aliases are kept sorted and unique so the index stays byte-stable across
+ * runs, and a moved file's stale alias is harmless - it simply matches
+ * nothing on disk.
+ */
+export function recordAlias (index, sha256, origin) {
+  const existing = (index.sources ?? []).find((s) => s.sha256 === sha256)
+  if (!existing || existing.origin === origin) return null
+  const aliases = new Set(existing.aliases ?? [])
+  if (aliases.has(origin)) return existing
+  aliases.add(origin)
+  existing.aliases = [...aliases].sort()
+  return existing
+}
+
+/** Every path currently known to hold this entry's bytes. */
+export function originsOf (entry) {
+  return [entry.origin, ...(entry.aliases ?? [])]
 }
 
 /**
@@ -179,6 +233,7 @@ export function diffIndex (index, resolved, hashOf) {
   const fresh = []
   const stale = []
   const skipped = []
+  const duplicate = []
   const seen = new Set()
   const byHash = bySha(index)
   const byOrigin = new Map((index.sources ?? []).map((s) => [s.origin, s]))
@@ -192,7 +247,14 @@ export function diffIndex (index, resolved, hashOf) {
 
       if (byHash.has(sha)) {
         seen.add(sha)
-        known.push(candidate)
+        // Known bytes at a path this entry does not yet answer to: a second
+        // copy of an already-analysed document, not a re-sighting of it.
+        // Split out so a caller can record the alias and say so, instead of
+        // folding it into `known` where it disappears - the silence that let
+        // the file be reported as never ingested, forever. See recordAlias.
+        const match = byHash.get(sha)
+        if (originsOf(match).includes(file.origin)) known.push(candidate)
+        else duplicate.push({ entry: match, file: candidate })
         continue
       }
       // Same place, different bytes: the document was edited or replaced.
@@ -213,7 +275,7 @@ export function diffIndex (index, resolved, hashOf) {
   const missing = (index.sources ?? []).filter(
     (s) => s.kind !== 'url' && !seen.has(s.sha256)
   )
-  return { fresh, known, stale, missing, skipped }
+  return { fresh, known, stale, missing, skipped, duplicate }
 }
 
 // Only these statuses genuinely imply a measured stats block. `new` is

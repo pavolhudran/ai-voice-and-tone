@@ -45,6 +45,23 @@ only ever produce `assumed` rules, never `derived`.
 Copy the templates from `<plugin>/templates/kb/` into `<KB>/` first, so the
 scripts have a config to read. Rename `gitignore` to `.gitignore`.
 
+**Then name the brand and declare its locales, before ingesting anything.**
+Ask for the brand name and which languages it publishes in, and write both to
+`<KB>/config.yml`'s `profiles.default` - `name`, `primary_locale`, `locales`.
+
+This is not bookkeeping to be tidied up later. A source's locale is attributed
+when it is first ingested, from the locales declared at that moment, and the
+template ships `locales: [en]`. Ingest a Czech corpus before saying it is
+Czech and every file of it is filed as English. `sources.mjs` warns when the
+profile still holds the placeholder name for exactly this reason - and the
+order of these steps is what decides whether a user ever sees that warning.
+
+(A knowledge base that got this wrong is no longer stuck: the next
+`--ingest` re-attributes every entry from the locales as declared now, and
+reports each correction. But the fingerprint taken in between was wrong, and
+any rule derived from it needs re-deriving - so it is much cheaper to ask
+first.)
+
 Ask where the project's brand material lives before scanning anything -
 project copy, a folder elsewhere on disk, pages on the web, or files the user
 has not dropped in yet. Mention `<KB>/sources/` explicitly: it is where
