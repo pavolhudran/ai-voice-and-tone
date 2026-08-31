@@ -233,3 +233,14 @@ test('a count of a word ending in consonant-y pluralises to -ies', () => {
   assert.match(one, /1 ledger entry\b/, 'a single entry keeps the singular')
   assert.match(one, /1 open dispute\b/)
 })
+
+test('every top-level block takes the same vertical rhythm, plate rows included', () => {
+  // The two .grid rows are blocks like any other, but only .section carried a
+  // top margin, so they butted straight against the matrix legend and the
+  // drift table above them.
+  const css = renderHtml(STATE).match(/<style>([\s\S]*?)<\/style>/)[1]
+  assert.match(css, /--rhythm:/, 'the rhythm has one definition')
+  assert.match(css, /\.section,\s*\.grid\s*\{\s*margin-top:\s*var\(--rhythm\)/)
+  assert.match(css, /\.plate \.section,\s*\.plate \.grid\s*\{\s*margin-top:\s*0/,
+    'but a section inside a plate is that plate\'s heading, not a new block')
+})

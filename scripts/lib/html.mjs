@@ -571,6 +571,11 @@ function settings (state) {
   --body: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* One definition of the vertical rhythm between top-level blocks. Both
+     .section and .grid take it: a plate row is a block like any other, and
+     when only .section carried the margin those rows butted straight against
+     the matrix legend and the drift table above them. */
+  --rhythm: clamp(2.75rem, 5vw, 4rem);
   --r-lg: 20px;
   --r-md: 14px;
   --step--1: clamp(.88rem, .855rem + .12vw, .95rem);
@@ -629,12 +634,13 @@ code { background: var(--cream); padding: .1em .34em; border-radius: 4px; }
 .spec--headline { background: var(--on-band); color: var(--band); font-weight: 600; }
 
 /* ---------- sections ---------- */
-.section { margin-top: clamp(2.75rem, 5vw, 4rem); }
+.section, .grid { margin-top: var(--rhythm); }
 .section__head { margin-bottom: 1.15rem; }
 .section__lede { font-size: var(--step--1); color: var(--ink-soft); max-width: 68ch; margin-top: .4rem; }
 .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+/* A section nested inside a plate is the plate's own heading, not a new block. */
+.plate .section, .plate .grid { margin-top: 0; }
 .plate { background: var(--cream); border-radius: var(--r-lg); padding: clamp(1.35rem, 3vw, 2rem); }
-.plate .section { margin-top: 0; }
 .inline { display: inline; list-style: none; padding: 0; margin: 0; }
 .inline li { display: inline; }
 .inline li + li::before { content: " / "; color: var(--ink-faint); }
