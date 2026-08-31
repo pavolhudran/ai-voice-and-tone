@@ -112,19 +112,51 @@ test('the page is a fragment: the artifact host supplies the skeleton', () => {
   assert.match(html, /^<title>Northwind Voice State<\/title>/)
 })
 
-test('every colour token is defined in the bare :root, not only behind a media query', () => {
-  // The classic unreadable-artifact bug: a token defined only inside
-  // prefers-color-scheme never applies in the viewer's default unstamped
-  // state, and the page renders one theme's text on the other theme's ground.
+test('the page commits to one light theme and paints every colour explicitly', () => {
+  // A deliberate single-theme design, matching the presentation deck it shares
+  // an identity with. That is only safe if nothing is left to the host: the
+  // artifact composites over a ground the viewer paints in ITS theme, so a
+  // transparent body would silently borrow a dark one and put dark text on it.
   const css = renderHtml(STATE).match(/<style>([\s\S]*?)<\/style>/)[1]
-  const bare = css.slice(css.indexOf(':root {'), css.indexOf('@media (prefers-color-scheme: dark)'))
-  const defined = new Set([...bare.matchAll(/(--[a-z-]+)\s*:/g)].map((m) => m[1]))
+
+  assert.doesNotMatch(css, /prefers-color-scheme/, 'no theme switching: one design, stated once')
+  assert.doesNotMatch(css, /\[data-theme/, 'no theme stamps either')
+  assert.match(css, /body\s*\{[^}]*background:\s*var\(--paper\)/, 'body must paint its own ground')
+
+  const root = css.slice(css.indexOf(':root {'), css.indexOf('* { box-sizing'))
+  const defined = new Set([...root.matchAll(/(--[a-z-]+)\s*:/g)].map((m) => m[1]))
   const used = new Set([...css.matchAll(/var\((--[a-z-]+)\)/g)].map((m) => m[1]))
-  // --w and --x are per-element layout values set inline, never colours.
   const missing = [...used].filter((v) => !defined.has(v) && v !== '--w' && v !== '--x')
-  assert.deepEqual(missing, [], 'these tokens are used but never defined in the bare :root block')
-  assert.match(css, /:root\[data-theme="dark"\]/, 'an explicit dark stamp must also win')
-  assert.match(css, /:root:not\(\[data-theme="light"\]\)/, 'an explicit light choice must beat a dark OS')
+  assert.deepEqual(missing, [], 'these tokens are used but never defined')
+})
+
+test('the brand identity is actually on the page, and the band is spent once', () => {
+  const html = renderHtml(STATE)
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1]
+
+  assert.match(css, /--band:\s*#ffe01b/, "the deck's yellow, not an approximation of it")
+  assert.match(css, /--display: "Fraunces"/)
+  assert.match(css, /--body: "Archivo"/)
+  assert.match(html, /<header class="hero">/)
+
+  // The band is the loudest thing the brand owns, so it fills exactly one
+  // field: the hero. Small accents elsewhere (a done step's ordinal, an
+  // "unwritten" flag) are how the deck uses it too and are not fields.
+  assert.match(css, /\.hero \{[^}]*background: var\(--band\)/, 'the hero is the field')
+  assert.match(css, /\.plate \{[^}]*background: var\(--cream\)/, 'every other field is cream')
+  assert.doesNotMatch(css, /\.tile \{[^}]*var\(--band\)/, 'tiles never take the band')
+})
+
+test('the hero reads the state rather than restating a number', () => {
+  const clean = renderHtml({ ...STATE, integrity: { errors: 0, warnings: 0, byCode: {}, findings: [] }, gaps: [] })
+  assert.match(clean, /1 cell authored of 16/, 'singular is respected')
+
+  const broken = renderHtml(STATE) // STATE carries 1 error and 1 blocker gap
+  assert.match(broken, /1 validation error to clear/)
+
+  const empty = renderHtml({ generated: '2026-08-31T00:00:00.000Z' })
+  assert.match(empty, /Nothing authored yet/)
+  assert.match(empty, /measured 2026-08-31/, 'the age of the page is in the band, not a footer')
 })
 
 test('the matrix distinguishes authored from computed, and labels every cell for a screen reader', () => {
@@ -200,4 +232,15 @@ test('a count of a word ending in consonant-y pluralises to -ies', () => {
   const one = renderHtml({ ...STATE, evidence: { total: 1, byType: { source: 1 }, conflicts: 1, drafts: 0 } })
   assert.match(one, /1 ledger entry\b/, 'a single entry keeps the singular')
   assert.match(one, /1 open dispute\b/)
+})
+
+test('every top-level block takes the same vertical rhythm, plate rows included', () => {
+  // The two .grid rows are blocks like any other, but only .section carried a
+  // top margin, so they butted straight against the matrix legend and the
+  // drift table above them.
+  const css = renderHtml(STATE).match(/<style>([\s\S]*?)<\/style>/)[1]
+  assert.match(css, /--rhythm:/, 'the rhythm has one definition')
+  assert.match(css, /\.section,\s*\.grid\s*\{\s*margin-top:\s*var\(--rhythm\)/)
+  assert.match(css, /\.plate \.section,\s*\.plate \.grid\s*\{\s*margin-top:\s*0/,
+    'but a section inside a plate is that plate\'s heading, not a new block')
 })

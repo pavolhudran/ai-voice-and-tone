@@ -72,7 +72,7 @@ p { margin: 0; text-wrap: pretty; }
 .lede { font-size: var(--step-1); line-height: 1.45; color: var(--ink-soft); text-wrap: balance; }
 .note { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.6; max-width: 68ch; text-wrap: balance; }
 code, .mono { font-family: var(--mono); font-size: .9em; }
-code { background: var(--cream); padding: .1em .34em; border-radius: 4px; }
+code { background: var(--cream); padding: .1em .34em; border-radius: 4px; white-space: nowrap; }
 a { color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 blockquote {
@@ -136,13 +136,77 @@ blockquote {
 
 /* ---------- plates: flat colour fields, no outlines ---------- */
 .plate { background: var(--band); border-radius: var(--r-lg); padding: clamp(1.5rem, 3.5vw, 2.4rem); }
-#mechanism .plate, #tone .plate, #kb .plate, #maintenance .plate { background: var(--cream); }
+#mechanism .plate, #tone .plate, #kb .plate, #run .plate, #maintenance .plate { background: var(--cream); }
 .plate-label {
   font-family: var(--body); font-size: var(--step--1); font-weight: 700;
   text-transform: uppercase; letter-spacing: .11em; color: var(--ink-soft);
   display: block; margin-bottom: 1rem;
 }
 .cols { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+
+/* ---------- the run slider: recorded takes, one at a time ---------- */
+.slider { margin-top: 1.8rem; }
+.slider-tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.slides {
+  display: flex; gap: 1.25rem; overflow-x: auto; scroll-snap-type: x mandatory;
+  scroll-behavior: smooth; scrollbar-width: none; padding-bottom: .25rem;
+}
+.slides::-webkit-scrollbar { display: none; }
+.slide { flex: 0 0 100%; scroll-snap-align: center; margin: 0; min-width: 0; }
+/* The takes are 828 to 983 px wide and one of them is portrait, so the media
+   box is fixed and the frame letterboxes against the terminal's own background
+   rather than resizing between slides. */
+.slide-shot { position: relative; }
+/* Every frame is a scroller, not only the page one. The takes are 694 px tall
+   except the status screen, which is 1142: fitting that to the box scaled it to
+   62% and made a screen full of numbers unreadable. Natural size and a
+   scrollbar beats shrink-to-fit for anything meant to be read. */
+.slide-media {
+  background: #121314; --fade-to: #121314;
+  border: 1px solid var(--edge); border-radius: var(--r-lg);
+  display: grid; place-items: start center;
+  height: clamp(20rem, 55vw, 44rem);
+  overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth;
+  scrollbar-width: thin;
+}
+.slide-media img { display: block; max-width: 100%; height: auto; }
+.slide-media:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slide-media.is-page { background: var(--paper); --fade-to: var(--paper); }
+
+/* Shown only where the content actually overflows, decided at runtime: a fade
+   over a frame that does not scroll is a lie about the frame. */
+.slide-shot::after {
+  content: ""; position: absolute; left: 1px; right: 1px; bottom: 1px; height: 5rem;
+  border-radius: 0 0 var(--r-lg) var(--r-lg); pointer-events: none; opacity: 0;
+  background: linear-gradient(to bottom, transparent, var(--fade-to));
+  transition: opacity .25s ease;
+}
+.scroll-hint {
+  position: absolute; left: 50%; bottom: 1.1rem; transform: translateX(-50%);
+  background: var(--ink); color: var(--paper); border-radius: 999px;
+  padding: .42rem 1rem; font-size: var(--step--1); font-weight: 600;
+  white-space: nowrap; pointer-events: none; opacity: 0;
+  transition: opacity .25s ease; box-shadow: 0 6px 18px -8px rgba(36,28,21,.6);
+}
+.slide-shot.is-scrollable::after, .slide-shot.is-scrollable .scroll-hint { opacity: 1; }
+.slide-shot.is-scrolled::after, .slide-shot.is-scrolled .scroll-hint { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .slide-media { scroll-behavior: auto; }
+  .slide-shot::after, .scroll-hint { transition: none; }
+}
+.slide figcaption { margin-top: .9rem; }
+.slide figcaption b { display: block; font-family: var(--display); font-size: var(--step-1); font-weight: 600; margin-bottom: .3rem; }
+.slider-nav { display: flex; align-items: center; gap: .5rem; margin-top: 1rem; }
+.slider-btn {
+  font-family: var(--body); font-size: 1.1rem; line-height: 1; font-weight: 700;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--edge);
+  border-radius: 999px; width: 2.4rem; height: 2.4rem; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.slider-btn:hover:not(:disabled) { background: var(--band); border-color: var(--band); }
+.slider-btn:disabled { opacity: .35; cursor: default; }
+.slider-count { font-family: var(--mono); font-size: var(--step--1); color: var(--ink-faint); margin-left: .35rem; }
+@media (prefers-reduced-motion: reduce) { .slides { scroll-behavior: auto; } }
 
 /* ---------- confidence switcher ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -321,6 +385,7 @@ footer p + p { margin-top: .7rem; }
         <a href="#gates">Gates</a>
         <a href="#kb">Knowledge base</a>
         <a href="#surface">Surface</a>
+        <a href="#run">In use</a>
         <a href="#maintenance">Maintenance</a>
         <a href="#start">Get started</a>
       </nav>
@@ -570,6 +635,84 @@ footer p + p { margin-top: .7rem; }
     <div class="cols">
       <p class="note">One agent runs in a <strong>fresh context</strong>: it sees the knowledge base and the draft, never the reasoning behind it. It cannot be told why a choice was made, so it cannot be talked into accepting it.</p>
       <p class="note">It also takes the <strong>read-back test</strong>. Given the copy with its labels stripped, it must name the context and reader state. Guess wrong and the tone missed. No human needed.</p>
+    </div>
+  </div>
+</section>
+
+<section id="run" class="wrap">
+  <p class="eyebrow">In use</p>
+  <div class="stack measure">
+    <h2>See it run.</h2>
+    <p>Six takes against a real corpus: 71 files of a brand's own Czech material, nothing staged. Five recorded in the terminal, and the page the last of them writes.</p>
+    <p class="note">The status screen is ASCII because a terminal is where it is read. Add <code>--artifact</code> and the same command renders the same state as a page you can send to whoever decides what the brand sounds like.</p>
+  </div>
+
+  <div class="slider" role="group" aria-roledescription="carousel" aria-label="Recorded takes">
+    <div class="slider-tabs">
+      <button class="chip" type="button" aria-pressed="true" data-slide="0">Quality</button>
+      <button class="chip" type="button" aria-pressed="false" data-slide="1">Locale</button>
+      <button class="chip" type="button" aria-pressed="false" data-slide="2">Validation</button>
+      <button class="chip" type="button" aria-pressed="false" data-slide="3">Status</button>
+      <button class="chip" type="button" aria-pressed="false" data-slide="4">Artifact</button>
+      <button class="chip" type="button" aria-pressed="false" data-slide="5">The page</button>
+    </div>
+    <div class="slides" tabindex="0" aria-label="Takes, scrollable">
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl1-quality.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: it refuses to measure what it cannot measure."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>It refuses to measure what it cannot measure</b><span class="note">One PDF in the corpus has a broken text layer: 44% of its words are single characters. It is refused rather than averaged in, and the corpus stays clean.</span></figcaption>
+      </figure>
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl2-locale.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: per-locale, never averaged."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>Per-locale, never averaged</b><span class="note">english=n/a for Czech. Syllables, contractions and passive voice have no Czech method here, so nothing is invented to fill the column.</span></figcaption>
+      </figure>
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl3-validate.gif" width="983" height="694" loading="lazy" decoding="async" alt="Terminal recording: every rule is checkable."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>Every rule is checkable</b><span class="note">humor 3 on a reader state that forces humor to 0. Caught with a file:line anchor, its own code, and a non-zero exit.</span></figcaption>
+      </figure>
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl4-status.gif" width="828" height="1142" loading="lazy" decoding="async" alt="Terminal recording: the whole state, computed rather than described."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>The whole state, computed rather than described</b><span class="note">Coverage, drift, sources, settings, and a ranked list of what is missing, each with the command that closes it.</span></figcaption>
+      </figure>
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl5-artifact.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: the same state, as a page you can send."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>The same state, as a page you can send</b><span class="note">Run it twice with the clock pinned and the bytes are identical. The page is generated from the state, not written alongside it.</span></figcaption>
+      </figure>
+      <figure class="slide">
+        <div class="slide-shot">
+        <div class="slide-media is-page" tabindex="0" role="group" aria-label="The status page, scroll to read it"><img src="status-artifact.png" width="1280" height="4035" loading="lazy" decoding="async"
+          alt="The voice and tone status page. A yellow band carries the brand name, a one-line reading of where the knowledge base stands, and the date it was measured. Below it: six figures including stage, tone matrix coverage and validation errors; a ranked list of what to do next, each with the command that closes it; the discovery pipeline; and the tone matrix, ten contexts against eight reader states, with authored cells printed in solid ink and computed cells in pale non-photo blue. Below that: validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern all of it."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
+        <figcaption><b>The page itself</b><span class="note">All of it, scrollable. Validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern the lot.</span></figcaption>
+      </figure>
+    </div>
+    <div class="slider-nav">
+      <button class="slider-btn" type="button" data-dir="-1" aria-label="Previous take">&lsaquo;</button>
+      <button class="slider-btn" type="button" data-dir="1" aria-label="Next take">&rsaquo;</button>
+      <span class="slider-count" aria-live="polite">1 of 6</span>
+    </div>
+  </div>
+
+  <div class="plate" style="margin-top:1.6rem">
+    <span class="plate-label">Why it can be trusted</span>
+    <div class="cols">
+      <p class="note">Nothing here is staged. The corpus is a real brand's material, the refused PDF is genuinely broken, and the rule that fails validation was broken on purpose to show what happens. Every take is one continuous recording.</p>
+      <p class="note">The page is computed, not written: one collector, one state object, <strong>a second renderer</strong>. Run it twice with the clock pinned and the bytes are identical, which is why it cannot drift from the screen it was made from.</p>
     </div>
   </div>
 </section>
@@ -988,6 +1131,98 @@ footer p + p { margin-top: .7rem; }
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", onScroll);
   markActive();
+
+  /* ---------- run slider ---------- */
+  (function () {
+    var slider = document.querySelector(".slider");
+    if (!slider) { return; }
+    var track = slider.querySelector(".slides");
+    var slides = Array.prototype.slice.call(slider.querySelectorAll(".slide"));
+    var chips = Array.prototype.slice.call(slider.querySelectorAll("[data-slide]"));
+    var count = slider.querySelector(".slider-count");
+    var prev = slider.querySelector('[data-dir="-1"]');
+    var next = slider.querySelector('[data-dir="1"]');
+    var current = 0;
+
+    // Derived from scroll position, never stored as the source of truth: the
+    // track is a real scroller, so a swipe or a shift-wheel moves it without
+    // going through any of these buttons. Reading it back is the only way the
+    // chips can stay honest about what is on screen.
+    function nearest() {
+      var mid = track.scrollLeft + track.clientWidth / 2;
+      var best = 0, bestD = Infinity;
+      for (var i = 0; i < slides.length; i++) {
+        var c = slides[i].offsetLeft + slides[i].offsetWidth / 2;
+        var d = Math.abs(c - mid);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    }
+
+    function paint(i) {
+      current = i;
+      chips.forEach(function (c, n) { c.setAttribute("aria-pressed", String(n === i)); });
+      if (count) { count.textContent = (i + 1) + " of " + slides.length; }
+      if (prev) { prev.disabled = i === 0; }
+      if (next) { next.disabled = i === slides.length - 1; }
+    }
+
+    function go(i) {
+      i = Math.max(0, Math.min(slides.length - 1, i));
+      track.scrollTo({ left: slides[i].offsetLeft - track.offsetLeft, behavior: "smooth" });
+      paint(i);
+    }
+
+    chips.forEach(function (c) {
+      c.addEventListener("click", function () { go(Number(c.getAttribute("data-slide"))); });
+    });
+    if (prev) { prev.addEventListener("click", function () { go(current - 1); }); }
+    if (next) { next.addEventListener("click", function () { go(current + 1); }); }
+
+    // Arrow keys while the track has focus, so the slider is operable without
+    // reaching for the buttons.
+    track.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight") { e.preventDefault(); go(current + 1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(current - 1); }
+    });
+
+    var t = null;
+    track.addEventListener("scroll", function () {
+      if (t) { clearTimeout(t); }
+      t = setTimeout(function () { paint(nearest()); }, 90);
+    }, { passive: true });
+
+    paint(0);
+
+    // Each frame is a scroller, but only the ones whose content actually
+    // overflows should say so: a fade over a frame that does not scroll is a
+    // lie about the frame. Measured after load and on resize, because the box
+    // height is a clamp on viewport width and a take that fits at 1280 may not
+    // at 900.
+    var shots = Array.prototype.slice.call(slider.querySelectorAll(".slide-shot"));
+    function measure() {
+      shots.forEach(function (shot) {
+        var box = shot.querySelector(".slide-media");
+        if (!box) { return; }
+        var overflows = box.scrollHeight > box.clientHeight + 4;
+        shot.classList.toggle("is-scrollable", overflows);
+        if (!overflows) { shot.classList.remove("is-scrolled"); }
+      });
+    }
+    shots.forEach(function (shot) {
+      var box = shot.querySelector(".slide-media");
+      if (!box) { return; }
+      box.addEventListener("scroll", function () {
+        shot.classList.toggle("is-scrolled", box.scrollTop > 8);
+      }, { passive: true });
+      var img = box.querySelector("img");
+      if (img && !img.complete) { img.addEventListener("load", measure); }
+    });
+    window.addEventListener("resize", measure);
+    window.addEventListener("load", measure);
+    measure();
+  })();
+
 })();
 </script>
 </body>
