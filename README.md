@@ -79,6 +79,11 @@ markdown, so voice changes arrive as pull requests you can read and revert.
 knowledge base you did not build. `:audit` refreshes the numbers and ends by
 asking you to decide something; `:status` only ever tells you where you are.
 
+`/voice-and-tone:status --artifact` renders that same state as a shareable page
+instead of a terminal screen - the same collector, the same state object, a
+second renderer. It is for the people who decide what the brand sounds like and
+who do not open a terminal to find out.
+
 ## Discovery: it reads what you have already written
 
 There is no template to fill in. `:init` runs a seven-stage pipeline over your

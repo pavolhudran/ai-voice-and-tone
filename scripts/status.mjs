@@ -1,9 +1,10 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { writeTextFile } from './lib/fsx.mjs'
+import { writeTextFile, displayPath } from './lib/fsx.mjs'
 import { loadConfig } from './lib/config.mjs'
 import { collect, readJson } from './lib/state.mjs'
 import { render, PANELS, clampWidth } from './lib/render.mjs'
+import { renderHtml } from './lib/html.mjs'
 import { buildManifest } from './scan.mjs'
 import { buildFingerprint } from './fingerprint.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -52,7 +53,8 @@ function main (argv) {
     panel: { type: 'string' },
     width: { type: 'string' },
     refresh: { type: 'boolean' },
-    locale: { type: 'string' }
+    locale: { type: 'string' },
+    artifact: { type: 'boolean' }
   })
   if (values.help) {
     printHelp('scripts/status.mjs', [
@@ -67,7 +69,9 @@ function main (argv) {
       '  --width <n>       render width, clamped to 60..120 (default 72)',
       '  --profile <name>  config profile (default: default)',
       '  --now <iso>       fixed timestamp for reproducible output',
-      '  --json            print the whole state object as JSON'
+      '  --json            print the whole state object as JSON',
+      '  --artifact        write the same state as a self-contained HTML page',
+      '                    (default: <kb>/.drafts/status.html; --out overrides)'
     ])
     return
   }
@@ -96,6 +100,27 @@ function main (argv) {
     writeOut(`${JSON.stringify(state, null, 2)}\n`)
     return
   }
+
+  // --artifact renders the SAME state object through a second renderer, never
+  // through a second collection. That is the whole point of the split between
+  // lib/state.mjs and the renderers: two surfaces, one reading. A page built
+  // by re-deriving the numbers could disagree with the screen and there would
+  // be no way to tell which was lying.
+  //
+  // It lands in .drafts/ because that directory is gitignored by the shipped
+  // KB template: a rendering is not evidence, and writing a fresh 40 KB page
+  // into a committed directory on every glance would bury the diffs that
+  // matter. countDrafts() counts only *.md, so this does not inflate the
+  // draft count it sits beside either.
+  if (values.artifact) {
+    const out = values.out
+      ? path.resolve(values.out)
+      : path.join(kbRoot, '.drafts', 'status.html')
+    writeTextFile(out, renderHtml(state))
+    writeOut(`status: wrote ${displayPath(projectRoot, out)}\n`)
+    return
+  }
+
   writeOut(render(state, { panel, width: clampWidth(Number.parseInt(values.width ?? '', 10)) }))
 }
 

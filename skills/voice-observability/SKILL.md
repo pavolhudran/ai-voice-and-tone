@@ -58,6 +58,37 @@ Show the output **verbatim**. Then wait.
 What you *should* add is what the script cannot: which gap matters most for what
 the user is actually trying to do, and what the two-step path to closing it is.
 
+## When a page is wanted instead of a screen
+
+Prohibition 2 above forbids you from drawing a panel. `--artifact` is the
+sanctioned way to give someone a better-looking view without breaking it: the
+script still draws, you still do not.
+
+Reach for it when the user asks for something shareable, says the screen is hard
+to read, wants to send the state to someone who does not use a terminal, or is
+working anywhere a monospace block renders badly.
+
+```
+node "<plugin>/scripts/status.mjs" --root "<project>" --kb "<KB>" --artifact
+```
+
+That writes `<KB>/.drafts/status.html` and prints the path. Then publish that
+exact file with the Artifact tool and give the user the link.
+
+Two things to hold to:
+
+- **Publish the file the script wrote. Never assemble a page yourself**, and
+  never edit the one it produced. A page you write is a description of the
+  numbers, free to drift from them while looking equally authoritative - the
+  precise failure the generated dashboard exists to prevent.
+- **Re-publish the same path** on later runs. The Artifact tool redeploys to the
+  same URL for the same file path, so the link the user already has keeps
+  working instead of being replaced by a new one each time.
+
+Say the same thing you would say about the screen: which gap matters most for
+what they are actually doing. Do not narrate the page's contents back to them -
+they can see it, and prohibition 1 still applies.
+
 ## The menu
 
 The footer lists the panels. When the user picks one:
