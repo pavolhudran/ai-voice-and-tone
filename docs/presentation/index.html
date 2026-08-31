@@ -156,39 +156,42 @@ blockquote {
 /* The takes are 828 to 983 px wide and one of them is portrait, so the media
    box is fixed and the frame letterboxes against the terminal's own background
    rather than resizing between slides. */
-.slide-media {
-  background: #121314; border: 1px solid var(--edge); border-radius: var(--r-lg);
-  overflow: hidden; display: grid; place-items: center;
-  height: clamp(20rem, 55vw, 44rem);
-}
-.slide-media img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; }
-
-/* The page slide is the one frame taller than its box on purpose: the report
-   is 4035 px and clipping it would say the page ends where the box does. It
-   scrolls instead, with a fade and a hint that both retire on first scroll. */
 .slide-shot { position: relative; }
-.slide-media.is-page {
-  background: var(--paper); place-items: start center;
+/* Every frame is a scroller, not only the page one. The takes are 694 px tall
+   except the status screen, which is 1142: fitting that to the box scaled it to
+   62% and made a screen full of numbers unreadable. Natural size and a
+   scrollbar beats shrink-to-fit for anything meant to be read. */
+.slide-media {
+  background: #121314; --fade-to: #121314;
+  border: 1px solid var(--edge); border-radius: var(--r-lg);
+  display: grid; place-items: start center;
+  height: clamp(20rem, 55vw, 44rem);
   overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth;
+  scrollbar-width: thin;
 }
-.slide-media.is-page img { width: 100%; height: auto; max-height: none; }
-.slide-media.is-page:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slide-media img { display: block; max-width: 100%; height: auto; }
+.slide-media:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slide-media.is-page { background: var(--paper); --fade-to: var(--paper); }
+
+/* Shown only where the content actually overflows, decided at runtime: a fade
+   over a frame that does not scroll is a lie about the frame. */
 .slide-shot::after {
   content: ""; position: absolute; left: 1px; right: 1px; bottom: 1px; height: 5rem;
-  border-radius: 0 0 var(--r-lg) var(--r-lg); pointer-events: none;
-  background: linear-gradient(to bottom, rgba(255,255,255,0), var(--paper));
+  border-radius: 0 0 var(--r-lg) var(--r-lg); pointer-events: none; opacity: 0;
+  background: linear-gradient(to bottom, transparent, var(--fade-to));
   transition: opacity .25s ease;
 }
 .scroll-hint {
   position: absolute; left: 50%; bottom: 1.1rem; transform: translateX(-50%);
   background: var(--ink); color: var(--paper); border-radius: 999px;
   padding: .42rem 1rem; font-size: var(--step--1); font-weight: 600;
-  white-space: nowrap; pointer-events: none; transition: opacity .25s ease;
-  box-shadow: 0 6px 18px -8px rgba(36,28,21,.6);
+  white-space: nowrap; pointer-events: none; opacity: 0;
+  transition: opacity .25s ease; box-shadow: 0 6px 18px -8px rgba(36,28,21,.6);
 }
+.slide-shot.is-scrollable::after, .slide-shot.is-scrollable .scroll-hint { opacity: 1; }
 .slide-shot.is-scrolled::after, .slide-shot.is-scrolled .scroll-hint { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .slide-media.is-page { scroll-behavior: auto; }
+  .slide-media { scroll-behavior: auto; }
   .slide-shot::after, .scroll-hint { transition: none; }
 }
 .slide figcaption { margin-top: .9rem; }
@@ -655,30 +658,45 @@ footer p + p { margin-top: .7rem; }
     </div>
     <div class="slides" tabindex="0" aria-label="Takes, scrollable">
       <figure class="slide">
-        <div class="slide-media"><img src="hl1-quality.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: it refuses to measure what it cannot measure."></div>
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl1-quality.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: it refuses to measure what it cannot measure."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
         <figcaption><b>It refuses to measure what it cannot measure</b><span class="note">One PDF in the corpus has a broken text layer: 44% of its words are single characters. It is refused rather than averaged in, and the corpus stays clean.</span></figcaption>
       </figure>
       <figure class="slide">
-        <div class="slide-media"><img src="hl2-locale.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: per-locale, never averaged."></div>
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl2-locale.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: per-locale, never averaged."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
         <figcaption><b>Per-locale, never averaged</b><span class="note">english=n/a for Czech. Syllables, contractions and passive voice have no Czech method here, so nothing is invented to fill the column.</span></figcaption>
       </figure>
       <figure class="slide">
-        <div class="slide-media"><img src="hl3-validate.gif" width="983" height="694" loading="lazy" decoding="async" alt="Terminal recording: every rule is checkable."></div>
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl3-validate.gif" width="983" height="694" loading="lazy" decoding="async" alt="Terminal recording: every rule is checkable."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
         <figcaption><b>Every rule is checkable</b><span class="note">humor 3 on a reader state that forces humor to 0. Caught with a file:line anchor, its own code, and a non-zero exit.</span></figcaption>
       </figure>
       <figure class="slide">
-        <div class="slide-media"><img src="hl4-status.gif" width="828" height="1142" loading="lazy" decoding="async" alt="Terminal recording: the whole state, computed rather than described."></div>
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl4-status.gif" width="828" height="1142" loading="lazy" decoding="async" alt="Terminal recording: the whole state, computed rather than described."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
         <figcaption><b>The whole state, computed rather than described</b><span class="note">Coverage, drift, sources, settings, and a ranked list of what is missing, each with the command that closes it.</span></figcaption>
       </figure>
       <figure class="slide">
-        <div class="slide-media"><img src="hl5-artifact.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: the same state, as a page you can send."></div>
+        <div class="slide-shot">
+        <div class="slide-media" tabindex="0" role="group" aria-label="Recorded take, scroll to see all of it"><img src="hl5-artifact.gif" width="944" height="694" loading="lazy" decoding="async" alt="Terminal recording: the same state, as a page you can send."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
+        </div>
         <figcaption><b>The same state, as a page you can send</b><span class="note">Run it twice with the clock pinned and the bytes are identical. The page is generated from the state, not written alongside it.</span></figcaption>
       </figure>
       <figure class="slide">
         <div class="slide-shot">
         <div class="slide-media is-page" tabindex="0" role="group" aria-label="The status page, scroll to read it"><img src="status-artifact.png" width="1280" height="4035" loading="lazy" decoding="async"
           alt="The voice and tone status page. A yellow band carries the brand name, a one-line reading of where the knowledge base stands, and the date it was measured. Below it: six figures including stage, tone matrix coverage and validation errors; a ranked list of what to do next, each with the command that closes it; the discovery pipeline; and the tone matrix, ten contexts against eight reader states, with authored cells printed in solid ink and computed cells in pale non-photo blue. Below that: validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern all of it."></div>
-          <span class="scroll-hint" aria-hidden="true">&darr; Scroll to read the whole page</span>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll</span>
         </div>
         <figcaption><b>The page itself</b><span class="note">All of it, scrollable. Validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern the lot.</span></figcaption>
       </figure>
@@ -1176,17 +1194,33 @@ footer p + p { margin-top: .7rem; }
 
     paint(0);
 
-    // The page slide scrolls inside its frame. The fade and the hint say so,
-    // and both retire on the first scroll rather than sitting over the content
-    // for as long as the slide is open.
-    var shot = slider.querySelector(".slide-shot");
-    var page = shot && shot.querySelector(".is-page");
-    if (page) {
-      page.addEventListener("scroll", function () {
-        var atTop = page.scrollTop <= 8;
-        if (shot.classList.toggle) { shot.classList.toggle("is-scrolled", !atTop); }
-      }, { passive: true });
+    // Each frame is a scroller, but only the ones whose content actually
+    // overflows should say so: a fade over a frame that does not scroll is a
+    // lie about the frame. Measured after load and on resize, because the box
+    // height is a clamp on viewport width and a take that fits at 1280 may not
+    // at 900.
+    var shots = Array.prototype.slice.call(slider.querySelectorAll(".slide-shot"));
+    function measure() {
+      shots.forEach(function (shot) {
+        var box = shot.querySelector(".slide-media");
+        if (!box) { return; }
+        var overflows = box.scrollHeight > box.clientHeight + 4;
+        shot.classList.toggle("is-scrollable", overflows);
+        if (!overflows) { shot.classList.remove("is-scrolled"); }
+      });
     }
+    shots.forEach(function (shot) {
+      var box = shot.querySelector(".slide-media");
+      if (!box) { return; }
+      box.addEventListener("scroll", function () {
+        shot.classList.toggle("is-scrolled", box.scrollTop > 8);
+      }, { passive: true });
+      var img = box.querySelector("img");
+      if (img && !img.complete) { img.addEventListener("load", measure); }
+    });
+    window.addEventListener("resize", measure);
+    window.addEventListener("load", measure);
+    measure();
   })();
 
 })();
