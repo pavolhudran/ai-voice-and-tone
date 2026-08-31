@@ -116,31 +116,69 @@ function statTile ({ label, value, unit = '', note = '', tone = 'plain' }) {
 function section (id, title, lede, body) {
   return `<section class="section" id="${escapeHtml(id)}">
       <header class="section__head">
-        <h2 class="section__title">${escapeHtml(title)}</h2>
+        <h2>${escapeHtml(title)}</h2>
         ${lede ? `<p class="section__lede">${escapeHtml(lede)}</p>` : ''}
       </header>
       ${body}
     </section>`
 }
 
-// ------------------------------------------------------------------- masthead
+// ----------------------------------------------------------------------- hero
 
-function masthead (state) {
+/**
+ * The one full-bleed yellow field on the page.
+ *
+ * The deck's signature move, borrowed exactly: box-shadow plus a clip-path
+ * that lets a band inside a max-width wrapper bleed to both edges without a
+ * second wrapper element. It carries the brand, the one-line reading of where
+ * this knowledge base stands, and the facts a reader checks before believing
+ * any number below - which profile, which locales, and when it was measured.
+ *
+ * A stale page is the failure mode this hero exists to prevent: the same
+ * screenshot is still legible six months later and says nothing about its own
+ * age, so the measured date sits in the band rather than in a footer nobody
+ * scrolls to.
+ */
+function hero (state) {
   const kb = state.kb ?? {}
-  const locales = (kb.locales ?? []).map((l) => escapeHtml(l)).join(' &middot; ')
-  const facts = [
+  const coverage = state.coverage ?? {}
+  const rules = state.rules ?? {}
+  const errors = Number(state.integrity?.errors) || 0
+  const blockers = (state.gaps ?? []).filter((g) => g.severity === 'blocker').length
+
+  // The headline is a reading, not a number: a page whose first line is a
+  // statistic makes the reader do the interpreting, and the interpreting is
+  // exactly what the plugin is for.
+  // Coerced, not trusted: a knowledge base that has never been built carries no
+  // coverage block at all, and `undefined === 0` is false - which sent the empty
+  // case down the branch that assumes there is something to count and put
+  // "undefined cells authored of 0" in the largest text on the page.
+  const authored = Number(coverage.authored) || 0
+  const possible = Number(coverage.possible) || 0
+
+  const headline = errors > 0
+    ? `${plural(errors, 'validation error')} to clear before the card can be trusted.`
+    : blockers > 0
+      ? `${plural(blockers, 'blocker')} between here and a guide that can be enforced.`
+      : authored === 0
+        ? 'Nothing authored yet. Every cell below is arithmetic, not a decision anyone made.'
+        : `${plural(authored, 'cell')} authored of ${possible}, and ${plural(Number(rules.total) || 0, 'rule')} that can be checked.`
+
+  const specs = [
     ['profile', kb.profile ?? 'default'],
-    ['kb version', kb.version ?? '-'],
-    ['locales', locales || '-'],
-    ['card', `${num(state.cardTokens, '0')} tokens`],
-    ['measured', String(state.generated ?? '').slice(0, 10) || '-']
-  ]
-  return `<header class="masthead">
-      <p class="masthead__eyebrow">Voice &amp; tone knowledge base state</p>
-      <h1 class="masthead__brand">${escapeHtml(kb.brand ?? 'Unnamed')}</h1>
-      <dl class="masthead__facts">
-        ${facts.map(([k, v]) => `<div class="fact"><dt>${escapeHtml(k)}</dt><dd>${v === locales ? v : escapeHtml(v)}</dd></div>`).join('\n        ')}
-      </dl>
+    ['locales', (kb.locales ?? []).join(', ') || 'none'],
+    ['kb', kb.version ?? '-'],
+    ['card', `${num(state.cardTokens, '0')} tokens`]
+  ].map(([k, v]) => `<span class="spec">${escapeHtml(k)} <b>${escapeHtml(v)}</b></span>`).join('\n        ')
+
+  return `<header class="hero">
+      <p class="eyebrow">Voice and tone, knowledge base state</p>
+      <h1>${escapeHtml(kb.brand ?? 'Unnamed')}</h1>
+      <p class="lede">${escapeHtml(headline)}</p>
+      <div class="specs">
+        ${specs}
+        <span class="spec spec--headline">measured ${escapeHtml(String(state.generated ?? '').slice(0, 10) || 'never')}</span>
+      </div>
     </header>`
 }
 
@@ -484,325 +522,291 @@ function settings (state) {
 // -------------------------------------------------------------------- styles
 
 /**
- * The palette is the project's own, taken from docs/presentation/index.html so
- * this page reads as part of the same plugin rather than as a stranger: warm
- * ink, cream, the teal accent, Fraunces/Archivo/IBM Plex Mono.
+ * The project's own visual system, taken from docs/presentation/index.html
+ * rather than invented alongside it: white paper, the yellow band, cream
+ * plates with no outlines, Fraunces over Archivo over IBM Plex Mono. A status
+ * page that looked like a different product would undo the thing the deck is
+ * for.
  *
- * Two things a deck does not need and a data page does are added here. The
- * first is a reserved status set (good / caution / warn) kept separate from
- * the accent, so severity never has to borrow the brand colour. The second is
- * `--ghost`, a non-photo blue: the colour a print shop marks a sheet up in
- * because it does not reproduce, used for exactly the cells that are on the
- * sheet without being real yet.
+ * Light only, deliberately. The deck commits to one visual world and this page
+ * is part of it; a dark variant would be a second design to keep in step with
+ * the first, and the yellow band is the identity - it does not survive being
+ * re-stepped for a dark ground without becoming a different colour. So there
+ * is no prefers-color-scheme block and no data-theme block: every colour is
+ * painted explicitly from a token defined once, and `body` sets its own
+ * background so the page never borrows the host's ground.
  *
- * Theming covers all three viewer states. `:root` carries the complete light
- * palette; the dark tokens are redefined once under prefers-color-scheme
- * (guarded so an explicit light choice still wins) and once under an explicit
- * dark stamp. No colour is ever declared only inside one of those blocks - a
- * token defined only behind a media query never applies in the unstamped
- * default, which is the classic unreadable-artifact bug.
- */
-const STYLES = `
+ * Two things a deck does not need and a data page does are added on top. A
+ * reserved status set (good / caution / warn) kept away from the accent, so
+ * severity never borrows the brand colour. And `--ghost`, a non-photo blue:
+ * the colour a print shop marks a sheet up in because it does not reproduce,
+ * used for exactly the cells that are on the sheet without being real yet.
+ *
+ * The band appears once, on the hero. It is the loudest thing the brand owns,
+ * and spending it twice on one page would leave nothing to mean "start here".
+ */const STYLES = `
 :root {
-  --paper:      #fbf7ec;
-  --card:       #ffffff;
-  --mist:       #f2efe9;
+  --paper:      #ffffff;
+  --band:       #ffe01b;
+  --on-band:    #241c15;
+  --cream:      #fbf7ec;
+  --grey:       #f0efe9;
+  --mist:       #eef3f4;
   --ink:        #241c15;
   --ink-soft:   #5b5147;
   --ink-faint:  #8b8177;
   --edge:       #e4dccb;
   --edge-soft:  #efe9dc;
+  --rule-soft:  #ece7db;
   --accent:     #007c89;
   --accent-ink: #005b64;
-  --ghost:      #8ec6d8;
-  --ghost-soft: #d5eaf1;
-  --good:       #2f6f4f;
-  --caution:    #9a6b12;
   --warn:       #b8341f;
   --warn-bg:    #fbeae4;
+  --good:       #2f6f4f;
+  --caution:    #8a5a12;
+  --ghost:      #8ec6d8;
+  --ghost-soft: #dff0f5;
 
   --display: "Fraunces", "Iowan Old Style", Georgia, serif;
   --body: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --gap: 14px;
-  --r: 10px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper:      #16130f;
-    --card:       #1d1913;
-    --mist:       #221d16;
-    --ink:        #f3ece1;
-    --ink-soft:   #b8ac9b;
-    --ink-faint:  #8a7f70;
-    --edge:       #362e23;
-    --edge-soft:  #2a241b;
-    --accent:     #46bcc7;
-    --accent-ink: #7fd6de;
-    --ghost:      #4e8496;
-    --ghost-soft: #23343a;
-    --good:       #6fbe93;
-    --caution:    #d9a441;
-    --warn:       #e8785f;
-    --warn-bg:    #3a201a;
-  }
-}
-:root[data-theme="dark"] {
-  --paper:      #16130f;
-  --card:       #1d1913;
-  --mist:       #221d16;
-  --ink:        #f3ece1;
-  --ink-soft:   #b8ac9b;
-  --ink-faint:  #8a7f70;
-  --edge:       #362e23;
-  --edge-soft:  #2a241b;
-  --accent:     #46bcc7;
-  --accent-ink: #7fd6de;
-  --ghost:      #4e8496;
-  --ghost-soft: #23343a;
-  --good:       #6fbe93;
-  --caution:    #d9a441;
-  --warn:       #e8785f;
-  --warn-bg:    #3a201a;
+  --r-lg: 20px;
+  --r-md: 14px;
+  --step--1: clamp(.88rem, .855rem + .12vw, .95rem);
+  --step-0:  clamp(1.02rem, .99rem + .16vw, 1.12rem);
+  --step-1:  clamp(1.25rem, 1.16rem + .4vw, 1.5rem);
+  --step-2:  clamp(1.75rem, 1.5rem + 1.15vw, 2.6rem);
+  --step-3:  clamp(2.5rem, 1.9rem + 2.9vw, 4.5rem);
 }
 
 * { box-sizing: border-box; }
 body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--body);
-  font-size: 15px;
-  line-height: 1.55;
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--body); font-size: var(--step-0); line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 1120px; margin: 0 auto; padding: 40px 24px 80px; }
+.wrap { width: min(100% - 2.5rem, 76rem); margin-inline: auto; padding-bottom: 4rem; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-code, .n, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.08; }
+h1 { font-size: var(--step-3); font-weight: 700; letter-spacing: -.02em; }
+h2 { font-size: var(--step-2); font-weight: 700; letter-spacing: -.015em; }
+h3 { font-size: var(--step-1); font-weight: 600; line-height: 1.25; }
+p { margin: 0; text-wrap: pretty; }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+code { background: var(--cream); padding: .1em .34em; border-radius: 4px; }
+.n, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-family: var(--body); font-size: var(--step--1); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .12em; color: var(--ink-soft); margin: 0 0 1.25rem;
+}
+.note { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.6; max-width: 68ch; }
+.empty { font-size: var(--step--1); color: var(--ink-faint); font-style: italic; margin: 0; }
 
-/* masthead */
-.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 18px; margin-bottom: 28px; }
-.masthead__eyebrow {
-  font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--ink-faint); margin: 0 0 6px;
+/* ---------- hero: the one full-bleed yellow field ---------- */
+.hero {
+  padding-block: clamp(3rem, 6vw, 4.5rem) clamp(2.5rem, 5vw, 3.5rem);
+  background: var(--band); color: var(--on-band);
+  box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax);
+  margin-bottom: clamp(2.5rem, 5vw, 4rem);
 }
-.masthead__brand {
-  font-family: var(--display); font-weight: 600; font-size: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
-  line-height: 1.05; margin: 0 0 14px; text-wrap: balance;
+.hero .eyebrow { color: var(--on-band); opacity: .78; }
+.hero h1 { color: var(--on-band); max-width: 15ch; }
+.hero .lede {
+  font-size: var(--step-1); line-height: 1.45; color: var(--on-band);
+  opacity: .82; max-width: 48ch; margin-top: 1.35rem;
 }
-.masthead__facts { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 0; }
-.fact { display: flex; gap: 8px; align-items: baseline; }
-.fact dt {
-  font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--ink-faint);
+.specs { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 2.25rem; }
+.spec {
+  font-size: var(--step--1); font-weight: 500; background: var(--paper); color: var(--ink);
+  border-radius: 999px; padding: .38rem .95rem; font-variant-numeric: tabular-nums;
 }
-.fact dd { margin: 0; font-family: var(--mono); font-size: 13px; color: var(--ink-soft); }
+.spec b { font-weight: 700; }
+.spec--headline { background: var(--on-band); color: var(--band); font-weight: 600; }
 
-/* sections */
-.section { margin-top: 40px; }
-.section__head { margin-bottom: 14px; }
-.section__title {
-  font-family: var(--display); font-weight: 600; font-size: 1.5rem;
-  margin: 0; letter-spacing: -.01em;
-}
-.section__lede { margin: 4px 0 0; color: var(--ink-soft); max-width: 68ch; }
-.grid { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-.panel {
-  background: var(--card); border: 1px solid var(--edge); border-radius: var(--r); padding: 18px 20px;
-}
-.empty { color: var(--ink-faint); font-style: italic; margin: 0; }
-.note { color: var(--ink-soft); font-size: 13.5px; margin: 12px 0 0; }
+/* ---------- sections ---------- */
+.section { margin-top: clamp(2.75rem, 5vw, 4rem); }
+.section__head { margin-bottom: 1.15rem; }
+.section__lede { font-size: var(--step--1); color: var(--ink-soft); max-width: 68ch; margin-top: .4rem; }
+.grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+.plate { background: var(--cream); border-radius: var(--r-lg); padding: clamp(1.35rem, 3vw, 2rem); }
+.plate .section { margin-top: 0; }
 .inline { display: inline; list-style: none; padding: 0; margin: 0; }
 .inline li { display: inline; }
 .inline li + li::before { content: " / "; color: var(--ink-faint); }
 
-/* tiles */
-.tiles { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.tile { background: var(--card); border: 1px solid var(--edge); border-radius: var(--r); padding: 14px 16px; }
+/* ---------- tiles: flat fields, no outlines ---------- */
+.tiles { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.tile { background: var(--cream); border-radius: var(--r-md); padding: 1rem 1.15rem; }
 .tile__label {
-  font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-faint); margin: 0 0 4px;
+  font-family: var(--body); font-size: .72rem; font-weight: 700; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 0 0 .35rem;
 }
 .tile__value {
-  font-family: var(--display); font-size: 2rem; font-weight: 600; line-height: 1;
-  margin: 0; font-variant-numeric: tabular-nums;
+  font-family: var(--display); font-size: 2.1rem; font-weight: 700; line-height: 1;
+  margin: 0; font-variant-numeric: tabular-nums; letter-spacing: -.02em;
 }
-.tile__unit { font-family: var(--mono); font-size: .8rem; font-weight: 400; color: var(--ink-faint); margin-left: 5px; }
-.tile__note { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
+.tile__unit { font-family: var(--body); font-size: .8rem; font-weight: 500; color: var(--ink-faint); margin-left: .3rem; }
+.tile__note { margin: .5rem 0 0; font-size: .78rem; color: var(--ink-soft); line-height: 1.45; }
 .tile--good .tile__value { color: var(--good); }
 .tile--warn .tile__value { color: var(--warn); }
 .tile--caution .tile__value { color: var(--caution); }
 
-.minitiles { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
-.minitile { border: 1px solid var(--edge-soft); border-radius: 8px; padding: 8px 10px; }
-.minitile__n { display: block; font-family: var(--mono); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
-.minitile__k { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+.minitiles { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr)); }
+.minitile { background: var(--paper); border-radius: var(--r-md); padding: .6rem .8rem; }
+.minitile__n { display: block; font-family: var(--mono); font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.minitile__k { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
 
-/* gaps */
-.gaps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+/* ---------- gaps ---------- */
+.gaps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
 .gap {
-  display: grid; gap: 4px 12px; align-items: baseline; padding: 12px 14px;
-  grid-template-columns: 84px 44px 1fr auto;
-  background: var(--card); border: 1px solid var(--edge); border-left-width: 4px; border-radius: var(--r);
+  display: grid; gap: .25rem .9rem; align-items: baseline;
+  grid-template-columns: 5.5rem 2.75rem 1fr auto;
+  background: var(--cream); border-radius: var(--r-md); padding: .9rem 1.1rem;
 }
-.gap--blocker { border-left-color: var(--warn); }
-.gap--warning { border-left-color: var(--caution); }
-.gap--nit { border-left-color: var(--ink-faint); }
-.gap__severity {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-}
+.gap--blocker { background: var(--warn-bg); }
+.gap__severity { font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .gap--blocker .gap__severity { color: var(--warn); }
 .gap--warning .gap__severity { color: var(--caution); }
 .gap--nit .gap__severity { color: var(--ink-faint); }
-.gap__id { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+.gap__id { font-family: var(--mono); font-size: .75rem; color: var(--ink-faint); }
 .gap__body { display: flex; flex-direction: column; }
 .gap__what { font-weight: 600; }
-.gap__why { color: var(--ink-soft); font-size: 13.5px; }
+.gap__why { color: var(--ink-soft); font-size: var(--step--1); }
 .gap__fix {
-  font-size: 12.5px; background: var(--mist); border: 1px solid var(--edge-soft);
-  padding: 3px 8px; border-radius: 6px; white-space: nowrap; color: var(--accent-ink);
+  font-family: var(--mono); font-size: .78rem; background: var(--paper);
+  padding: .25rem .6rem; border-radius: 6px; white-space: nowrap; color: var(--accent-ink);
 }
 
-/* pipeline */
-.pipeline { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+/* ---------- pipeline ---------- */
+.pipeline { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
 .step {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-  border: 1px solid var(--edge); border-radius: 999px; background: var(--card);
+  display: flex; align-items: center; gap: .5rem; padding: .45rem .9rem;
+  border-radius: 999px; background: var(--grey); font-size: var(--step--1);
 }
 .step__ord {
-  font-family: var(--mono); font-size: 11px; width: 18px; height: 18px; border-radius: 50%;
-  display: grid; place-items: center; background: var(--mist); color: var(--ink-faint);
+  font-family: var(--mono); font-size: .7rem; width: 1.3rem; height: 1.3rem; border-radius: 50%;
+  display: grid; place-items: center; background: var(--paper); color: var(--ink-faint);
 }
-.step__name { font-size: 13.5px; }
-.step__state { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
-.step.is-done { border-color: var(--accent); }
-.step.is-done .step__ord { background: var(--accent); color: var(--card); }
-.step.is-done .step__state { color: var(--accent-ink); }
-.step.is-here { box-shadow: 0 0 0 3px var(--ghost-soft); }
+.step__state { font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.step.is-done { background: var(--ink); color: var(--paper); }
+.step.is-done .step__ord { background: var(--band); color: var(--on-band); }
+.step.is-done .step__state { color: var(--paper); opacity: .7; }
+.step.is-here { box-shadow: 0 0 0 3px var(--band); }
 
-/* matrix */
+/* ---------- tone matrix: the proof sheet ---------- */
 .matrix__scroll, .table__scroll { overflow-x: auto; }
-.matrix { border-collapse: collapse; font-size: 13px; width: 100%; }
-.matrix th, .matrix td { padding: 5px 6px; text-align: center; }
-.matrix__corner, .matrix thead th {
-  font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .08em;
+.matrix { border-collapse: collapse; font-size: .82rem; width: 100%; }
+.matrix th, .matrix td { padding: .3rem .4rem; text-align: center; }
+.matrix thead th {
+  font-family: var(--body); font-size: .66rem; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--ink-faint); border-bottom: 1px solid var(--edge);
-  padding-bottom: 8px;
+  padding-bottom: .55rem;
 }
 .matrix thead th.is-gated { color: var(--ink-soft); border-bottom: 2px solid var(--ink-faint); }
 .matrix thead th abbr { text-decoration: none; border: 0; }
 .matrix__context {
-  text-align: left; font-weight: 400; font-family: var(--mono); font-size: 12px;
-  white-space: nowrap; padding-right: 14px; color: var(--ink-soft);
+  text-align: left; font-weight: 400; font-family: var(--mono); font-size: .78rem;
+  white-space: nowrap; padding-right: .9rem; color: var(--ink-soft);
 }
 .row--bare .matrix__context { color: var(--ink); }
 .row__flag {
-  margin-left: 8px; font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--caution); border: 1px solid var(--caution); border-radius: 4px; padding: 1px 4px;
+  margin-left: .5rem; font-family: var(--body); font-size: .6rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--on-band);
+  background: var(--band); border-radius: 4px; padding: .1rem .35rem;
 }
 .mark { display: inline-block; width: 15px; height: 15px; border-radius: 3px; vertical-align: middle; }
 .cell--authored .mark, .mark--authored { background: var(--ink); }
 .cell--computed .mark, .mark--computed { background: var(--ghost-soft); border: 1.5px solid var(--ghost); }
-.matrix__count { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); white-space: nowrap; padding-left: 12px; }
-.matrix__count span { color: var(--ink); }
-/* The cell stays a table-cell - display:flex on a <td> takes it out of the
-   table's column algorithm and the header stops lining up over it. The flex
-   box is an inner wrapper instead. */
-.matrix__traffic { padding-left: 10px; }
-.traffic__pair { display: flex; align-items: center; gap: 8px; }
-.traffic { display: block; height: 6px; width: 72px; border-radius: 3px; background: var(--mist); position: relative; }
+.matrix__count { font-family: var(--mono); font-size: .78rem; color: var(--ink-faint); white-space: nowrap; padding-left: .8rem; }
+.matrix__count span { color: var(--ink); font-weight: 500; }
+.matrix__traffic { padding-left: .7rem; }
+.traffic__pair { display: flex; align-items: center; gap: .5rem; }
+.traffic { display: block; height: 6px; width: 4.5rem; border-radius: 3px; background: var(--grey); position: relative; }
 .traffic::after {
   content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w);
-  background: var(--accent); border-radius: 3px; opacity: .55;
+  background: var(--accent); border-radius: 3px; opacity: .6;
 }
-.traffic__n { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); min-width: 34px; text-align: right; }
-.matrix__legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 14px; font-size: 12.5px; color: var(--ink-soft); }
-.key { display: inline-flex; align-items: center; gap: 7px; }
+.traffic__n { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); min-width: 2.4rem; text-align: right; }
+.matrix__legend { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin-top: 1rem; font-size: var(--step--1); color: var(--ink-soft); }
+.key { display: inline-flex; align-items: center; gap: .45rem; }
 .key__rule { display: inline-block; width: 15px; height: 0; border-bottom: 2px solid var(--ink-faint); }
 
-/* confidence */
-.confs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.conf { display: grid; grid-template-columns: 92px 1fr 34px 130px; gap: 12px; align-items: center; }
-.conf__name { font-family: var(--mono); font-size: 12.5px; }
-.conf__track { height: 10px; background: var(--mist); border-radius: 5px; overflow: hidden; }
+/* ---------- confidence ---------- */
+.confs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+.conf { display: grid; grid-template-columns: 5.75rem 1fr 2.1rem 8rem; gap: .75rem; align-items: center; }
+.conf__name { font-family: var(--mono); font-size: .8rem; }
+.conf__track { height: 10px; background: var(--paper); border-radius: 5px; overflow: hidden; }
 .conf__fill { display: block; height: 100%; width: var(--w); background: var(--accent); border-radius: 5px; }
 .conf--derived .conf__fill { opacity: .72; }
 .conf--assumed .conf__fill { opacity: .44; }
-.conf--disputed .conf__fill { opacity: 1; background: repeating-linear-gradient(45deg, var(--ink-faint) 0 3px, transparent 3px 6px); }
+.conf--disputed .conf__fill { background: repeating-linear-gradient(45deg, var(--ink-faint) 0 3px, transparent 3px 6px); }
 .conf__n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
-.conf__use { font-size: 12.5px; color: var(--ink-faint); }
+.conf__use { font-size: .78rem; color: var(--ink-faint); }
 
-.locale { margin-top: 18px; }
-.locale__name {
-  font-family: var(--display); font-size: 1.05rem; font-weight: 600; margin: 0 0 6px;
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px;
-}
-.locale__base {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
-  text-transform: uppercase; font-weight: 400; color: var(--ink-faint);
-}
-
-/* data tables */
-.data { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.data th, .data td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--edge-soft); }
+/* ---------- data tables ---------- */
+.data { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
+.data th, .data td { padding: .4rem .65rem; text-align: left; border-bottom: 1px solid var(--rule-soft); }
 .data--head thead th {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--ink-faint); font-weight: 500;
+  font-family: var(--body); font-size: .66rem; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-faint);
 }
 .data th[scope="row"] { font-weight: 400; color: var(--ink-soft); white-space: nowrap; }
 .data td.n, .data .n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.data .arrow { color: var(--ink-faint); padding: 0 2px; text-align: center; }
-.data .delta { color: var(--ink); }
-.data .why { color: var(--ink-faint); font-size: 12.5px; }
-.data tr.is-flagged .delta { color: var(--warn); font-weight: 600; }
-.trackcell { width: 190px; }
+.data .arrow { color: var(--ink-faint); padding: 0 .1rem; text-align: center; }
+.data .why { color: var(--ink-faint); font-size: .78rem; }
+.data tr.is-flagged .delta { color: var(--warn); font-weight: 700; }
+.trackcell { width: 12rem; }
+.locale { margin-top: 1.15rem; }
+.locale__name { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; margin: 0 0 .4rem; font-size: var(--step-1); }
+.locale__base {
+  font-family: var(--body); font-size: .68rem; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
 
-/* drift + magnitude tracks */
-.track { position: relative; display: block; height: 12px; width: 100%; min-width: 120px; background: var(--mist); border-radius: 6px; }
+/* ---------- tracks ---------- */
+.track { position: relative; display: block; height: 12px; width: 100%; min-width: 7rem; background: var(--grey); border-radius: 6px; }
 .track__axis { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--ink-faint); opacity: .55; }
 .track__tick { position: absolute; top: 2px; bottom: 2px; left: var(--x); width: 1px; background: var(--ink-faint); opacity: .3; }
 .track__fill { position: absolute; top: 2px; bottom: 2px; width: var(--w); background: var(--accent); border-radius: 3px; }
 .track__fill--right { left: 50%; }
 .track__fill--left { right: 50%; }
 .track--na { background: transparent; }
-.track__na { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
-.track--mag { min-width: 90px; }
-.track--mag .track__fill--mag { left: 0; background: var(--accent); opacity: .55; }
+.track__na { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); }
+.track--mag { min-width: 5.5rem; }
+.track--mag .track__fill--mag { left: 0; opacity: .6; }
 tr.is-flagged .track__fill { background: var(--warn); }
 
-/* findings, register, notes */
-.findings, .regs, .notes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.finding { display: grid; grid-template-columns: 64px auto 1fr auto; gap: 4px 10px; align-items: baseline; font-size: 13px; }
-.finding__sev { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+/* ---------- findings, register, notes ---------- */
+.findings, .regs, .notes { list-style: none; margin: .9rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+.finding { display: grid; grid-template-columns: 4rem auto 1fr auto; gap: .25rem .7rem; align-items: baseline; font-size: .82rem; }
+.finding__sev { font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .finding--error .finding__sev { color: var(--warn); }
 .finding--warning .finding__sev { color: var(--caution); }
-.finding__code { font-size: 11.5px; color: var(--ink-faint); }
+.finding__code { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); background: none; padding: 0; }
 .finding__msg { color: var(--ink-soft); }
-.finding__at { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
-.notes li { font-size: 13.5px; color: var(--ink-soft); }
-.notes__k {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-faint); margin-right: 8px;
-}
-.reg { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
-.reg__id { font-size: 12px; color: var(--ink-faint); }
+.finding__at { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); white-space: nowrap; }
+.notes li { font-size: var(--step--1); color: var(--ink-soft); }
+.notes__k { font-size: .66rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin-right: .55rem; }
+.reg { display: flex; align-items: center; gap: .6rem; font-size: var(--step--1); }
+.reg__id { font-family: var(--mono); font-size: .75rem; color: var(--ink-faint); background: none; padding: 0; }
 .reg__label { color: var(--ink-soft); }
 
 .pill {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  padding: 2px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap;
+  font-family: var(--body); font-size: .64rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; padding: .12rem .5rem; border-radius: 999px;
+  border: 1px solid currentColor; white-space: nowrap;
 }
 .pill--warn { color: var(--warn); background: var(--warn-bg); }
 .pill--soft { color: var(--ink-faint); }
 
 .colophon {
-  margin-top: 52px; padding-top: 18px; border-top: 1px solid var(--edge);
-  font-size: 12.5px; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: 6px 20px;
+  margin-top: clamp(3rem, 6vw, 4.5rem); padding-top: 1.15rem; border-top: 2px solid var(--ink);
+  font-size: .78rem; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: .4rem 1.4rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -810,7 +814,7 @@ tr.is-flagged .track__fill { background: var(--warn); }
 }
 @media (max-width: 640px) {
   .gap { grid-template-columns: 1fr; }
-  .conf { grid-template-columns: 80px 1fr 30px; }
+  .conf { grid-template-columns: 5rem 1fr 1.9rem; }
   .conf__use { grid-column: 1 / -1; }
   .finding { grid-template-columns: 1fr; }
 }
@@ -858,13 +862,13 @@ export function renderHtml (state) {
     })
   ].join('\n        ')
 
-  return `<title>${escapeHtml(kb.brand ?? 'Voice')} Voice State</title>
+  return `<title>${kb.brand ? `${escapeHtml(kb.brand)} Voice State` : 'Voice and Tone State'}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>${STYLES}</style>
 <div class="wrap">
-  ${masthead(state)}
+  ${hero(state)}
 
   <div class="tiles">
         ${tiles}
@@ -877,8 +881,8 @@ export function renderHtml (state) {
   ${section('matrix', 'Tone matrix', 'Ten contexts against eight reader states. An authored cell was written and approved by a person; a computed cell is interpolated from the dial arithmetic and never carries humor.', matrix(coverage))}
 
   <div class="grid">
-    <div class="panel">${section('rules', 'Rules by confidence', 'Confidence is not a rating of the rule. It is what happens when the rule is broken.', confidence(rules))}</div>
-    <div class="panel">${section('evidence', 'Evidence', 'Every rule points back to entries here. Nothing is asserted without one.', evidence(state))}</div>
+    <div class="plate">${section('rules', 'Rules by confidence', 'Confidence is not a rating of the rule. It is what happens when the rule is broken.', confidence(rules))}</div>
+    <div class="plate">${section('evidence', 'Evidence', 'Every rule points back to entries here. Nothing is asserted without one.', evidence(state))}</div>
   </div>
 
   ${section('integrity', 'Integrity', 'Whether the compiled card still matches the files it was compiled from, and what validation found.', integrity(state))}
@@ -886,8 +890,8 @@ export function renderHtml (state) {
   ${section('drift', 'Drift', `How far the corpus has moved from its frozen baseline. Flagged past ${escapeHtml(num(state.drift?.thresholdPct, '25'))}%.`, drift(state))}
 
   <div class="grid">
-    <div class="panel">${section('corpus', 'Corpus', 'What was measured, per locale. Locales are never averaged together.', corpus(state))}</div>
-    <div class="panel">${section('sources', 'Sources', 'Registered material and what has been analysed.', sources(state))}</div>
+    <div class="plate">${section('corpus', 'Corpus', 'What was measured, per locale. Locales are never averaged together.', corpus(state))}</div>
+    <div class="plate">${section('sources', 'Sources', 'Registered material and what has been analysed.', sources(state))}</div>
   </div>
 
   ${section('settings', 'Settings', 'The numbers that govern promotion, staleness, and flagging.', settings(state))}
