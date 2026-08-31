@@ -1,6 +1,6 @@
 ---
 description: Show the state of the voice knowledge base - coverage, drift, sources, settings, and what is missing
-argument-hint: "[--panel <name>|all] [--refresh] [--locale <code>] [--width <n>] [--json]"
+argument-hint: "[--panel <name>|all] [--refresh] [--artifact] [--locale <code>] [--width <n>] [--json]"
 ---
 
 # /voice-and-tone:status
@@ -27,6 +27,7 @@ something that silently corrects itself every time you look.
 /voice-and-tone:status --panel missing
 /voice-and-tone:status --refresh
 /voice-and-tone:status --width 100
+/voice-and-tone:status --artifact
 /voice-and-tone:status --json
 ```
 
@@ -43,6 +44,34 @@ something that silently corrects itself every time you look.
 | `evidence` | entries by type, open conflicts, drafts waiting on `:learn` |
 | `settings` | profiles, locales, thresholds, runtime, vendored extractor versions, the register |
 | `missing` | every gap, ranked, each with the command that closes it |
+
+## `--artifact`
+
+The same state, rendered as a page instead of a screen, and handed back as a
+link you can send to someone who does not live in a terminal.
+
+It is the *same reading*, not a second one: `--artifact` runs the same collector
+and passes the same state object to a second renderer. Nothing is recomputed and
+nothing is described - a number on the page and the number on the screen cannot
+disagree, because neither is written by hand.
+
+What the page can do that seventy-two ASCII columns cannot:
+
+- the tone matrix becomes a proof sheet - authored cells printed in ink,
+  computed cells in non-photo blue, the colour a print shop marks up in
+  precisely because it does not reproduce
+- a drift delta gets a real axis with the flag threshold drawn on the track,
+  instead of an arrow and a percentage
+- everything is on one scrollable page, so a validation error sits next to the
+  rule it names and a drift flag next to the corpus that moved
+
+There is no `--panel` equivalent. `--panel` exists because a terminal cannot
+scroll back usefully; a page can, and slicing it would hide exactly the
+cross-reading the page is for.
+
+Written to `<KB>/.drafts/status.html` (gitignored - a rendering is not
+evidence), or wherever `--out` points. Re-running overwrites the same file, so
+re-publishing updates the same link rather than scattering new ones.
 
 ## `--refresh`
 
