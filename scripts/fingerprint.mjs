@@ -26,7 +26,10 @@ export function buildFingerprint (projectRoot, config, { generated, source = 'me
     perLocale.set(file.locale, bucket)
   }
 
-  const out = {}
+  // Null-prototype for the same reason scan.mjs's byLocale is: a locale named
+  // "__proto__" would otherwise be assigned through Object.prototype's setter
+  // and vanish from the persisted fingerprint instead of being recorded.
+  const out = Object.create(null)
   // Sorted so the artifact is stable across runs and diffs cleanly in git.
   for (const locale of [...perLocale.keys()].sort()) {
     out[locale] = {
@@ -40,7 +43,8 @@ export function buildFingerprint (projectRoot, config, { generated, source = 'me
   // summary below (and its --json counterpart), naming registered material
   // that has never been ingested rather than letting an empty byLocale point
   // a reader at scan.include, a key this function never reads.
-  return { generated, source, byLocale: out, baseline: null, unindexed: unindexed.length }
+  // Spread back to an ordinary object on the way out - see scan.mjs's byLocale.
+  return { generated, source, byLocale: { ...out }, baseline: null, unindexed: unindexed.length }
 }
 
 function main (argv) {

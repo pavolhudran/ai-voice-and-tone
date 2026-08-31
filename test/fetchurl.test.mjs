@@ -158,3 +158,43 @@ test('a server that never answers is recorded as a timed-out skip, not an infini
     cleanup(dir)
   }
 })
+
+test('a registered url with a non-http scheme is refused instead of being fetched', async () => {
+  const dir = makeTmpProject({})
+  try {
+    for (const url of ['file:///etc/passwd', 'data:text/html,<b>hi</b>', 'ftp://example.invalid/x']) {
+      let reached = null
+      const spy = async (u) => { reached = String(u); return { ok: true, status: 200, headers: { get: () => 'text/html' }, text: async () => '' } }
+
+      // runAdd's own ^https?:// test only guards the path a user types on.
+      // config.yml is committed, so a `sources:` entry can arrive with a clone
+      // having never passed through it - the refusal has to happen here.
+      const { entry, body } = await ingestUrl(
+        { id: 's01', url },
+        { kbRoot: path.join(dir, '.voice-and-tone'), now: NOW, id: 'f001', fetchImpl: spy }
+      )
+
+      assert.equal(reached, null, `${url} must never reach fetch`)
+      assert.equal(body, null)
+      assert.equal(entry.quality.note, 'unreadable')
+      assert.match(entry.quality.reasons[0], /only http and https/)
+    }
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an ordinary https url is still fetched', async () => {
+  const dir = makeTmpProject({})
+  try {
+    let reached = null
+    const spy = async (u) => { reached = String(u); return { ok: true, status: 200, headers: { get: () => 'text/html' }, text: async () => PAGE } }
+    await ingestUrl(
+      { id: 's01', url: 'https://example.invalid/about' },
+      { kbRoot: path.join(dir, '.voice-and-tone'), now: NOW, id: 'f001', fetchImpl: spy }
+    )
+    assert.equal(reached, 'https://example.invalid/about')
+  } finally {
+    cleanup(dir)
+  }
+})

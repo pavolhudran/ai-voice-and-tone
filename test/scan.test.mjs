@@ -239,3 +239,31 @@ test('the CLI summary names /voice-and-tone:connect --ingest for registered-but-
     cleanup(dir)
   }
 })
+
+test('a locale named __proto__ is counted as a locale, not written onto Object.prototype', () => {
+  // `locale` reaches buildManifest from config.yml and evidence/sources.json,
+  // both committed files. On a plain object literal the bucket lookup would
+  // hand back Object.prototype itself and the counters would land on it.
+  const dir = makeTmpProject({
+    '__proto__/page.md': '# Heading\n\nWe write plainly. We keep every sentence short.\n'
+  })
+  try {
+    const config = {
+      ...DEFAULT_CONFIG,
+      profiles: { default: { name: 'X', primary_locale: 'en', locales: ['en', '__proto__'] } },
+      scan: { include: ['**/*.md'], exclude: [] }
+    }
+    const manifest = buildManifest(dir, config, '2026-08-26T00:00:00.000Z')
+
+    assert.equal({}.files, undefined, 'Object.prototype must not have gained a files property')
+    assert.equal({}.words, undefined, 'Object.prototype must not have gained a words property')
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(manifest.byLocale, '__proto__'),
+      'the locale is recorded as an ordinary key'
+    )
+    assert.equal(Object.getPrototypeOf(manifest.byLocale), Object.prototype)
+    assert.equal(JSON.parse(JSON.stringify(manifest)).byLocale.__proto__.files, 1)
+  } finally {
+    cleanup(dir)
+  }
+})

@@ -305,3 +305,39 @@ test('a register skip and a gatherCorpus skip agree on the no-extractor reason',
     cleanup(dir)
   }
 })
+
+test('an inbox path that climbs out of the knowledge base is refused, not resolved', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': 'version: 1\n',
+    'outside/secrets/creds.json': '{"token":"hunter2"}'
+  })
+  try {
+    // config.yml is committed, so this entry can arrive with a clone rather
+    // than from the local user. Resolving it would walk `outside/` with
+    // ALL_FILES and hand every extractable file to the ingest ladder.
+    assert.throws(
+      () => resolveEntry({ id: 's02', kind: 'inbox', path: '../outside/secrets' }, ctxFor(dir)),
+      /outside the knowledge base/
+    )
+    // An absolute path is the same escape written differently.
+    assert.throws(
+      () => resolveEntry({ id: 's03', kind: 'inbox', path: path.join(dir, 'outside') }, ctxFor(dir)),
+      /outside the knowledge base/
+    )
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('an inbox path that stays inside the knowledge base still resolves, including a nested one', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/sources/deck/notes.md': '# Notes\n\nWe write plainly here.\n'
+  })
+  try {
+    const resolved = resolveEntry({ id: 's02', kind: 'inbox', path: 'sources/deck' }, ctxFor(dir))
+    assert.equal(resolved.files.length, 1)
+    assert.equal(resolved.files[0].origin, 'sources/deck/notes.md')
+  } finally {
+    cleanup(dir)
+  }
+})

@@ -54,7 +54,13 @@ const PINNED = {
 function npmInstall (name, version) {
   mkdirSync(WORK, { recursive: true })
   writeTextFile(path.join(WORK, 'package.json'), JSON.stringify({ private: true }, null, 2))
-  execFileSync('npm', ['install', '--silent', '--no-audit', '--no-fund', `${name}@${version}`], {
+  // --ignore-scripts: the bytes this produces are COMMITTED and then run on
+  // every user's machine, so the one moment they are fetched is the moment a
+  // compromised package in the tree (a transitive one nobody here pinned)
+  // would want a preinstall/postinstall hook to fire. Neither vendored library
+  // needs one - both are plain JavaScript, and the esbuild bundle below plus
+  // the manifest's hashes prove what came out.
+  execFileSync('npm', ['install', '--silent', '--no-audit', '--no-fund', '--ignore-scripts', `${name}@${version}`], {
     cwd: WORK, stdio: 'inherit'
   })
   return path.join(WORK, 'node_modules', name)
