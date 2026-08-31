@@ -126,7 +126,7 @@ function masthead (state) {
     ['measured', String(state.generated ?? '').slice(0, 10) || '-']
   ]
   return `<header class="masthead">
-      <p class="masthead__eyebrow">Voice &amp; tone &mdash; knowledge base state</p>
+      <p class="masthead__eyebrow">Voice &amp; tone knowledge base state</p>
       <h1 class="masthead__brand">${escapeHtml(kb.brand ?? 'Unnamed')}</h1>
       <dl class="masthead__facts">
         ${facts.map(([k, v]) => `<div class="fact"><dt>${escapeHtml(k)}</dt><dd>${v === locales ? v : escapeHtml(v)}</dd></div>`).join('\n        ')}
