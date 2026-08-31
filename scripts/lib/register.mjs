@@ -1,7 +1,7 @@
 import path from 'node:path'
 import os from 'node:os'
 import { existsSync, statSync } from 'node:fs'
-import { walk, toPosix } from './fsx.mjs'
+import { walk, toPosix, isInside } from './fsx.mjs'
 import { formatFor } from './extract.mjs'
 import { activeProfile, localeOf } from './config.mjs'
 
@@ -62,7 +62,28 @@ function rootAndGlobs (entry, { projectRoot, kbRoot }) {
     }
   }
   if (entry.kind === 'inbox') {
-    const root = path.resolve(kbRoot, entry.path ?? 'sources')
+    const declared = entry.path ?? 'sources'
+    const root = path.resolve(kbRoot, declared)
+    // An `inbox` names a directory INSIDE the knowledge base - that is the
+    // whole difference between it and `local`, which is documented to point
+    // anywhere on disk. `path.resolve` does not enforce that: a declared path
+    // of "../../../.ssh" resolves cleanly to somewhere else entirely, and the
+    // walk below then lists it with ALL_FILES and hands every extractable
+    // file to the ingest ladder.
+    //
+    // config.yml is a COMMITTED file. It arrives with a clone, from whoever
+    // wrote that repository - so an inbox path is not something only the
+    // local user can have set, and it must be checked rather than trusted.
+    // A `local` entry pointing outside is the feature; an `inbox` entry
+    // pointing outside is either a mistake or an attempt, and neither is
+    // worth resolving quietly.
+    if (!isInside(kbRoot, root)) {
+      throw new Error(
+        `register: inbox source ${entry.id ?? '(unnamed)'} declares path "${declared}", which resolves ` +
+        'outside the knowledge base. An inbox must name a directory inside it; use kind: local for ' +
+        'material that lives elsewhere on disk.'
+      )
+    }
     return {
       root,
       include: ALL_FILES,

@@ -14,7 +14,20 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
   })
 
   const files = []
-  const byLocale = {}
+  // Null-prototype, deliberately. `locale` reaches this loop from config.yml
+  // and from evidence/sources.json - both committed files - and on a plain
+  // object literal the key "__proto__" hits Object.prototype's own setter
+  // instead of creating an entry: `byLocale[locale] ?? (byLocale[locale] = ...)`
+  // then hands back Object.prototype itself, and the counters below write
+  // `files`/`strings`/`words` onto every object in the process. With no
+  // prototype there is no accessor to hit, so "__proto__" is just a key.
+  //
+  // It is spread back onto an ordinary object on the way out (below): a
+  // null-prototype object handed to a caller is its own hazard
+  // (`hasOwnProperty` on it throws), and spread copies with
+  // CreateDataProperty, which does NOT invoke the setter this avoids - so
+  // the key survives as an ordinary own property and the shape is unchanged.
+  const byLocale = Object.create(null)
   const totals = { files: 0, strings: 0, words: 0, sentences: 0 }
 
   for (const file of gathered) {
@@ -64,7 +77,7 @@ export function buildManifest (projectRoot, config, generated, profileName = 'de
     projectRoot: toPosix(projectRoot),
     profile: profileName,
     totals,
-    byLocale,
+    byLocale: { ...byLocale },
     files,
     unreadable: { count: unreadablePaths.length, paths: unreadablePaths },
     skipped: {

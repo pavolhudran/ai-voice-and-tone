@@ -99,3 +99,20 @@ export function writeTextFile (abs, contents) {
   mkdirSync(path.dirname(abs), { recursive: true })
   writeFileSync(abs, String(contents).replace(/\r\n?/g, '\n'), 'utf8')
 }
+
+/**
+ * Whether `target` is `parent` itself or sits somewhere beneath it.
+ *
+ * `path.resolve` is not a containment check: resolving "../../.ssh" against a
+ * root happily produces a path outside it. Containment can only be decided
+ * AFTER resolution, and only by asking which direction the relative path
+ * points - a result that starts with ".." (or comes back absolute, which is
+ * what path.relative returns across Windows drives) means the target escaped.
+ *
+ * Both sides are resolved first so a caller cannot defeat this by passing one
+ * relative and one absolute path.
+ */
+export function isInside (parent, target) {
+  const rel = path.relative(path.resolve(parent), path.resolve(target))
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}

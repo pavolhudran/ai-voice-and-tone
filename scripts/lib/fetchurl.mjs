@@ -41,10 +41,44 @@ export function snapshotPathFor (kbRoot, id, date) {
   return path.join(kbRoot, 'evidence', 'snapshots', `${id}-${date}.html`)
 }
 
+/**
+ * The only schemes a registered `kind: 'url'` source may name.
+ *
+ * runAdd already refuses anything else at REGISTRATION time (its `isUrl` test
+ * is the same http/https pair), but that check protects only the one path a
+ * user types on. config.yml is a committed file: a `sources:` list arrives
+ * with a clone, or from a hand edit, having never passed through runAdd - and
+ * runRefresh hands whatever it finds there straight to fetch(). Node's fetch
+ * accepts `data:` URLs, so an unchecked entry can inject bytes that never
+ * touched the network at all, and a `blob:`/other scheme reaches whatever a
+ * future runtime decides to support.
+ *
+ * Validated where the URL is USED rather than only where it is entered - that
+ * is the difference between a check and a guarantee.
+ */
+const FETCHABLE_PROTOCOLS = new Set(['http:', 'https:'])
+
+export function assertFetchable (url) {
+  let parsed
+  try {
+    parsed = new URL(String(url))
+  } catch {
+    throw new Error(`not a usable url: ${String(url)}`)
+  }
+  if (!FETCHABLE_PROTOCOLS.has(parsed.protocol)) {
+    throw new Error(
+      `refusing to fetch a '${parsed.protocol}' url - only http and https sources are fetched ` +
+      '(to read something on disk, register it as a local/file source instead)'
+    )
+  }
+  return parsed
+}
+
 export async function fetchPage (url, { fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('no fetch implementation available; Node 18 or newer is required')
   }
+  assertFetchable(url)
   // Left ref'd, deliberately: this is the one timer whose firing this
   // function is actually waiting on. Unref'ing it would let Node consider
   // the event loop drained and exit before a genuinely hung connection ever

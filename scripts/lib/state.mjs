@@ -135,13 +135,17 @@ export function manifestFreshness (projectRoot, manifest, now) {
 }
 
 function countBy (items, keyOf) {
-  const out = {}
+  // Keys come from the knowledge base and the index, both committed. A plain
+  // object literal would route "__proto__" through Object.prototype's setter
+  // rather than counting it.
+  const out = Object.create(null)
   for (const item of items) {
     const key = keyOf(item)
     if (key === null || key === undefined) continue
     out[key] = (out[key] ?? 0) + 1
   }
-  return out
+  // Spread back to an ordinary object on the way out - see scan.mjs's byLocale.
+  return { ...out }
 }
 
 /**
@@ -257,7 +261,9 @@ export function deltaPct (from, to) {
 }
 
 export function driftOf (fingerprint, thresholdPct) {
-  const byLocale = {}
+  // evidence/fingerprint.json is committed and JSON.parse gives "__proto__"
+  // as a real own key, so this map must not have a prototype to shadow it.
+  const byLocale = Object.create(null)
   const baselineLocales = fingerprint?.baseline?.byLocale ?? {}
 
   for (const [locale, current] of Object.entries(fingerprint?.byLocale ?? {})) {
@@ -287,7 +293,8 @@ export function driftOf (fingerprint, thresholdPct) {
     byLocale[locale] = { baseline: fingerprint.baseline.generated ?? null, metrics }
   }
 
-  return { thresholdPct, byLocale }
+  // Spread back to an ordinary object on the way out - see scan.mjs's byLocale.
+  return { thresholdPct, byLocale: { ...byLocale } }
 }
 
 /**
