@@ -78,7 +78,17 @@ function pct (part, whole) {
   return Math.round((part / whole) * 100)
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+/**
+ * Naive on purpose, but not so naive it prints "4 ledger entrys". Only the two
+ * rules this page's own vocabulary actually needs: a consonant + y takes -ies,
+ * everything else takes -s. A word that needs more than that should be passed
+ * in already plural rather than teaching this function English.
+ */
+const plural = (n, word) => {
+  if (n === 1) return `${n} ${word}`
+  if (/[^aeiou]y$/.test(word)) return `${n} ${word.slice(0, -1)}ies`
+  return `${n} ${word}s`
+}
 
 /**
  * "0d", "4d", "3mo". Age is the one number on this page a reader converts in
@@ -726,6 +736,16 @@ code, .n, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .conf--disputed .conf__fill { opacity: 1; background: repeating-linear-gradient(45deg, var(--ink-faint) 0 3px, transparent 3px 6px); }
 .conf__n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .conf__use { font-size: 12.5px; color: var(--ink-faint); }
+
+.locale { margin-top: 18px; }
+.locale__name {
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; margin: 0 0 6px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px;
+}
+.locale__base {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; font-weight: 400; color: var(--ink-faint);
+}
 
 /* data tables */
 .data { width: 100%; border-collapse: collapse; font-size: 13.5px; }
