@@ -182,3 +182,22 @@ test('status --artifact writes a page and says where, in ascii', () => {
   assert.match(readFileSync(written, 'utf8'), /<title>/)
   cleanup(dir)
 })
+
+test('a locale heading keeps its baseline label separate from the locale name', () => {
+  // It rendered as "csbaseline 2026-08-31": the span was emitted but never
+  // styled, so nothing separated the two. Caught by looking at the page.
+  const css = renderHtml(STATE).match(/<style>([\s\S]*?)<\/style>/)[1]
+  assert.match(css, /\.locale__base\s*\{/, 'the label must actually have a rule')
+  assert.match(css, /\.locale__name\s*\{/)
+})
+
+test('a count of a word ending in consonant-y pluralises to -ies', () => {
+  // "4 ledger entrys" shipped to a rendered page before this existed.
+  const html = renderHtml({ ...STATE, evidence: { total: 4, byType: { source: 1 }, conflicts: 0, drafts: 2 } })
+  assert.match(html, /4 ledger entries/)
+  assert.doesNotMatch(html, /entrys/)
+  assert.match(html, /2 retained drafts/, 'the ordinary -s case still works')
+  const one = renderHtml({ ...STATE, evidence: { total: 1, byType: { source: 1 }, conflicts: 1, drafts: 0 } })
+  assert.match(one, /1 ledger entry\b/, 'a single entry keeps the singular')
+  assert.match(one, /1 open dispute\b/)
+})
