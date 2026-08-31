@@ -544,7 +544,7 @@ footer p + p { margin-top: .7rem; }
           <tr><td>:rewrite</td><td>Off-brand text to on-brand, showing what changed and why.</td></tr>
           <tr><td>:learn</td><td>Turn your edits into rules, once corroborated.</td></tr>
           <tr><td>:audit</td><td>Coverage, drift, rule health, scored inventory.</td></tr>
-          <tr><td>:status</td><td>What you have, what it is set to, and what is missing.</td></tr>
+          <tr><td>:status</td><td>What you have, what it is set to, and what is missing &mdash; on screen or as a shareable page.</td></tr>
           <tr><td>:sync</td><td>Validate and recompile the card.</td></tr>
           <tr><td>:localize</td><td>Apply a locale pack.</td></tr>
         </tbody>
@@ -570,14 +570,6 @@ footer p + p { margin-top: .7rem; }
     <div class="cols">
       <p class="note">One agent runs in a <strong>fresh context</strong>: it sees the knowledge base and the draft, never the reasoning behind it. It cannot be told why a choice was made, so it cannot be talked into accepting it.</p>
       <p class="note">It also takes the <strong>read-back test</strong>. Given the copy with its labels stripped, it must name the context and reader state. Guess wrong and the tone missed. No human needed.</p>
-    </div>
-  </div>
-
-  <div class="plate" style="margin-top:1rem">
-    <span class="plate-label">The shareable read</span>
-    <div class="cols">
-      <p class="note"><code>:status --artifact</code> renders the same state as a page instead of a terminal screen, and hands back a link. Same collector, same state object, <strong>second renderer</strong> &mdash; nothing is recomputed and nothing is described, so the page and the screen cannot disagree.</p>
-      <p class="note">The tone matrix becomes a proof sheet: authored cells printed in ink, computed cells in <strong>non-photo blue</strong> &mdash; the colour a print shop marks up in precisely because it does not reproduce. For the people who decide what the brand sounds like and never open a terminal.</p>
     </div>
   </div>
 </section>
@@ -660,8 +652,8 @@ footer p + p { margin-top: .7rem; }
       <span class="num">5</span>
       <div>
         <h3>See where you stand</h3>
-        <p>One screen: coverage, drift, sources, settings, and a ranked list of what is missing - each with the command that closes it. It reads only. Nothing on it can change what it reports on, so a stale number stays visible instead of quietly correcting itself every time you look.</p>
-        <span class="cmd">/voice-and-tone:status</span>
+        <p>One screen: coverage, drift, sources, settings, and a ranked list of what is missing - each with the command that closes it. It reads only. Nothing on it can change what it reports on, so a stale number stays visible instead of quietly correcting itself every time you look. Add <code>--artifact</code> and the same state comes back as a page you can send &mdash; second renderer, same numbers, so the two cannot disagree.</p>
+        <span class="cmd">/voice-and-tone:status</span><span class="cmd">/voice-and-tone:status --artifact</span>
       </div>
     </div>
     <div class="gstep">
