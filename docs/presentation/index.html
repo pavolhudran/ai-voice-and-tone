@@ -157,12 +157,40 @@ blockquote {
    box is fixed and the frame letterboxes against the terminal's own background
    rather than resizing between slides. */
 .slide-media {
-  background: #121314; border-radius: var(--r-lg); overflow: hidden;
-  display: grid; place-items: center; height: clamp(20rem, 55vw, 44rem);
+  background: #121314; border: 1px solid var(--edge); border-radius: var(--r-lg);
+  overflow: hidden; display: grid; place-items: center;
+  height: clamp(20rem, 55vw, 44rem);
 }
 .slide-media img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; }
-.slide-media.is-page { background: var(--paper); box-shadow: inset 0 0 0 1px var(--edge); align-items: start; }
+
+/* The page slide is the one frame taller than its box on purpose: the report
+   is 4035 px and clipping it would say the page ends where the box does. It
+   scrolls instead, with a fade and a hint that both retire on first scroll. */
+.slide-shot { position: relative; }
+.slide-media.is-page {
+  background: var(--paper); place-items: start center;
+  overflow-y: auto; overscroll-behavior: contain; scroll-behavior: smooth;
+}
 .slide-media.is-page img { width: 100%; height: auto; max-height: none; }
+.slide-media.is-page:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slide-shot::after {
+  content: ""; position: absolute; left: 1px; right: 1px; bottom: 1px; height: 5rem;
+  border-radius: 0 0 var(--r-lg) var(--r-lg); pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), var(--paper));
+  transition: opacity .25s ease;
+}
+.scroll-hint {
+  position: absolute; left: 50%; bottom: 1.1rem; transform: translateX(-50%);
+  background: var(--ink); color: var(--paper); border-radius: 999px;
+  padding: .42rem 1rem; font-size: var(--step--1); font-weight: 600;
+  white-space: nowrap; pointer-events: none; transition: opacity .25s ease;
+  box-shadow: 0 6px 18px -8px rgba(36,28,21,.6);
+}
+.slide-shot.is-scrolled::after, .slide-shot.is-scrolled .scroll-hint { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .slide-media.is-page { scroll-behavior: auto; }
+  .slide-shot::after, .scroll-hint { transition: none; }
+}
 .slide figcaption { margin-top: .9rem; }
 .slide figcaption b { display: block; font-family: var(--display); font-size: var(--step-1); font-weight: 600; margin-bottom: .3rem; }
 .slider-nav { display: flex; align-items: center; gap: .5rem; margin-top: 1rem; }
@@ -647,9 +675,12 @@ footer p + p { margin-top: .7rem; }
         <figcaption><b>The same state, as a page you can send</b><span class="note">Run it twice with the clock pinned and the bytes are identical. The page is generated from the state, not written alongside it.</span></figcaption>
       </figure>
       <figure class="slide">
-        <div class="slide-media is-page"><img src="status-artifact.png" width="1280" height="1740" loading="lazy" decoding="async"
-          alt="The voice and tone status page. A yellow band carries the brand name, a one-line reading of where the knowledge base stands, and the date it was measured. Below it: six figures including stage, tone matrix coverage and validation errors; a ranked list of what to do next, each with the command that closes it; the discovery pipeline; and the tone matrix, ten contexts against eight reader states, with authored cells printed in solid ink and computed cells in pale non-photo blue."></div>
-        <figcaption><b>The page itself</b><span class="note">The top of it. It continues with validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern all of it.</span></figcaption>
+        <div class="slide-shot">
+        <div class="slide-media is-page" tabindex="0" role="group" aria-label="The status page, scroll to read it"><img src="status-artifact.png" width="1280" height="4035" loading="lazy" decoding="async"
+          alt="The voice and tone status page. A yellow band carries the brand name, a one-line reading of where the knowledge base stands, and the date it was measured. Below it: six figures including stage, tone matrix coverage and validation errors; a ranked list of what to do next, each with the command that closes it; the discovery pipeline; and the tone matrix, ten contexts against eight reader states, with authored cells printed in solid ink and computed cells in pale non-photo blue. Below that: validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern all of it."></div>
+          <span class="scroll-hint" aria-hidden="true">&darr; Scroll to read the whole page</span>
+        </div>
+        <figcaption><b>The page itself</b><span class="note">All of it, scrollable. Validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern the lot.</span></figcaption>
       </figure>
     </div>
     <div class="slider-nav">
@@ -1144,6 +1175,18 @@ footer p + p { margin-top: .7rem; }
     }, { passive: true });
 
     paint(0);
+
+    // The page slide scrolls inside its frame. The fade and the hint say so,
+    // and both retire on the first scroll rather than sitting over the content
+    // for as long as the slide is open.
+    var shot = slider.querySelector(".slide-shot");
+    var page = shot && shot.querySelector(".is-page");
+    if (page) {
+      page.addEventListener("scroll", function () {
+        var atTop = page.scrollTop <= 8;
+        if (shot.classList.toggle) { shot.classList.toggle("is-scrolled", !atTop); }
+      }, { passive: true });
+    }
   })();
 
 })();
