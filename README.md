@@ -79,10 +79,8 @@ markdown, so voice changes arrive as pull requests you can read and revert.
 knowledge base you did not build. `:audit` refreshes the numbers and ends by
 asking you to decide something; `:status` only ever tells you where you are.
 
-`/voice-and-tone:status --artifact` renders that same state as a shareable page
-instead of a terminal screen - the same collector, the same state object, a
-second renderer. It is for the people who decide what the brand sounds like and
-who do not open a terminal to find out.
+It also renders as a page you can send. See
+[The report](#the-report-a-page-you-can-send) below.
 
 ## Discovery: it reads what you have already written
 
@@ -242,6 +240,48 @@ It also takes the **read-back test**: given the copy with its labels stripped, i
 must name the context and reader state. Guess wrong and the tone missed. No human
 needed. The dispatch is two turns precisely so the guess is made before the answer
 is revealed.
+
+## The report: a page you can send
+
+The status screen is ASCII because a terminal is where it is read. The palette
+is `+`, `-`, `|` and `=` because Windows console codepages mangle anything else,
+and every column is padded to a measured width. That is careful work in a
+terminal and dead weight in a browser.
+
+```
+/voice-and-tone:status --artifact
+```
+
+The same command renders the same state as a self-contained HTML page, written
+to `<KB>/.drafts/status.html`, which the shipped template gitignores. Publish it
+and you have a link for whoever decides what the brand sounds like and does not
+open a terminal to find out.
+
+**It is a second renderer, not a second reading.** Same collector, same state
+object. `scripts/lib/html.mjs` is a sibling of `scripts/lib/render.mjs` and,
+like it, imports no `node:fs` - a renderer that could read a file could put
+something on the page the state never carried. A page assembled by a model from
+`--json` output would be a *description* of the numbers, free to drift from them
+while looking just as authoritative. Run it twice with `--now` pinned and the
+bytes are identical.
+
+What the page earns over seventy-two columns of ASCII:
+
+- **The tone matrix becomes a proof sheet.** Authored cells print in ink;
+  computed cells print in non-photo blue, the colour a print shop marks a sheet
+  up in precisely because it does not reproduce. Identity is never colour alone:
+  an authored cell carries a filled mark and its own label.
+- **Drift gets a real axis**, with the flag threshold drawn on the track rather
+  than stated beside it.
+- **Everything is on one page**, so a validation error sits next to the rule it
+  names and a drift flag next to the corpus that moved.
+
+There is deliberately no `--panel` equivalent. `--panel` exists because a
+terminal cannot scroll back usefully; a page can, and slicing it would hide
+exactly the cross-reading the page is for.
+
+Re-running overwrites the same path, so re-publishing updates the same link
+rather than scattering new ones.
 
 ## Learning: your edits are evidence
 

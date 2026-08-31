@@ -136,13 +136,29 @@ blockquote {
 
 /* ---------- plates: flat colour fields, no outlines ---------- */
 .plate { background: var(--band); border-radius: var(--r-lg); padding: clamp(1.5rem, 3.5vw, 2.4rem); }
-#mechanism .plate, #tone .plate, #kb .plate, #maintenance .plate { background: var(--cream); }
+#mechanism .plate, #tone .plate, #kb .plate, #report .plate, #maintenance .plate { background: var(--cream); }
 .plate-label {
   font-family: var(--body); font-size: var(--step--1); font-weight: 700;
   text-transform: uppercase; letter-spacing: .11em; color: var(--ink-soft);
   display: block; margin-bottom: 1rem;
 }
 .cols { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+
+/* ---------- the one screenshot in the deck: framed, and faded where it continues ---------- */
+.shot { margin: 0; position: relative; }
+.shot-frame {
+  position: relative; border-radius: var(--r-lg); overflow: hidden;
+  background: var(--paper); box-shadow: 0 1px 0 var(--edge), 0 18px 40px -28px rgba(36,28,21,.45);
+}
+.shot-frame img { display: block; width: 100%; height: auto; }
+/* The real page is more than twice this tall. Fading the cut says so; a hard
+   edge would read as the bottom of the page. */
+.shot-frame::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3.5rem;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), var(--paper));
+  pointer-events: none;
+}
+.shot figcaption { margin-top: .9rem; }
 
 /* ---------- confidence switcher ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -321,6 +337,7 @@ footer p + p { margin-top: .7rem; }
         <a href="#gates">Gates</a>
         <a href="#kb">Knowledge base</a>
         <a href="#surface">Surface</a>
+        <a href="#report">The report</a>
         <a href="#maintenance">Maintenance</a>
         <a href="#start">Get started</a>
       </nav>
@@ -570,6 +587,30 @@ footer p + p { margin-top: .7rem; }
     <div class="cols">
       <p class="note">One agent runs in a <strong>fresh context</strong>: it sees the knowledge base and the draft, never the reasoning behind it. It cannot be told why a choice was made, so it cannot be talked into accepting it.</p>
       <p class="note">It also takes the <strong>read-back test</strong>. Given the copy with its labels stripped, it must name the context and reader state. Guess wrong and the tone missed. No human needed.</p>
+    </div>
+  </div>
+</section>
+
+<section id="report" class="wrap">
+  <p class="eyebrow">What comes out</p>
+  <div class="stack measure">
+    <h2>Not everyone who owns the voice opens a terminal.</h2>
+    <p>The status screen is ASCII because a terminal is where it is read. Add <code>--artifact</code> and the same command renders the same state as a page you can send to whoever decides what the brand sounds like.</p>
+  </div>
+
+  <figure class="shot" style="margin-top:1.8rem">
+    <div class="shot-frame">
+      <img src="status-artifact.png" width="1280" height="1740" loading="lazy" decoding="async"
+           alt="The voice and tone status page. A yellow band carries the brand name, a one-line reading of where the knowledge base stands, and the date it was measured. Below it: six figures including stage, tone matrix coverage and validation errors; a ranked list of what to do next, each with the command that closes it; the discovery pipeline with completed steps marked; and the tone matrix, ten contexts against eight reader states, with authored cells printed in solid ink and computed cells in pale non-photo blue.">
+    </div>
+    <figcaption class="note">The top of the page. It continues with validation findings, per-locale drift against the frozen baseline, the corpus, the source register, and the thresholds that govern all of it.</figcaption>
+  </figure>
+
+  <div class="plate" style="margin-top:1.6rem">
+    <span class="plate-label">Why it can be trusted</span>
+    <div class="cols">
+      <p class="note">One collector, one state object, <strong>a second renderer</strong>. The page is not a description of the numbers written alongside them, it is computed from the same state the screen is. Run it twice with the clock pinned and the bytes are identical.</p>
+      <p class="note">The tone matrix becomes a proof sheet. Authored cells print in ink; computed cells print in <strong>non-photo blue</strong>, the colour a print shop marks a sheet up in precisely because it does not reproduce.</p>
     </div>
   </div>
 </section>
