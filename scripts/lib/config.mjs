@@ -27,6 +27,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   // when this is empty, so an existing knowledge base is unaffected until it
   // opts in by running /voice-and-tone:connect.
   sources: [],
+  // House rule IDs no speaker overlay may override. Empty by design: a
+  // knowledge base with no speakers has nothing to lock, and G21 in
+  // lib/gaps.mjs is what tells a house WITH speakers that its guardrails
+  // are all still overridable.
+  locks: [],
   runtime: { node: 'detected', probed: null },
   // drift_pct is the percentage change past which /voice-and-tone:status flags
   // a fingerprint metric against its baseline. deepMerge supplies it for every
@@ -109,6 +114,46 @@ export function localeOf (relPosixPath, locales, primaryLocale) {
   return primaryLocale
 }
 
+/**
+ * A speaker profile inherits `primary_locale` and `locales` from `default`
+ * unless it sets its own (spec 2026-09-10 §3). The house profile is returned
+ * as declared; an unknown name still falls back to the plugin default, as
+ * before.
+ */
 export function activeProfile (config, profileName = 'default') {
-  return config.profiles?.[profileName] ?? DEFAULT_CONFIG.profiles.default
+  const profiles = config?.profiles ?? {}
+  if (profileName === 'default') return profiles.default ?? DEFAULT_CONFIG.profiles.default
+  const speaker = profiles[profileName]
+  if (!speaker) return DEFAULT_CONFIG.profiles.default
+  const house = profiles.default ?? DEFAULT_CONFIG.profiles.default
+  return { ...house, ...speaker }
+}
+
+/** Every profile other than `default`, each merged onto the house, sorted by slug. */
+export function speakerProfiles (config) {
+  const profiles = config?.profiles ?? {}
+  return Object.keys(profiles)
+    .filter((slug) => slug !== 'default')
+    .sort()
+    .map((slug) => ({ slug, ...activeProfile(config, slug) }))
+}
+
+export function isSpeaker (config, profileName) {
+  return profileName !== 'default' && Boolean(config?.profiles?.[profileName])
+}
+
+/** Where a speaker's own rule files live. Two levels, fixed: never nested. */
+export function overlayRoot (kbRoot, slug) {
+  return path.join(kbRoot, 'profiles', slug)
+}
+
+/**
+ * The directory whose evidence/fingerprint.json, evidence/manifest.json and
+ * CONTEXT.md belong to this profile: the overlay for a declared speaker, the
+ * house for `default` and for any name config does not declare. Scripts
+ * that wrote to <kb>/evidence/ before keep doing so unless a real speaker is
+ * named, which is what keeps every existing invocation byte-identical.
+ */
+export function artifactRoot (kbRoot, profileName, config) {
+  return isSpeaker(config, profileName) ? overlayRoot(kbRoot, profileName) : kbRoot
 }

@@ -2,7 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { DEFAULT_CONFIG, kbRootFor, loadConfig, saveConfig, localeOf } from '../scripts/lib/config.mjs'
+import {
+  DEFAULT_CONFIG, kbRootFor, loadConfig, saveConfig, localeOf, activeProfile,
+  speakerProfiles, isSpeaker, overlayRoot, artifactRoot
+} from '../scripts/lib/config.mjs'
 
 test('defaults match the spec thresholds', () => {
   assert.equal(DEFAULT_CONFIG.version, 1)
@@ -123,4 +126,66 @@ test('case-insensitivity does not create new false positives', () => {
 test('a region-tagged locale matches in either case', () => {
   assert.equal(localeOf('content/pt-BR/page.md', ['pt-br', 'en'], 'en'), 'pt-br')
   assert.equal(localeOf('page_PT-BR.md', ['pt-BR', 'en'], 'en'), 'pt-BR', 'declared casing is returned')
+})
+
+test('locks default to an empty list', () => {
+  const dir = makeTmpProject({})
+  try {
+    assert.deepEqual(loadConfig(path.join(dir, '.voice-and-tone')).locks, [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a speaker profile inherits locales from default unless it sets its own', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en, de]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      '  bramble:',
+      '    name: "Acme Bramble"',
+      '    locales: [en]',
+      ''
+    ].join('\n')
+  })
+  try {
+    const config = loadConfig(path.join(dir, '.voice-and-tone'))
+    assert.deepEqual(activeProfile(config, 'maya').locales, ['en', 'de'])
+    assert.equal(activeProfile(config, 'maya').primary_locale, 'en')
+    assert.equal(activeProfile(config, 'maya').name, 'Maya Lind')
+    assert.deepEqual(activeProfile(config, 'bramble').locales, ['en'])
+    assert.equal(activeProfile(config, 'nobody').name, 'Unnamed', 'an unknown profile still falls back to the plugin default')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('speakerProfiles lists every non-default profile, sorted, and isSpeaker agrees', () => {
+  const config = {
+    profiles: {
+      default: { name: 'Acme', primary_locale: 'en', locales: ['en'] },
+      maya: { name: 'Maya Lind' },
+      helpdesk: { name: 'Acme Support' }
+    }
+  }
+  assert.deepEqual(speakerProfiles(config).map((p) => p.slug), ['helpdesk', 'maya'])
+  assert.equal(speakerProfiles(config)[1].name, 'Maya Lind')
+  assert.deepEqual(speakerProfiles(config)[1].locales, ['en'], 'inherited from default')
+  assert.equal(isSpeaker(config, 'maya'), true)
+  assert.equal(isSpeaker(config, 'default'), false)
+  assert.equal(isSpeaker(config, 'ghost'), false, 'undeclared is not a speaker')
+  assert.deepEqual(speakerProfiles({}), [])
+})
+
+test('overlayRoot and artifactRoot point at the overlay for a speaker and at the house otherwise', () => {
+  const config = { profiles: { default: { name: 'Acme' }, maya: { name: 'Maya Lind' } } }
+  assert.equal(overlayRoot('/kb', 'maya'), path.join('/kb', 'profiles', 'maya'))
+  assert.equal(artifactRoot('/kb', 'maya', config), path.join('/kb', 'profiles', 'maya'))
+  assert.equal(artifactRoot('/kb', 'default', config), '/kb')
+  assert.equal(artifactRoot('/kb', 'ghost', config), '/kb', 'an undeclared profile writes nothing into profiles/')
 })
