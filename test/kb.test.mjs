@@ -567,3 +567,33 @@ test('resolveKb: an overlay with no V rule inherits the whole house voice', () =
     cleanup(dir)
   }
 })
+
+test('a locked house voice rule is a guardrail, never a refused override: speaker ids are speaker-local for voice', () => {
+  // Voice replaces as a set, so a speaker numbers its own characteristics
+  // from V1 and a collision with a locked house V id is not an override.
+  // Found on a real knowledge base: locking V2 made every speaker's own V2
+  // a lock violation and dropped it from the resolved set.
+  const dir = makeTmpProject({
+    ...HOUSE,
+    'kb/profiles/maya/voice.md': [
+      '### V1 · Builder `confirmed` ev: e1',
+      '',
+      '**Means:** Writes from what she built.',
+      '**Rules out:** commentary',
+      '',
+      '### V2 · Numbers first `confirmed` ev: e1',
+      '',
+      '**Means:** The metric leads.',
+      '**Rules out:** hedging'
+    ].join('\n')
+  })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.deepEqual(kb.lockViolations, [], 'no violation for a voice id')
+    assert.deepEqual(kb.rules.filter((r) => r.id.startsWith('V')).map((r) => [r.id, r.name, r.origin, r.locked]),
+      [['V1', 'Builder', 'speaker', false], ['V2', 'Numbers first', 'speaker', false], ['V2', 'No pressure', 'house', true]],
+      "the speaker keeps her V2 and the house's locked V2 follows as a guardrail")
+  } finally {
+    cleanup(dir)
+  }
+})

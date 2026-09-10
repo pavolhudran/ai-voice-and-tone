@@ -1057,3 +1057,28 @@ test('a ledger entry that produced a rule living on any overlay is not orphaned,
     cleanup(dir)
   }
 })
+
+test('a speaker voice id that collides with a locked house voice id is neither a duplicate nor a lock violation', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    writeFileSync(path.join(kbRoot, 'profiles', 'maya', 'voice.md'), [
+      '### V1 · Builder   `confirmed`  ev: e1',
+      '',
+      '**Means:** Writes from what she built.',
+      '**Rules out:** commentary',
+      '',
+      '### V2 · Numbers first   `confirmed`  ev: e1',
+      '',
+      '**Means:** The metric leads.',
+      '**Rules out:** hedging'
+    ].join('\n'))
+    const report = validateKb(resolveKb(kbRoot, 'maya'))
+    const codes = report.findings.map((f) => f.code)
+    assert.ok(!codes.includes('E_LOCKED_OVERRIDE'), JSON.stringify(report.findings))
+    assert.ok(!codes.includes('E_DUPLICATE_ID'), JSON.stringify(report.findings))
+    // (the fixture ledger's V3 is now orphaned by this rewrite; that warning is
+    // correct and not what this test is about)
+  } finally {
+    cleanup(dir)
+  }
+})

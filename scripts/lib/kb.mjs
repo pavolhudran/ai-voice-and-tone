@@ -483,7 +483,13 @@ export function mergeRules (houseRules, overlayRules, locks = []) {
   for (const house of houseRules) {
     const hit = overlayById.get(house.id)
     if (locked.has(house.id)) {
-      if (hit) lockViolations.push({ id: house.id, file: hit.path ?? `${hit.file}.md`, line: hit.line, houseRule: house })
+      // Voice ids are speaker-local: a speaker numbers its own characteristics
+      // from V1 because voice replaces as a set, so a speaker V2 beside a
+      // locked house V2 is a coincidence of numbering, not an override. The
+      // locked house rule is appended as a guardrail either way.
+      if (hit && !VOICE(house)) {
+        lockViolations.push({ id: house.id, file: hit.path ?? `${hit.file}.md`, line: hit.line, houseRule: house })
+      }
       if (VOICE(house) && speakerHasVoice) continue // appended after the speaker's voice, below
       rules.push(tagHouse(house))
       continue
@@ -493,7 +499,7 @@ export function mergeRules (houseRules, overlayRules, locks = []) {
     rules.push(tagHouse(house))
   }
   for (const rule of overlayRules) {
-    if (locked.has(rule.id)) continue
+    if (locked.has(rule.id) && !VOICE(rule)) continue
     const houseRule = houseRules.find((h) => h.id === rule.id)
     const tagged = tagSpeaker(rule)
     if (houseRule && !VOICE(rule)) {

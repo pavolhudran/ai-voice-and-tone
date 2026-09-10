@@ -96,7 +96,11 @@ export function validateKb (kb = {}) {
   const ruleIds = new Set()
 
   for (const rule of rules) {
-    if (ruleIds.has(rule.id)) {
+    // A locked house voice rule appended after a speaker's own voice may share
+    // its id with one of the speaker's characteristics - voice ids are
+    // speaker-local (kb.mjs mergeRules), so that is not a duplicate.
+    const guardrailVoice = rule.origin === 'house' && rule.locked && rule.id.startsWith('V') && kb.role === 'speaker'
+    if (ruleIds.has(rule.id) && !guardrailVoice) {
       add('error', 'E_DUPLICATE_ID', `rule id ${rule.id} is used more than once`, rule.path ?? rule.file, rule.line)
     }
     ruleIds.add(rule.id)
