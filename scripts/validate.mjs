@@ -141,7 +141,13 @@ export function validateKb (kb = {}) {
   // rules is still correct - the rule exists, on the house. So "does this
   // rule exist" is asked of the union, while duplicates are still judged on
   // the resolved set alone.
-  const knownIds = new Set([...ruleIds, ...(kb.house?.rules ?? []).map((r) => r.id)])
+  const knownIds = new Set([
+    ...ruleIds,
+    ...(kb.house?.rules ?? []).map((r) => r.id),
+    // ...and every overlay's rules: the ledger is shared, so the house may
+    // legitimately hold an entry that produced a speaker's rule.
+    ...(kb.overlayRuleIds ?? [])
+  ])
 
   for (const entry of evidence) {
     if (!EVIDENCE_TYPES.includes(entry.type)) {

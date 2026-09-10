@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { readTextFile } from './fsx.mjs'
-import { loadConfig, isSpeaker, overlayRoot as overlayRootFor, activeProfile } from './config.mjs'
+import { loadConfig, isSpeaker, overlayRoot as overlayRootFor, activeProfile, speakerProfiles } from './config.mjs'
 
 export const STATES = [
   'delighted', 'curious', 'focused', 'uncertain',
@@ -528,6 +528,17 @@ export function resolveKb (kbRoot, profileName = 'default') {
   const overlayDir = overlayRootFor(kbRoot, profileName)
   const speaking = isSpeaker(config, profileName) && existsSync(overlayDir)
 
+  // The ledger and the source index are shared (§4.5), so an entry may have
+  // produced a rule that lives on ANY overlay. Every declared overlay's rule
+  // ids travel on the resolved object for validate's "does this rule exist"
+  // checks, whichever profile is being resolved.
+  const overlayRuleIds = []
+  for (const { slug } of speakerProfiles(config)) {
+    const dir = overlayRootFor(kbRoot, slug)
+    if (!existsSync(dir)) continue
+    for (const rule of loadKb(dir).rules) overlayRuleIds.push(rule.id)
+  }
+
   if (!speaking) {
     const { rules } = mergeRules(withPath(house.rules, ''), [], locks)
     return {
@@ -540,6 +551,7 @@ export function resolveKb (kbRoot, profileName = 'default') {
       overrides: [],
       lockViolations: [],
       speakerOffset: null,
+      overlayRuleIds,
       houseRoot: kbRoot,
       overlayRoot: null,
       house,
@@ -579,6 +591,7 @@ export function resolveKb (kbRoot, profileName = 'default') {
     overrides,
     lockViolations,
     speakerOffset: speakerOffsetOf(house.tone, overlay.tone),
+    overlayRuleIds,
     houseRoot: kbRoot,
     overlayRoot: overlayDir,
     house,

@@ -1040,3 +1040,20 @@ test('validateAll on a knowledge base with no speakers is validateKb of the hous
     cleanup(dir)
   }
 })
+
+test('a ledger entry that produced a rule living on any overlay is not orphaned, from the house or from another speaker', () => {
+  // The ledger is shared (spec 2026-09-10 §4.5): e1 in the fixture produced
+  // V3, L30 and T-social/focused, which live on maya's overlay. The house
+  // cannot see overlays through its own resolved rules, and jonas cannot
+  // see maya's - so "does this rule exist" is asked of every overlay too.
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    for (const profile of ['default', 'jonas', 'maya']) {
+      const report = validateKb(resolveKb(kbRoot, profile))
+      assert.ok(!report.findings.some((f) => f.code === 'W_ORPHAN_EVIDENCE'),
+        `${profile}: ${JSON.stringify(report.findings.filter((f) => f.code === 'W_ORPHAN_EVIDENCE'))}`)
+    }
+  } finally {
+    cleanup(dir)
+  }
+})
