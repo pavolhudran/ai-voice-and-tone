@@ -35,6 +35,18 @@ than inventing a fourth vocabulary: `blocker`, `warning`, `nit`.
 | `G14` | a source was extracted by an unpinned library version | nit | 1 | `/voice-and-tone:connect --ingest` |
 | `G15` | rules cite no evidence | nit | 1 | cite evidence |
 | `G16` | `CONTEXT.md` is over 900 tokens | nit | 1 | trim rules |
+| `G17` | a speaker has no voice characteristic or no default dials line | blocker | 4 | `/voice-and-tone:speaker add <slug>` |
+| `G18` | a speaker has no drift baseline | blocker | 3 | `fingerprint.mjs --set-baseline --profile <slug>` |
+| `G19` | a speaker's registered material was never ingested | blocker | 3 | `/voice-and-tone:connect --ingest --profile <slug>` |
+| `G20` | a speaker card is older than a file it compiles from, house files included | warning | 3 | `/voice-and-tone:sync --profile <slug>` |
+| `G21` | the house declares speakers and `locks:` is empty | warning | 3 | add `locks:` to `config.yml`, then `/voice-and-tone:sync` |
+
+`G17`-`G20` run once per speaker: over every declared speaker in the house
+view, where each gap is prefixed `[<slug>]`, and over the one speaker in a
+speaker view (`--profile <slug>`), with no prefix. `G21` is a house-level
+judgement and fires once: a house with speakers and no locks has guardrails
+every speaker can override, which is rarely what the brand team believes it
+has.
 
 ### Two guards worth knowing about
 
@@ -61,6 +73,9 @@ worse. `test/gaps.test.mjs` asserts that each produces nothing.
 | **A computed cell** | The matrix filling itself along the paths you actually write is the intended behaviour, not a hole. |
 | **Files skipped for having no extractor** | Expected, and already reported by `scan`. Only container-format skips are actionable, and those surface as `G04`. |
 | **A `disputed` rule existing** | `G10` fires because the dispute is **unresolved**, never because conflict is a fault. When two sources genuinely disagree that is information, and both sides are held open until the user decides. |
+| **A speaker whose every cell is computed** | Same as the house: the matrix fills itself along the paths that speaker actually writes. |
+| **A speaker with zero overrides** | Inheriting everything is the expected starting state, not a hole. |
+| **A speaker whose card has never been compiled** | `G17` already owns "this speaker is not finished"; a second gap for the missing card would be the same remedy twice. |
 
 If a user asks why one of these is not reported, the answer is that the silence
 is deliberate - not that the detector is missing.
