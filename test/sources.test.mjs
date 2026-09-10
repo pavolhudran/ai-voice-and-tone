@@ -1045,3 +1045,44 @@ test('runAdd with a profile persists it on the register entry, and ingest stamps
     cleanup(dir)
   }
 })
+
+test("a speaker-scoped check never reports another speaker's index entries as missing, and ingest never drops them", async () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      '  jonas:',
+      '    name: "Jonas Berg"',
+      'sources:',
+      '  - id: s01',
+      '    kind: inbox',
+      '    path: "profiles/maya/sources/"',
+      '    profile: maya',
+      '  - id: s02',
+      '    kind: inbox',
+      '    path: "profiles/jonas/sources/"',
+      '    profile: jonas',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/profiles/maya/sources/a.md': 'Her post.\n',
+    '.voice-and-tone/profiles/jonas/sources/b.md': 'His post.\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const house = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'default', now: '2026-09-10T00:00:00.000Z' }
+    await runIngest(house, {})
+    assert.equal(loadIndex(kbRoot).sources.length, 2)
+    const maya = runCheck({ ...house, profileName: 'maya' })
+    assert.equal(maya.missing.length, 0, "jonas's entry is outside maya's scope, not missing")
+    assert.equal(maya.known.length, 1)
+    await runIngest({ ...house, profileName: 'maya' }, {})
+    assert.equal(loadIndex(kbRoot).sources.length, 2, 'a scoped ingest must not drop the other speaker from the index')
+  } finally {
+    cleanup(dir)
+  }
+})

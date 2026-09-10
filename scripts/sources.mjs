@@ -169,7 +169,13 @@ export function runCheck (ctx) {
   restrictProjectFilesToIngestible(resolved)
   const index = loadIndex(ctx.kbRoot)
   const errors = filterVanished(resolved)
-  const diff = diffIndex(index, resolved, hasher())
+  // The diff sees only the entries in scope, or another speaker's material
+  // reads as "missing" from this one. The full index is what gets saved,
+  // untouched - a scoped ingest must never drop anyone else's entries.
+  const scoped = isSpeaker(ctx.config, ctx.profileName)
+    ? { ...index, sources: (index.sources ?? []).filter((s) => s.profile === ctx.profileName) }
+    : index
+  const diff = diffIndex(scoped, resolved, hasher())
 
   // `known` entries carry a `needsModelTier` verdict recorded at ingest time
   // that does not expire just because nothing about the source changed - a
@@ -185,7 +191,7 @@ export function runCheck (ctx) {
     JSON.parse(JSON.stringify({ sources: index.sources ?? [] })), resolved
   )
 
-  const total = index.sources.length
+  const total = scoped.sources.length
   return {
     ...diff,
     relocale,
@@ -209,7 +215,7 @@ export function runCheck (ctx) {
     // statistics that matter survived in the index, so say so plainly rather
     // than warning - a warning here would push people to commit sources just
     // to silence it, which quietly undoes the decision not to.
-    statsIntact: statsByLocale(index).size > 0 || index.sources.length === 0
+    statsIntact: statsByLocale(scoped).size > 0 || scoped.sources.length === 0
   }
 }
 

@@ -642,3 +642,11 @@ test('the critic asks which speaker wrote the draft when there is more than one'
   assert.match(agent, /which speaker wrote this/i)
   assert.match(agent, /profiles\/<slug>\/voice\.md/)
 })
+
+test('discovery asks up front whether there is one voice, several speakers, or later', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-discovery', 'SKILL.md'))
+  assert.match(body, /one voice/)
+  assert.match(body, /several speakers/)
+  assert.match(body, /decide later/)
+  assert.match(readFileSync(surfaceFile('commands', 'init.md'), 'utf8'), /one voice/)
+})

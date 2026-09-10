@@ -49,6 +49,15 @@ scripts have a config to read. Rename `gitignore` to `.gitignore`.
 Ask for the brand name and which languages it publishes in, and write both to
 `<KB>/config.yml`'s `profiles.default` - `name`, `primary_locale`, `locales`.
 
+**In the same breath, ask how many voices there are.** One question, three
+answers: does the brand speak with **one voice**, with **several speakers**
+(founders, a support team, a product line, a mascot, an assistant - anyone who
+writes in the first person under the brand), or **decide later**? Say plainly
+that speakers can be added at any time with `/voice-and-tone:speaker add`, so
+"later" costs nothing. Whatever the answer, the house pipeline below runs
+first; on "several", note the names now and offer `speaker add` for each at
+the end (see "Speakers" below) rather than interleaving them.
+
 This is not bookkeeping to be tidied up later. A source's locale is attributed
 when it is first ingested, from the locales declared at that moment, and the
 template ships `locales: [en]`. Ingest a Czech corpus before saying it is
