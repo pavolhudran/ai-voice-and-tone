@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { utimesSync } from 'node:fs'
+import { utimesSync, cpSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { loadConfig } from '../scripts/lib/config.mjs'
 import { CONTEXTS, STATES } from '../scripts/lib/kb.mjs'
@@ -595,4 +596,83 @@ test('the whole state object survives a JSON round trip', () => {
   // reference anywhere in it would silently vanish or throw at print time.
   const state = stateOf({ '.voice-and-tone/config.yml': CONFIG_WITH_INBOX, '.voice-and-tone/voice.md': '# V\n' })
   assert.deepEqual(JSON.parse(JSON.stringify(state)), state)
+})
+
+// --- speakers (spec 2026-09-10 §9.1) ---------------------------------------
+
+const FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'house-with-speakers')
+
+function fixtureState (profileName) {
+  const dir = makeTmpProject({})
+  cpSync(FIXTURE, path.join(dir, '.voice-and-tone'), { recursive: true })
+  const kbRoot = path.join(dir, '.voice-and-tone')
+  try {
+    return collect({ projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName, now: NOW })
+  } finally {
+    cleanup(dir)
+  }
+}
+
+test('a knowledge base with no speakers reports role house, no locks, no speakers, and every old key intact', () => {
+  const state = stateOf({
+    'content/a.md': '# Hello\n',
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG,
+    '.voice-and-tone/voice.md': '# V\n',
+    '.voice-and-tone/tone.md': '# T\n'
+  })
+  assert.equal(state.kb.role, 'house')
+  assert.equal(state.kb.speaker, null)
+  assert.deepEqual(state.locks, { declared: [], violated: [] })
+  assert.deepEqual(state.speakers, [])
+  assert.deepEqual(state.rules.byOrigin, { house: 0, speaker: 0, overrides: 0, locked: 0 })
+  assert.equal(state.kb.profile, 'default')
+})
+
+test('the house view lists every speaker with its summary numbers', () => {
+  const state = fixtureState('default')
+  assert.equal(state.kb.role, 'house')
+  assert.deepEqual(state.locks.declared, ['V2', 'L20'])
+  assert.deepEqual(state.speakers.map((s) => s.slug), ['jonas', 'maya'])
+  const maya = state.speakers.find((s) => s.slug === 'maya')
+  assert.equal(maya.name, 'Maya Lind')
+  assert.equal(maya.voiceRules, 1)
+  assert.equal(maya.hasDefaultDials, true)
+  assert.equal(maya.authoredCells, 1)
+  assert.equal(maya.overrides, 1)
+  assert.equal(maya.lockViolations, 0)
+  assert.equal(maya.driftBaseline, false, 'no fingerprint under the overlay yet')
+  assert.equal(maya.cardStale, null, 'no card compiled yet')
+  const jonas = state.speakers.find((s) => s.slug === 'jonas')
+  assert.equal(jonas.voiceRules, 0)
+  assert.equal(jonas.hasDefaultDials, false)
+  assert.equal(jonas.lockViolations, 1)
+  assert.equal(state.integrity.errors, 0, 'the house view validates the house alone')
+})
+
+test('a speaker view resolves that speaker: rules by origin, cells, locks violated, one speaker in the list', () => {
+  const state = fixtureState('jonas')
+  assert.equal(state.kb.role, 'speaker')
+  assert.deepEqual(state.kb.speaker, { slug: 'jonas', name: 'Jonas Berg' })
+  assert.deepEqual(state.locks.violated, ['L20'])
+  assert.ok(state.integrity.errors >= 1)
+  assert.equal(state.rules.byOrigin.speaker, 1, 'L02 only; the L20 row was refused')
+  assert.equal(state.rules.byOrigin.locked, 2)
+  assert.deepEqual(state.speakers.map((s) => s.slug), ['jonas'])
+  const maya = fixtureState('maya')
+  assert.equal(maya.coverage.authored, 1)
+  assert.equal(maya.rules.byOrigin.overrides, 1)
+})
+
+test('drafts are counted for the profile they belong to', () => {
+  const state = stateOf({
+    '.voice-and-tone/config.yml': MINIMAL_CONFIG.replace('profiles:\n', 'profiles:\n  maya:\n    name: "Maya Lind"\n'),
+    '.voice-and-tone/voice.md': '# V\n',
+    '.voice-and-tone/tone.md': '# T\n',
+    '.voice-and-tone/profiles/maya/voice.md': '# V\n',
+    '.voice-and-tone/.drafts/a.md': '---\nprofile: default\n---\nx\n',
+    '.voice-and-tone/.drafts/b.md': '---\nprofile: maya\n---\ny\n',
+    '.voice-and-tone/.drafts/c.md': 'no frontmatter at all\n'
+  })
+  assert.equal(state.evidence.drafts, 2, 'default plus the unlabelled one')
+  assert.equal(state.speakers[0].draftsPending, 1)
 })

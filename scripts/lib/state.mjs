@@ -2,11 +2,11 @@ import { existsSync, statSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readTextFile } from './fsx.mjs'
-import { activeProfile } from './config.mjs'
+import { activeProfile, speakerProfiles, isSpeaker, artifactRoot, overlayRoot } from './config.mjs'
 import {
-  loadKb, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, HUMOR_ZERO_STATES, cellId
+  resolveKb, defaultDialsOf, CONTEXTS, STATES, CONFIDENCE_LEVELS, EVIDENCE_TYPES, HUMOR_ZERO_STATES, cellId
 } from './kb.mjs'
-import { loadRegister, resolveRegister } from './register.mjs'
+import { loadRegister, resolveRegister, entriesForProfile } from './register.mjs'
 import { loadIndex } from './sourceindex.mjs'
 import { sha256File } from './hash.mjs'
 import { detectGaps } from './gaps.mjs'
@@ -99,13 +99,19 @@ function ageDays (fromMs, now) {
  */
 export const CARD_SOURCES = ['voice.md', 'tone.md', 'lexicon.md', 'mechanics.md', 'config.yml']
 
-export function cardFreshness (kbRoot, now) {
-  const cardMs = mtimeMs(path.join(kbRoot, 'CONTEXT.md'))
+export function cardFreshness (kbRoot, now, { cardRoot = kbRoot, sourceRoots = null } = {}) {
+  const cardMs = mtimeMs(path.join(cardRoot, 'CONTEXT.md'))
   if (cardMs === null) return null
+  // A speaker card compiles from its overlay AND the house, so both roots
+  // are checked; the overlay's files are named with their profiles/ prefix
+  // so the reader knows which voice.md is behind.
+  const roots = sourceRoots ?? [{ root: kbRoot, prefix: '' }]
   const staleAgainst = []
-  for (const name of CARD_SOURCES) {
-    const sourceMs = mtimeMs(path.join(kbRoot, name))
-    if (sourceMs !== null && sourceMs > cardMs) staleAgainst.push(name)
+  for (const { root, prefix } of roots) {
+    for (const name of CARD_SOURCES) {
+      const sourceMs = mtimeMs(path.join(root, name))
+      if (sourceMs !== null && sourceMs > cardMs) staleAgainst.push(`${prefix}${name}`)
+    }
   }
   return { generated: new Date(cardMs).toISOString(), staleAgainst, ageDays: ageDays(cardMs, now) }
 }
@@ -199,13 +205,60 @@ export function coverageOf (kb, manifest) {
   }
 }
 
-function countDrafts (kbRoot) {
+/**
+ * Drafts belong to the profile their frontmatter names. A draft with no
+ * frontmatter, or no `profile:` line, is the house's - every draft written
+ * before speakers existed looks like that, so the house count is unchanged.
+ */
+function countDrafts (kbRoot, profileName = 'default') {
   const dir = path.join(kbRoot, '.drafts')
   if (!existsSync(dir)) return 0
   try {
-    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).length
+    let n = 0
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+      const head = readTextFile(path.join(dir, entry.name)).slice(0, 2000)
+      const match = /^---\n[\s\S]*?^profile:\s*(\S+)\s*$[\s\S]*?^---/m.exec(head)
+      const owner = match ? match[1] : 'default'
+      if (owner === profileName) n += 1
+    }
+    return n
   } catch {
     return 0
+  }
+}
+
+/**
+ * One speaker, summarised for the house view's speakers block and for
+ * G17-G20 in lib/gaps.mjs. Reads the overlay's own fingerprint and manifest,
+ * because drift and corpus are per speaker (spec 2026-09-10 §4.5).
+ */
+function summariseSpeaker ({ kbRoot, config, slug, now }) {
+  const kb = resolveKb(kbRoot, slug)
+  const root = overlayRoot(kbRoot, slug)
+  const fingerprint = readJson(path.join(root, 'evidence', 'fingerprint.json'))
+  const manifest = readJson(path.join(root, 'evidence', 'manifest.json'))
+  const drift = driftOf(fingerprint, config.thresholds?.drift_pct ?? 25)
+  const flagged = Object.values(drift.byLocale).some((l) => l.metrics.some((m) => m.flagged))
+  const card = cardFreshness(kbRoot, now, {
+    cardRoot: root,
+    sourceRoots: [{ root, prefix: `profiles/${slug}/` }, { root: kbRoot, prefix: '' }]
+  })
+  return {
+    slug,
+    name: kb.speaker?.name ?? slug,
+    voiceRules: kb.rules.filter((r) => r.origin === 'speaker' && r.id.startsWith('V')).length,
+    hasDefaultDials: defaultDialsOf(kb.overlay?.tone ?? '') !== null,
+    authoredCells: kb.cells.length,
+    overrides: kb.overrides.length,
+    lockViolations: kb.lockViolations.length,
+    corpusWords: manifest?.totals?.words ?? 0,
+    fingerprintAgeDays: fingerprint ? ageDays(Date.parse(fingerprint.generated), now) : null,
+    driftBaseline: Boolean(fingerprint?.baseline),
+    driftFlagged: flagged,
+    draftsPending: countDrafts(kbRoot, slug),
+    sourcesNeverIngested: manifest?.unindexed?.count ?? 0,
+    cardStale: card ? card.staleAgainst : null
   }
 }
 
@@ -380,16 +433,27 @@ function loadVendorPins () {
 
 export function collect ({ projectRoot, kbRoot, config, profileName = 'default', now, checkFreshness = false }) {
   const profile = activeProfile(config, profileName)
-  const kb = loadKb(kbRoot)
+  const kb = resolveKb(kbRoot, profileName)
   const present = kb.present ?? {}
   const exists = Boolean(present.config || present.voice || present.tone)
+  const speaking = kb.role === 'speaker'
 
-  const manifest = readJson(path.join(kbRoot, 'evidence', 'manifest.json'))
-  const fingerprint = readJson(path.join(kbRoot, 'evidence', 'fingerprint.json'))
-  const index = loadIndex(kbRoot)
-  const register = loadRegister(config)
+  // A speaker's artifacts - manifest, fingerprint, card - live under its
+  // overlay; its register entries and index entries are the ones attributed
+  // to it. The house reads exactly what it read before.
+  const root = artifactRoot(kbRoot, profileName, config)
+  const manifest = readJson(path.join(root, 'evidence', 'manifest.json'))
+  const fingerprint = readJson(path.join(root, 'evidence', 'fingerprint.json'))
+  const wholeIndex = loadIndex(kbRoot)
+  const index = {
+    ...wholeIndex,
+    sources: (wholeIndex.sources ?? []).filter((s) =>
+      (speaking ? s.profile === profileName : (s.profile ?? null) === null))
+  }
+  const register = entriesForProfile(loadRegister(config), profileName, config)
   const validation = exists ? validateKb(kb) : { errors: 0, warnings: 0, findings: [], counts: {} }
-  const cardExists = existsSync(path.join(kbRoot, 'CONTEXT.md'))
+  const cardPath = path.join(root, 'CONTEXT.md')
+  const cardExists = existsSync(cardPath)
 
   const stage = exists
     ? inferStages({ manifest, index, register, fingerprint, kb, validation, cardExists })
@@ -404,8 +468,11 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       brand: profile.name ?? null,
       profile: profileName,
       locales: profile.locales ?? [profile.primary_locale ?? 'en'],
-      primaryLocale: profile.primary_locale ?? 'en'
+      primaryLocale: profile.primary_locale ?? 'en',
+      role: kb.role,
+      speaker: kb.speaker
     },
+    locks: { declared: kb.locks, violated: kb.lockViolations.map((v) => v.id) },
     stage,
     integrity: {
       errors: validation.errors ?? 0,
@@ -414,7 +481,12 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       findings: validation.findings ?? []
     },
     freshness: {
-      card: cardFreshness(kbRoot, now),
+      card: speaking
+        ? cardFreshness(kbRoot, now, {
+          cardRoot: root,
+          sourceRoots: [{ root, prefix: `profiles/${profileName}/` }, { root: kbRoot, prefix: '' }]
+        })
+        : cardFreshness(kbRoot, now),
       manifest: manifestFreshness(projectRoot, manifest, now),
       fingerprint: fingerprint
         ? { generated: fingerprint.generated ?? null, ageDays: ageDays(Date.parse(fingerprint.generated), now) }
@@ -424,13 +496,19 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
     rules: {
       total: (kb.rules ?? []).length,
       byConfidence: zeroFilled(CONFIDENCE_LEVELS, countBy(kb.rules ?? [], (r) => r.confidence)),
-      byFile: countBy(kb.rules ?? [], (r) => r.file)
+      byFile: countBy(kb.rules ?? [], (r) => r.file),
+      byOrigin: {
+        house: (kb.rules ?? []).filter((r) => r.origin === 'house').length,
+        speaker: (kb.rules ?? []).filter((r) => r.origin === 'speaker').length,
+        overrides: (kb.overrides ?? []).length,
+        locked: (kb.rules ?? []).filter((r) => r.locked).length
+      }
     },
     evidence: {
       total: (kb.evidence ?? []).length,
       byType: zeroFilled(EVIDENCE_TYPES, countBy(kb.evidence ?? [], (e) => e.type)),
       conflicts: countConflicts(kbRoot),
-      drafts: countDrafts(kbRoot)
+      drafts: countDrafts(kbRoot, profileName)
     },
     drift: driftOf(fingerprint, config.thresholds?.drift_pct ?? 25),
     sources: sourcesOf(config, index, register, manifest, { checkFreshness, projectRoot, kbRoot, profileName }),
@@ -450,7 +528,15 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       vendor: loadVendorPins()
     },
     localePacks: Object.keys(kb.locales ?? {}),
-    cardTokens: cardExists ? Math.ceil(readTextFile(path.join(kbRoot, 'CONTEXT.md')).length / 4) : 0
+    cardTokens: cardExists ? Math.ceil(readTextFile(cardPath).length / 4) : 0,
+    // Every declared speaker in the house view; only this one in a speaker
+    // view. G17-G20 iterate it either way; the renderers draw the panel only
+    // in the house view.
+    speakers: !exists
+      ? []
+      : speaking
+        ? [summariseSpeaker({ kbRoot, config, slug: profileName, now })]
+        : speakerProfiles(config).map(({ slug }) => summariseSpeaker({ kbRoot, config, slug, now }))
   }
 
   // Computed last, from the assembled object: every detector is a pure
