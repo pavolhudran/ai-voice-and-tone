@@ -321,3 +321,39 @@ test('an empty corpus with registered-but-unindexed material names /voice-and-to
     cleanup(dir)
   }
 })
+
+test('--profile <speaker> writes the fingerprint and its baseline under the overlay, leaving the house untouched', () => {
+  const dir = makeTmpProject({
+    'content/a.md': '# A\n\nHouse copy.\n',
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include: ["content/**/*.md"]',
+      '    exclude: []',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/profiles/maya/voice.md': '# Voice\n'
+  })
+  try {
+    const overlay = path.join(dir, '.voice-and-tone', 'profiles', 'maya', 'evidence', 'fingerprint.json')
+    main(['--root', dir, '--profile', 'maya', '--set-baseline', '--now', '2026-09-10T00:00:00.000Z'])
+    assert.ok(existsSync(overlay))
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', 'evidence', 'fingerprint.json')))
+    const first = JSON.parse(readFileSync(overlay, 'utf8'))
+    assert.ok(first.baseline, 'the speaker has its own baseline')
+    main(['--root', dir, '--profile', 'maya', '--now', '2026-09-11T00:00:00.000Z'])
+    const second = JSON.parse(readFileSync(overlay, 'utf8'))
+    assert.equal(second.baseline.generated, first.baseline.generated, 'a plain run preserves the speaker baseline')
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', 'evidence', 'fingerprint.json')), 'still nothing written to the house')
+  } finally {
+    cleanup(dir)
+  }
+})

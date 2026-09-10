@@ -2,7 +2,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
 import { splitSentences, splitWords } from './lib/text.mjs'
-import { loadConfig, kbRootFor } from './lib/config.mjs'
+import { loadConfig, kbRootFor, artifactRoot } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -122,7 +122,11 @@ function main (argv) {
   const config = loadConfig(kbRoot)
   const manifest = buildManifest(projectRoot, config, nowIso(values), values.profile ?? 'default', kbRoot)
 
-  const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'evidence', 'manifest.json')
+  // A declared speaker's manifest lives under its overlay (spec 2026-09-10
+  // §4.5); the house and any undeclared name keep writing where they always did.
+  const out = values.out
+    ? path.resolve(values.out)
+    : path.join(artifactRoot(kbRoot, values.profile ?? 'default', config), 'evidence', 'manifest.json')
   writeTextFile(out, `${JSON.stringify(manifest, null, 2)}\n`)
 
   if (values.json) {
