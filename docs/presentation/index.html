@@ -234,6 +234,14 @@ blockquote {
 .step { background: var(--cream); border: 1px solid var(--edge-soft); border-radius: var(--r-md); padding: 1rem 1.1rem; }
 .step .name { font-weight: 700; font-size: var(--step-0); color: var(--ink); display: block; }
 .step .what { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.45; display: block; margin-top: .35rem; text-wrap: pretty; }
+.speaker-split { align-items: start; }
+.speaker-split h3 { font-size: var(--step-0); margin-bottom: .55rem; }
+.speaker-split ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
+.speaker-split ul.plain li { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.5; padding-left: 1.1rem; position: relative; }
+.speaker-split ul.plain li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--ink); }
+.speaker-steps { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.25rem; }
+.speaker-steps .step { padding: 1.35rem 1.4rem; display: flex; flex-direction: column; }
+.speaker-steps .step .cmd { margin-top: auto; padding-top: .9rem; align-self: flex-start; }
 
 /* ---------- matrix ---------- */
 .matrix-layout { display: grid; gap: 1.75rem; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
@@ -781,79 +789,68 @@ footer p + p { margin-top: .7rem; }
   <p class="eyebrow">New, and optional</p>
   <div class="stack measure">
     <h2>One house, many speakers.</h2>
-    <p>Some brands write in more than one first-person voice: a founder posting under her own name, a support team, a product line, a mascot, an assistant. Each of those can be a <strong>speaker</strong>. It keeps its own voice and inherits everything else from the house.</p>
-    <p class="note">None of this is required. A brand that speaks with one voice never sees it.</p>
+    <p>Some brands write in more than one first-person voice: a founder posting under her own name, a support team, a product line, a mascot, an assistant. Each of those can be a <strong>speaker</strong>: it keeps its own voice and inherits everything else from the house.</p>
+    <p class="note">None of this is required. A brand that speaks with one voice never sees it, and a knowledge base with no speakers is unchanged, byte for byte.</p>
   </div>
 
-  <div class="cols" style="margin-top:1.6rem;align-items:start">
-    <div class="plate">
-      <span class="plate-label">What a speaker is</span>
-      <div class="stack-tight">
-        <p class="note"><b>It owns</b> its voice characteristics, its default dials, the cells it authored, and its examples.</p>
-        <p class="note"><b>It inherits</b> the house&rsquo;s lexicon, mechanics, audiences, channels and locales, and may override any of them by ID - except what the house has locked.</p>
-        <p class="note">Two levels, fixed. An overlay always sits on the house, never on another overlay, so &ldquo;which rule won&rdquo; is always answerable.</p>
+  <div class="plate" style="margin-top:1.6rem">
+    <span class="plate-label">Who keeps what</span>
+    <div class="cols speaker-split">
+      <div>
+        <h3>The house keeps</h3>
+        <ul class="plain">
+          <li>the lexicon, the mechanics, the audiences</li>
+          <li>the channel playbooks and the locale packs</li>
+          <li>the state vectors and context offsets - the psychology</li>
+          <li>and the rules it <b>locks</b></li>
+        </ul>
+      </div>
+      <div>
+        <h3>A speaker keeps</h3>
+        <ul class="plain">
+          <li>its voice characteristics - they replace the house&rsquo;s</li>
+          <li>its default dials - they shift every computed cell</li>
+          <li>the tone cells it authored</li>
+          <li>its own examples and its own material</li>
+        </ul>
       </div>
     </div>
-    <div class="plate">
-      <span class="plate-label">The overlay</span>
-      <pre class="tree">profiles/&lt;slug&gt;/
-  <b>CONTEXT.md</b>   <i>GENERATED speaker card.</i>
-  <b>voice.md</b>     <i>Its characteristics. Replaces the house&rsquo;s.</i>
-  <b>tone.md</b>      <i>Its default dials, and the cells it authored.</i>
-  <b>lexicon.md</b>   <i>Additions and overrides, merged by ID.</i>
-  <b>examples/</b>    <i>Its own approved, rejected, and before/after pairs.</i>
-  <b>evidence/</b>    <i>Its own fingerprint and baseline.</i>
-  <b>sources/</b>     <i>Its own inbox. Never committed, like the house&rsquo;s.</i></pre>
-      <p class="note" style="margin-top:.9rem">Every file is optional. Missing means inherited.</p>
-    </div>
-  </div>
-
-  <div class="cols" style="margin-top:1.25rem;align-items:start">
-    <div class="gate">
+    <div class="gate" style="margin-top:1.4rem">
       <span class="n">Locks</span>
-      <p><span class="mono">locks:</span> in <span class="mono">config.yml</span> names the house rules no speaker may override - usually the &ldquo;never say&rdquo; list. They print on every speaker card under <strong>House guardrails (locked)</strong>, and a speaker that breaks one fails validation.</p>
+      <p><span class="mono">locks:</span> in <span class="mono">config.yml</span> names the house rules no speaker may override - usually the &ldquo;never say&rdquo; list. They print on every speaker card under <strong>House guardrails</strong>, and a speaker that breaks one fails validation. Everything not locked, a speaker may override by rule ID.</p>
     </div>
-    <div class="plate">
-      <span class="plate-label">One new command</span>
-      <div class="tablewrap">
-        <table class="list">
-          <thead><tr><th>:speaker</th><th>What it does</th></tr></thead>
-          <tbody>
-            <tr><td>add &lt;slug&gt;</td><td>Scaffolds the overlay, reads the material you point it at, interviews you on that speaker&rsquo;s own strings, compiles its card.</td></tr>
-            <tr><td>list</td><td>One line per speaker: voice rules, authored cells, overrides, drafts pending. Reads only.</td></tr>
-            <tr><td>remove &lt;slug&gt;</td><td>Reopens every rule the speaker&rsquo;s evidence produced, then removes the overlay. Each step is a proposed diff.</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="note" style="margin-top:.9rem">All three are backed by one script, <span class="mono">scripts/speaker.mjs</span>, which does the scaffolding, so every speaker starts the same way.</p>
+  </div>
+
+  <div class="pipeline speaker-steps" style="margin-top:1.25rem">
+    <div class="step">
+      <span class="name">1 &middot; Add a speaker</span>
+      <span class="what">One command scaffolds the overlay, reads the material you point it at, interviews you on that speaker&rsquo;s own strings, and compiles its card. Init asks early whether there is one voice or several; you can add a speaker any time.</span>
+      <span class="cmd">/voice-and-tone:speaker add maya --name "Maya Lind"</span>
+    </div>
+    <div class="step">
+      <span class="name">2 &middot; Write as the speaker</span>
+      <span class="what"><span class="mono">--profile &lt;slug&gt;</span> works on write, rewrite, localize, review, status, sync, audit and connect. Plain language works too: &ldquo;write this as Maya&rdquo;. One line in <span class="mono">CLAUDE.md</span> sets a default for the whole project.</span>
+      <span class="cmd">/voice-and-tone:write --profile maya a welcome for a new subscriber</span>
+    </div>
+    <div class="step">
+      <span class="name">3 &middot; Keep it honest</span>
+      <span class="what">Status gains a <span class="mono">speakers</span> panel, five new gaps, and a page per speaker. The critic asks one more question in its read-back: <strong>which speaker wrote this?</strong> Several speakers who all sound like the house is the failure this catches. <span class="mono">speaker list</span> and <span class="mono">speaker remove</span> round it off.</span>
+      <span class="cmd">/voice-and-tone:status --profile maya --artifact</span>
     </div>
   </div>
 
   <div class="plate" style="margin-top:1.25rem">
-    <span class="plate-label">Choosing who speaks</span>
-    <div class="cols">
-      <p class="note"><span class="mono">--profile &lt;slug&gt;</span> selects a speaker on <span class="mono">:write</span>, <span class="mono">:rewrite</span>, <span class="mono">:localize</span>, <span class="mono">:review</span>, <span class="mono">:status</span>, <span class="mono">:sync</span>, <span class="mono">:audit</span> and <span class="mono">:connect</span>. Plain language works too: &ldquo;write this as Maya&rdquo; finds the speaker whose name matches.</p>
-      <p class="note">A default for the whole project is one line in <span class="mono">CLAUDE.md</span>: <span class="mono">voice-and-tone: default profile maya</span>. Learning needs no flag: a draft remembers which speaker it was written as, and a correction lands with that speaker.</p>
-    </div>
-    <span class="cmd">/voice-and-tone:write --profile maya a welcome for a new subscriber</span>
+    <span class="plate-label">What lands on disk</span>
+    <pre class="tree">profiles/&lt;slug&gt;/
+  <b>CONTEXT.md</b>   <i>GENERATED speaker card, with the house guardrails on it.</i>
+  <b>voice.md</b>     <i>Its characteristics. Replaces the house&rsquo;s.</i>
+  <b>tone.md</b>      <i>Its default dials, and the cells it authored.</i>
+  <b>lexicon.md</b>   <i>Additions and overrides, merged by ID. Same for mechanics, audience, channels, locales.</i>
+  <b>examples/</b>    <i>Its own approved, rejected, and before/after pairs.</i>
+  <b>evidence/</b>    <i>Its own fingerprint and baseline - drift is per speaker.</i>
+  <b>sources/</b>     <i>Its own inbox. Never committed, like the house&rsquo;s.</i></pre>
+    <p class="note" style="margin-top:.9rem">Every file is optional; missing means inherited. Two levels, fixed: an overlay sits on the house, never on another overlay, so &ldquo;which rule won&rdquo; is always answerable.</p>
   </div>
-
-  <div class="cols" style="margin-top:1.5rem">
-    <div class="stack-tight">
-      <h3>Status knows them</h3>
-      <p class="note">The house view gains a <span class="mono">speakers</span> panel and five gap detectors, <span class="mono">G17</span> to <span class="mono">G21</span>: a speaker with no voice yet, no baseline, material never read, a stale card, or a house with speakers and no locks. Under <span class="mono">--profile</span> the same command writes a page per speaker.</p>
-    </div>
-    <div class="stack-tight">
-      <h3>The critic asks one more question</h3>
-      <p class="note">With two or more speakers, the read-back test also asks: <strong>which speaker wrote this?</strong> A wrong guess is a finding. Several speakers who all sound like the house is the failure this exists to catch.</p>
-    </div>
-    <div class="stack-tight">
-      <h3>Init asks early</h3>
-      <p class="note">One voice, several speakers, or decide later? Whatever you answer, the house is built first. Speakers can be added at any time.</p>
-    </div>
-  </div>
-
-  <p class="note measure" style="margin-top:1.6rem"><strong>A knowledge base with no speakers is unchanged, byte for byte.</strong></p>
 </section>
 
 <section id="start" class="wrap">
