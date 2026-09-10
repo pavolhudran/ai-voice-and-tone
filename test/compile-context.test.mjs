@@ -1,13 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync } from 'node:fs'
+import { cpSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { loadKb } from '../scripts/lib/kb.mjs'
+import { loadKb, resolveKb } from '../scripts/lib/kb.mjs'
 import { compileContext, estimateTokens } from '../scripts/compile-context.mjs'
 
-const templates = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'kb')
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const templates = path.join(root, 'templates', 'kb')
+const FIXTURE = path.join(root, 'test', 'fixtures', 'house-with-speakers')
 
 /** The "## Default dials" block alone - "humor 0" also appears under Humor gate. */
 function dialsSection (md) {
@@ -288,6 +291,54 @@ test('compile-context ranks corpus hits from the register, not from a stale conf
       lexiconSection.indexOf('utilize') < lexiconSection.indexOf('leverage'),
       `expected utilize (3 hits) ranked above leverage (0 hits): ${lexiconSection}`
     )
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// --- speakers (spec 2026-09-10 §5) -----------------------------------------
+
+test('the house card compiled from a resolved kb is byte-identical to one compiled from loadKb', () => {
+  const dir = makeTmpProject(files)
+  try {
+    const opts = { corpusStrings: ['We leverage it.', 'one  two'], generated: '2026-08-26T00:00:00.000Z' }
+    assert.equal(compileContext(resolveKb(path.join(dir, 'kb')), opts), compileContext(loadKb(path.join(dir, 'kb')), opts))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a speaker card carries the speaker header, the guardrails, the override mark, and overlay paths', () => {
+  const dir = makeTmpProject({})
+  try {
+    cpSync(FIXTURE, path.join(dir, 'kb'), { recursive: true })
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    const md = compileContext(kb, { corpusStrings: ['We leverage it.'], generated: '2026-09-10T00:00:00.000Z', profileName: 'maya' })
+    assert.match(md, /\*\*Brand:\*\* Acme · \*\*Speaker:\*\* Maya Lind \(maya\)/)
+    assert.match(md, /- \*\*Builder\*\* \(`confirmed`\)/)
+    assert.ok(!md.includes('**Plainspoken**'), "the house's unlocked V1 is not on the speaker card")
+    assert.match(md, /## House guardrails \(locked\)/)
+    assert.match(md, /- \*\*No pressure\*\* .*Rules out: countdowns, scarcity framing/)
+    assert.match(md, /L20/, 'a locked lexicon row is listed among the guardrails')
+    assert.match(md, /\| leverage \| lean on \| confirmed \|/, 'the override, not the house row')
+    assert.match(md, /Overrides: L01/)
+    assert.match(md, /warmth 2 · humor 0 · directness 4 · detail 3 · urgency 1 · formality 3/, "default dials are the speaker's")
+    assert.match(md, /\| The house card \| `CONTEXT\.md` \|/)
+    assert.match(md, /`profiles\/maya\/tone\.md`/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('main --profile writes the speaker card under the overlay', () => {
+  const dir = makeTmpProject({})
+  try {
+    cpSync(FIXTURE, path.join(dir, '.voice-and-tone'), { recursive: true })
+    execFileSync(process.execPath, [
+      path.join(root, 'scripts', 'compile-context.mjs'), '--root', dir, '--profile', 'maya', '--now', '2026-09-10T00:00:00.000Z'
+    ])
+    assert.ok(existsSync(path.join(dir, '.voice-and-tone', 'profiles', 'maya', 'CONTEXT.md')))
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', 'CONTEXT.md')))
   } finally {
     cleanup(dir)
   }

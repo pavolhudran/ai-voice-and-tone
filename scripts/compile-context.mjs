@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
-import { loadConfig, activeProfile } from './lib/config.mjs'
+import { activeProfile, artifactRoot } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
-import { loadKb, parseDials, parseTableRules, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
+import { resolveKb, defaultDialsOf, DIALS, HUMOR_ZERO_STATES, CONTEXTS, STATES } from './lib/kb.mjs'
 import { countHits, rankRules } from './lib/hits.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -28,8 +28,8 @@ function renderDials (dials) {
 }
 
 function defaultDials (toneMd) {
-  const line = /^\*\*Default dials:\*\*\s*(.+)$/m.exec(toneMd || '')
-  return line ? { ...NEUTRAL_DIALS, ...parseDials(line[1]) } : NEUTRAL_DIALS
+  const authored = defaultDialsOf(toneMd)
+  return authored ? { ...NEUTRAL_DIALS, ...authored } : NEUTRAL_DIALS
 }
 
 /**
@@ -43,10 +43,21 @@ function defaultDials (toneMd) {
 const notDisputed = (rule) => rule.confidence !== 'disputed'
 
 export function compileContext (kb, { corpusStrings = [], generated, profileName = 'default' } = {}) {
+  // A resolved knowledge base (resolveKb) or a raw one (loadKb): both carry
+  // every rule on kb.rules with file and kind, so the card reads rules from
+  // there rather than re-parsing table text. For the house the list is the
+  // same list parseTableRules produced, in the same order - byte identity
+  // holds - and for a speaker it is the merged set, overrides included.
+  const speaking = kb.role === 'speaker'
   const profile = activeProfile(kb.config, profileName)
+  const brand = activeProfile(kb.config, 'default')
+  const tableRules = (file) => kb.rules.filter((r) => r.file === file && r.kind === 'table' && notDisputed(r))
   const voiceRules = kb.rules.filter((r) => r.file === 'voice' && r.id.startsWith('V') && notDisputed(r))
-  const lexicon = parseTableRules(kb.lexicon || '').filter(notDisputed)
-  const mechanics = parseTableRules(kb.mechanics || '').filter(notDisputed)
+  // On a speaker card the locked house voice moves to the guardrails list.
+  const shownVoice = speaking ? voiceRules.filter((r) => !r.locked) : voiceRules
+  const lexicon = tableRules('lexicon')
+  const mechanics = tableRules('mechanics')
+  const overriddenIn = (file) => (kb.overrides ?? []).filter((r) => r.file === file).map((r) => r.id)
 
   const topLexicon = rankRules(lexicon, countHits(corpusStrings, lexicon)).slice(0, 8)
   const topMechanics = rankRules(mechanics, countHits(corpusStrings, mechanics)).slice(0, 6)
@@ -59,7 +70,9 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
   lines.push(`> ${ATTRIBUTION}`)
   lines.push('')
   lines.push(
-    `**Brand:** ${profile.name} · **Profile:** ${profileName} · ` +
+    (speaking
+      ? `**Brand:** ${brand.name} · **Speaker:** ${kb.speaker.name} (${kb.speaker.slug}) · `
+      : `**Brand:** ${profile.name} · **Profile:** ${profileName} · `) +
     `**Locales:** ${(profile.locales ?? []).join(', ') || profile.primary_locale} · ` +
     `**KB version:** ${kb.config.kb_version} · **Generated:** ${generated}`
   )
@@ -67,15 +80,36 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
 
   lines.push('## Voice - constant')
   lines.push('')
-  if (voiceRules.length === 0) {
-    lines.push('_None yet. Run `/voice-and-tone:init` to discover them._')
+  if (shownVoice.length === 0) {
+    lines.push(speaking
+      ? '_None yet. Run `/voice-and-tone:speaker add` to discover them._'
+      : '_None yet. Run `/voice-and-tone:init` to discover them._')
   } else {
-    for (const rule of voiceRules.slice(0, 6)) {
+    for (const rule of shownVoice.slice(0, 6)) {
       lines.push(`- **${rule.name ?? rule.id}** (\`${rule.confidence}\`) - ${rule.fields.Means ?? ''}`)
       lines.push(`  - Rules out: ${rule.fields['Rules out'] ?? '(unspecified)'}`)
     }
   }
   lines.push('')
+
+  if (speaking) {
+    // Spec 2026-09-10 §5: every locked house rule, whatever file it lives
+    // in, listed where a writer will see it. A prose rule shows its
+    // "Rules out" line; a table row shows what to avoid and what to prefer.
+    const locked = kb.rules.filter((r) => r.locked && notDisputed(r))
+    lines.push('## House guardrails (locked)')
+    lines.push('')
+    if (locked.length === 0) lines.push('_None declared - see `locks:` in config.yml._')
+    for (const rule of locked) {
+      if (rule.kind === 'prose') {
+        lines.push(`- **${rule.name ?? rule.id}** (\`${rule.confidence}\`) - Rules out: ${rule.fields['Rules out'] ?? rule.fields.Means ?? '(unspecified)'}`)
+      } else {
+        const avoid = rule.cells.Avoid ?? rule.cells.Rule ?? Object.values(rule.cells)[0] ?? ''
+        lines.push(`- **${rule.id}** (\`${rule.confidence}\`) - ${avoid}${rule.cells.Prefer ? ` -> ${rule.cells.Prefer}` : ''}`)
+      }
+    }
+    lines.push('')
+  }
 
   lines.push('## Default dials')
   lines.push('')
@@ -94,6 +128,10 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
     }
   }
   lines.push('')
+  if (speaking && overriddenIn('lexicon').length) {
+    lines.push(`Overrides: ${overriddenIn('lexicon').join(', ')} (house rule replaced)`)
+    lines.push('')
+  }
 
   lines.push('## Mechanics - most-violated first')
   lines.push('')
@@ -105,6 +143,10 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
     }
   }
   lines.push('')
+  if (speaking && overriddenIn('mechanics').length) {
+    lines.push(`Overrides: ${overriddenIn('mechanics').join(', ')} (house rule replaced)`)
+    lines.push('')
+  }
 
   lines.push('## Humor gate')
   lines.push('')
@@ -116,13 +158,22 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
   lines.push('')
   lines.push('| Need | Load |')
   lines.push('|---|---|')
-  lines.push(`| A tone cell | \`tone.md\` - ${kb.cells.length} authored of ${CONTEXTS.length * STATES.length} |`)
+  // Paths are knowledge-base relative, as every row here always was. On a
+  // speaker card a file the overlay defines points at the overlay; one it
+  // inherits points at the house.
+  const overlayPrefix = speaking ? `profiles/${kb.speaker.slug}/` : ''
+  const inOverlay = (dir, name) => speaking && kb.overlay?.[dir]?.[name] !== undefined
+  lines.push(`| A tone cell | \`${overlayPrefix}tone.md\` - ${kb.cells.length} authored of ${CONTEXTS.length * STATES.length} |`)
   const channelNames = Object.keys(kb.channels)
   const localeNames = Object.keys(kb.locales)
-  lines.push(`| A channel playbook | ${channelNames.length ? channelNames.map((n) => `\`channels/${n}.md\``).join(', ') : '_none yet_'} |`)
-  lines.push(`| A locale pack | ${localeNames.length ? localeNames.map((n) => `\`locales/${n}.md\``).join(', ') : '_none yet_'} |`)
-  lines.push('| Who we write for | `audience.md` |')
+  lines.push(`| A channel playbook | ${channelNames.length ? channelNames.map((n) => `\`${inOverlay('channels', n) ? overlayPrefix : ''}channels/${n}.md\``).join(', ') : '_none yet_'} |`)
+  lines.push(`| A locale pack | ${localeNames.length ? localeNames.map((n) => `\`${inOverlay('locales', n) ? overlayPrefix : ''}locales/${n}.md\``).join(', ') : '_none yet_'} |`)
+  lines.push(`| Who we write for | \`${speaking && kb.overlay?.audience ? overlayPrefix : ''}audience.md\` |`)
   lines.push('| Why a rule exists | `evidence/ledger.md` |')
+  if (speaking) {
+    lines.push('| The house card | `CONTEXT.md` |')
+    lines.push('| The house voice, persona and self-reference rules | `voice.md` |')
+  }
   lines.push('')
 
   return `${lines.join('\n')}\n`
@@ -144,9 +195,9 @@ function main (argv) {
   }
 
   const { projectRoot, kbRoot } = resolveRoots(values)
-  const kb = loadKb(kbRoot)
-  const config = loadConfig(kbRoot)
   const profileName = values.profile ?? 'default'
+  const kb = resolveKb(kbRoot, profileName)
+  const config = kb.config
   // gatherAll, not the older gatherCorpus: gatherCorpus reads config.scan
   // directly, a key the register (config.sources) has superseded everywhere
   // else in this pipeline. Using it here let CONTEXT.md - the always-loaded
@@ -158,7 +209,9 @@ function main (argv) {
   const corpusStrings = gatherAll({ projectRoot, kbRoot, config, profileName }).files.flatMap((f) => f.strings)
 
   const md = compileContext(kb, { corpusStrings, generated: nowIso(values), profileName })
-  const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'CONTEXT.md')
+  // A declared speaker's card lives under its overlay; the house card, and
+  // any undeclared profile name, keep writing where they always did.
+  const out = values.out ? path.resolve(values.out) : path.join(artifactRoot(kbRoot, profileName, config), 'CONTEXT.md')
   writeTextFile(out, md)
 
   const tokens = estimateTokens(md)
