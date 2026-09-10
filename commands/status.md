@@ -44,6 +44,7 @@ something that silently corrects itself every time you look.
 | `evidence` | entries by type, open conflicts, drafts waiting on `:learn` |
 | `settings` | profiles, locales, thresholds, runtime, vendored extractor versions, the register |
 | `missing` | every gap, ranked, each with the command that closes it |
+| `speakers` | one row per declared speaker: voice rules, authored cells, overrides, locks broken, drift, drafts (house view only) |
 
 ## `--artifact`
 

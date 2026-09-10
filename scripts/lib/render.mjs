@@ -186,8 +186,11 @@ export function panel (title, lines, width = WIDTH) {
 }
 
 export const PANELS = [
-  'pipeline', 'integrity', 'coverage', 'rules', 'drift', 'sources', 'evidence', 'settings', 'missing', 'all'
+  'pipeline', 'integrity', 'coverage', 'rules', 'drift', 'sources', 'evidence', 'settings', 'missing', 'speakers', 'all'
 ]
+
+/** House view with at least one declared speaker: the only time the speakers panel and menu row appear. */
+const showSpeakers = (state) => state.kb?.role !== 'speaker' && (state.speakers ?? []).length > 0
 
 const STAGE_ORDER = ['scan', 'ingest', 'measure', 'draft', 'interview', 'canonize']
 const SEVERITY_MARK = { blocker: '[!!]', warning: '[! ]', nit: '[. ]' }
@@ -212,8 +215,9 @@ function borderRow (left, right, width) {
 }
 
 function header (state, width) {
+  const who = state.kb.role === 'speaker' ? `${state.kb.speaker?.slug ?? state.kb.profile} (speaker)` : state.kb.profile
   const right = state.kb.exists
-    ? `${state.kb.brand ?? '?'} | ${state.kb.profile} | kb ${state.kb.version ?? '?'} | ${(state.kb.locales ?? []).join(',')}`
+    ? `${state.kb.brand ?? '?'} | ${who} | kb ${state.kb.version ?? '?'} | ${(state.kb.locales ?? []).join(',')}`
     : 'no knowledge base'
   return [rule('=', width), borderRow(' VOICE & TONE : STATE', `${right} `, width), rule('=', width)]
 }
@@ -284,6 +288,7 @@ function coveragePanel (state, width) {
   lines.push(`${INDENT}# authored   . computed`)
   lines.push(`${INDENT}a computed cell is never humorous, whatever the dials say`)
   lines.push(`${INDENT}! corpus traffic, no authored cells`)
+  if (state.kb.role === 'speaker') lines.push(`${INDENT}speaker offset applied to every computed cell`)
 
   return panel(`TONE MATRIX          ${authored} of ${possible} authored (${pct}%)`, lines, width)
 }
@@ -301,6 +306,10 @@ function rulesPanel (state, width) {
   const barWidth = Math.max(8, Math.min(20, width - 40))
   const lines = Object.entries(counts).map(([level, count]) =>
     `${INDENT}${pad(level, 11)}${bar(count, max, barWidth)}  ${pad(String(count), 4)}${CONFIDENCE_NOTE[level] ?? ''}`)
+  if (state.kb.role === 'speaker') {
+    const o = state.rules.byOrigin ?? {}
+    lines.push(`${INDENT}origin: house ${o.house ?? 0} · speaker ${o.speaker ?? 0} · overrides ${o.overrides ?? 0} · locked ${o.locked ?? 0}`)
+  }
   return panel(`RULES  ${state.rules.total} total`, lines, width)
 }
 
@@ -394,9 +403,21 @@ function settingsPanel (state, width) {
   for (const entry of state.settings.register ?? []) kinds[entry.kind] = (kinds[entry.kind] ?? 0) + 1
   const register = Object.entries(kinds).map(([kind, n]) => `${n} ${kind}`).join(', ')
 
+  const speaking = state.kb.role === 'speaker'
+  const declared = state.locks?.declared ?? []
+  const lines = [
+    speaking
+      ? `${INDENT}${pad('profile', 15)}${state.kb.profile}  "${state.kb.speaker?.name ?? ''}"  speaker of ${state.kb.brand ?? ''}`
+      : `${INDENT}${pad('profile', 15)}${state.kb.profile}  "${state.kb.brand ?? ''}"`,
+    `${INDENT}${pad('locales', 15)}${(state.kb.locales ?? []).join(', ')} (primary ${state.kb.primaryLocale})`
+  ]
+  // The locks line exists only once there is something it could govern, so
+  // a knowledge base with no speakers and no locks prints what it always did.
+  if (speaking || showSpeakers(state) || declared.length) {
+    lines.push(`${INDENT}${pad('locks', 15)}${declared.join(', ') || 'none'}`)
+  }
   return panel('SETTINGS', [
-    `${INDENT}${pad('profile', 15)}${state.kb.profile}  "${state.kb.brand ?? ''}"`,
-    `${INDENT}${pad('locales', 15)}${(state.kb.locales ?? []).join(', ')} (primary ${state.kb.primaryLocale})`,
+    ...lines,
     `${INDENT}${pad('thresholds', 15)}corroboration ${t.corroboration}  samples ${t.derived_min_samples}`,
     `${INDENT}${pad('', 15)}stale_months ${t.stale_months}  drift_pct ${t.drift_pct}`,
     `${INDENT}${pad('runtime', 15)}node ${state.settings.runtime?.node ?? '?'}`,
@@ -404,6 +425,25 @@ function settingsPanel (state, width) {
     `${INDENT}${pad('register', 15)}${state.settings.register?.length ?? 0} entries: ${register || 'none'}`,
     `${INDENT}${pad('kb path', 15)}${state.kb.root}`
   ], width)
+}
+
+function speakersPanel (state, width) {
+  const speakers = state.speakers ?? []
+  if (!showSpeakers(state)) return panel('SPEAKERS  none declared', [], width)
+  const cols = [['slug', 11], ['name', 19], ['voice', 7], ['cells', 7], ['over', 6], ['lock', 6], ['drift', 7], ['drafts', 6]]
+  const line = (cells) => INDENT + cols.map(([, w], i) => pad(String(cells[i]), w)).join('').trimEnd()
+  const lines = [line(cols.map(([name]) => name))]
+  for (const s of speakers) {
+    const drift = !s.driftBaseline ? 'n/a' : s.driftFlagged ? 'FLAG' : 'ok'
+    lines.push(line([
+      s.slug, truncate(s.name, 18), s.voiceRules, s.authoredCells, s.overrides,
+      s.lockViolations ? `${s.lockViolations}!` : '-', drift, s.draftsPending
+    ]))
+  }
+  lines.push('')
+  lines.push(`${INDENT}each speaker inherits the house and replaces its voice`)
+  lines.push(`${INDENT}! lock violation (also in integrity)   n/a no baseline`)
+  return panel(`SPEAKERS  ${speakers.length} declared`, lines, width)
 }
 
 function missingPanel (state, width) {
@@ -421,7 +461,7 @@ function missingPanel (state, width) {
   return panel(`MISSING  ${gaps.length} gap(s), highest leverage first`, lines, width)
 }
 
-function menu (width, { initOnly = false } = {}) {
+function menu (width, { initOnly = false, speakers = false } = {}) {
   if (initOnly) {
     return [
       rule('-', width),
@@ -432,7 +472,7 @@ function menu (width, { initOnly = false } = {}) {
   return [
     rule('-', width),
     borderRow(' 1 coverage  2 drift  3 rules  4 sources  5 evidence', '', width),
-    borderRow(' 6 settings  7 missing  8 all', 'q done ', width),
+    borderRow(speakers ? ' 6 settings  7 missing  8 all  9 speakers' : ' 6 settings  7 missing  8 all', 'q done ', width),
     rule('-', width)
   ]
 }
@@ -446,7 +486,8 @@ const PANEL_FN = {
   sources: sourcesPanel,
   evidence: evidencePanel,
   settings: settingsPanel,
-  missing: missingPanel
+  missing: missingPanel,
+  speakers: speakersPanel
 }
 
 /**
@@ -483,9 +524,17 @@ export function render (state, { panel: name = 'all', width = WIDTH } = {}) {
     ], w)
   }
 
+  // The speakers panel sits after the pipeline in the full screen, and only
+  // in a house view that declares at least one speaker - nothing on a
+  // speaker-free screen moves.
+  const order = showSpeakers(state)
+    ? ['pipeline', 'speakers', 'integrity', 'coverage', 'rules', 'drift', 'sources', 'evidence', 'settings', 'missing']
+    : PANELS.filter((p) => p !== 'all' && p !== 'speakers')
   const blocks = name === 'all'
-    ? PANELS.filter((p) => p !== 'all').map((p) => PANEL_FN[p](state, w))
+    ? order.map((p) => PANEL_FN[p](state, w))
     : [PANEL_FN[name](state, w)]
 
-  return finish([...header(state, w), '', ...blocks.flatMap((lines) => [...lines, '']), ...menu(w, {})], w)
+  return finish([
+    ...header(state, w), '', ...blocks.flatMap((lines) => [...lines, '']), ...menu(w, { speakers: showSpeakers(state) })
+  ], w)
 }
