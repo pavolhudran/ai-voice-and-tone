@@ -234,6 +234,9 @@ blockquote {
 .step { background: var(--cream); border: 1px solid var(--edge-soft); border-radius: var(--r-md); padding: 1rem 1.1rem; }
 .step .name { font-weight: 700; font-size: var(--step-0); color: var(--ink); display: block; }
 .step .what { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.45; display: block; margin-top: .35rem; text-wrap: pretty; }
+/* The section's plates are cream like its neighbours'; the one card that
+   frames the whole idea sits on the band, as the page's lead plates do. */
+#speakers .plate.plate-band { background: var(--band); }
 .speaker-split { align-items: start; }
 .speaker-split h3 { font-size: var(--step-0); margin-bottom: .55rem; }
 .speaker-split ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
@@ -796,7 +799,7 @@ footer p + p { margin-top: .7rem; }
     <p class="note">None of this is required. A brand that speaks with one voice never sees it, and a knowledge base with no speakers is unchanged, byte for byte.</p>
   </div>
 
-  <div class="plate" style="margin-top:1.6rem">
+  <div class="plate plate-band" style="margin-top:1.6rem">
     <span class="plate-label">Who keeps what</span>
     <div class="cols speaker-split">
       <div>
