@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, saveConfig, activeProfile } from './lib/config.mjs'
+import { loadConfig, saveConfig, activeProfile, isSpeaker } from './lib/config.mjs'
 import { isBinaryFormat } from './lib/extract.mjs'
-import { loadRegister, resolveRegister, nextRegisterId, expandHome } from './lib/register.mjs'
+import { loadRegister, resolveRegister, nextRegisterId, expandHome, entriesForProfile } from './lib/register.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale,
   recordAlias, originsOf
@@ -158,7 +158,13 @@ export function reattributeLocales (index, resolved) {
 }
 
 export function runCheck (ctx) {
-  const register = loadRegister(ctx.config)
+  // A speaker context sees only its own entries. The house context sees
+  // EVERY entry, speakers' included: ingestion is attribution-preserving
+  // (each file carries its entry's profile), so one --ingest from the house
+  // covers every speaker, and nobody has to run it once per person.
+  const register = isSpeaker(ctx.config, ctx.profileName)
+    ? entriesForProfile(loadRegister(ctx.config), ctx.profileName, ctx.config)
+    : loadRegister(ctx.config)
   const resolved = resolveRegister(register, ctx)
   restrictProjectFilesToIngestible(resolved)
   const index = loadIndex(ctx.kbRoot)
@@ -218,12 +224,16 @@ export function runCheck (ctx) {
  */
 async function ingestOne (file, ctx, index, errors) {
   try {
-    return await ingestFile(file, {
+    const entry = await ingestFile(file, {
       kbRoot: ctx.kbRoot,
       now: ctx.now,
       id: nextEntryId(index),
       from: file.from
     })
+    // The speaker this file belongs to, or null for the house - stamped
+    // here so gatherAll can scope the index without consulting the register.
+    entry.profile = file.profile ?? null
+    return entry
   } catch (error) {
     errors.push({
       origin: file.origin,
@@ -425,6 +435,7 @@ export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
     }
 
     const { entry: candidate, body } = fetched
+    candidate.profile = entry.profile ?? null
     const existing = index.sources.find((s) => s.kind === 'url' && s.from === entry.id)
 
     if (existing && existing.sha256 === candidate.sha256) {
@@ -558,13 +569,14 @@ export function registerSource (kbRoot, config, entry) {
   writeTextFile(file, out.endsWith('\n') ? out : `${out}\n`)
 }
 
-export function runAdd (ctx, { target, label = null }) {
+export function runAdd (ctx, { target, label = null, profile = null }) {
   const register = loadRegister(ctx.config)
   const id = nextRegisterId(register)
 
+  const owner = profile ? { profile } : {}
   const entry = isUrl(target)
-    ? { id, kind: 'url', url: String(target), label, retain: 'none' }
-    : { id, kind: 'local', path: path.resolve(expandHome(target)), label }
+    ? { id, kind: 'url', url: String(target), label, retain: 'none', ...owner }
+    : { id, kind: 'local', path: path.resolve(expandHome(target)), label, ...owner }
 
   registerSource(ctx.kbRoot, ctx.config, entry)
   return { register: [...register, entry], entry }
@@ -632,7 +644,8 @@ async function main (argv, { fetchImpl } = {}) {
       '  --only <id|url>      scope --refresh to one registered url source',
       '  --root <dir>         project root (default: cwd)',
       '  --kb <dir>           knowledge base dir',
-      '  --profile <name>     config profile (default: default)',
+      '  --profile <name>     config profile (default: default); a speaker slug scopes --check',
+      '                       and --ingest to that speaker, and attributes --add to it',
       '  --now <iso>          fixed timestamp for reproducible output',
       '  --json               machine-readable summary'
     ])
@@ -652,7 +665,11 @@ async function main (argv, { fetchImpl } = {}) {
   const ctx = contextFor(values, { fetchImpl })
 
   if (values.add) {
-    const { entry } = runAdd(ctx, { target: values.add, label: values.label ?? null })
+    const { entry } = runAdd(ctx, {
+      target: values.add,
+      label: values.label ?? null,
+      profile: isSpeaker(ctx.config, ctx.profileName) ? ctx.profileName : null
+    })
     if (values.json) return writeOut(`${JSON.stringify({ added: entry.id, kind: entry.kind })}\n`)
     // --ingest never processes kind: 'url' (runRefresh does, and only
     // runRefresh); naming the wrong next step here would send a url straight

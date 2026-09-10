@@ -1002,3 +1002,46 @@ test('a folded duplicate is re-attributed through its alias', () => {
   assert.equal(reattributeLocales(index, resolved).length, 1)
   assert.equal(index.sources[0].locale, 'cs')
 })
+
+test('runAdd with a profile persists it on the register entry, and ingest stamps it on the index entry', async () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include: ["content/**/*.md"]',
+      '    exclude: []',
+      ''
+    ].join('\n'),
+    'material/post.md': 'Her post about the thing she built.\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const ctx = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'maya', now: '2026-09-10T00:00:00.000Z' }
+    const { entry } = runAdd(ctx, { target: path.join(dir, 'material'), label: 'posts', profile: 'maya' })
+    assert.equal(entry.profile, 'maya')
+    const written = loadConfig(kbRoot)
+    assert.equal(written.sources.find((s) => s.id === entry.id).profile, 'maya')
+
+    const after = { ...ctx, config: written }
+    await runIngest(after, {})
+    const index = loadIndex(kbRoot)
+    assert.equal(index.sources.length, 1)
+    assert.equal(index.sources[0].profile, 'maya')
+
+    const houseCheck = runCheck({ ...after, profileName: 'default' })
+    assert.deepEqual(houseCheck.register.map((r) => r.id).sort(), ['s01', entry.id].sort(),
+      'a house check sees every entry, so one ingest covers every speaker')
+    const speakerCheck = runCheck(after)
+    assert.deepEqual(speakerCheck.register.map((r) => r.id), [entry.id], 'a speaker check sees only its own')
+  } finally {
+    cleanup(dir)
+  }
+})
