@@ -19,6 +19,12 @@ const ATTRIBUTION =
 // the card's own Humor gate section two headings down.
 const NEUTRAL_DIALS = { ...Object.fromEntries(DIALS.map((dial) => [dial, 2])), humor: 0 }
 
+/** The first clause of a rule cell, capped, so a guardrail line stays one line. */
+function firstClause (text) {
+  const clause = String(text).split(/\s+-\s+|:\s|\.\s/)[0].trim()
+  return clause.length > 72 ? `${clause.slice(0, 69).trimEnd()}...` : clause
+}
+
 export function estimateTokens (text) {
   return Math.ceil(String(text).length / 4)
 }
@@ -100,14 +106,18 @@ export function compileContext (kb, { corpusStrings = [], generated, profileName
     lines.push('## House guardrails (locked)')
     lines.push('')
     if (locked.length === 0) lines.push('_None declared - see `locks:` in config.yml._')
+    // One short line each. The full wording lives in the house files, which
+    // the write flow opens when the card's line is not enough; repeating a
+    // rich never-say list here put every speaker card over budget.
     for (const rule of locked) {
       if (rule.kind === 'prose') {
-        lines.push(`- **${rule.name ?? rule.id}** (\`${rule.confidence}\`) - Rules out: ${rule.fields['Rules out'] ?? rule.fields.Means ?? '(unspecified)'}`)
+        lines.push(`- **${rule.id}** ${rule.name ?? ''} - rules out ${firstClause(rule.fields['Rules out'] ?? rule.fields.Means ?? '(unspecified)')}`)
       } else {
         const avoid = rule.cells.Avoid ?? rule.cells.Rule ?? Object.values(rule.cells)[0] ?? ''
-        lines.push(`- **${rule.id}** (\`${rule.confidence}\`) - ${avoid}${rule.cells.Prefer ? ` -> ${rule.cells.Prefer}` : ''}`)
+        lines.push(`- **${rule.id}** - ${firstClause(avoid)}`)
       }
     }
+    lines.push(`Full wording: \`lexicon.md\`, \`mechanics.md\`, \`voice.md\` in the house.`)
     lines.push('')
   }
 

@@ -22,29 +22,36 @@ ID except the ones the house has locked.
 
 ## `add`
 
-Runs speaker discovery: scaffolds `profiles/<slug>/` from the overlay
-template, declares the profile in `config.yml`, registers every `--from`
-source under the speaker with `scripts/sources.mjs --add --profile <slug>`,
-ingests it, fingerprints it with `--profile <slug> --set-baseline`, drafts
-the overlay, interviews on the speaker's own strings, and compiles the
-speaker card. A tone-of-voice document among the sources is registered
-material: its explicit rules enter at `confirmed`.
+The scaffold is a script, so it is the same every time:
+`scripts/speaker.mjs --add <slug> --name "<display name>" [--locale <code>]`
+copies the overlay template to `profiles/<slug>/`, declares the profile in
+`config.yml` (comments kept), and registers the speaker's inbox
+`profiles/<slug>/sources/` under the speaker. Then speaker discovery takes
+over: every `--from` source is registered with
+`scripts/sources.mjs --add --profile <slug>`, ingested, fingerprinted with
+`--profile <slug> --set-baseline`; the overlay is drafted from the speaker's
+material, interviewed on the speaker's own strings, and the speaker card is
+compiled. A tone-of-voice document among the sources is registered material:
+its explicit rules enter at `confirmed`.
 
 Ends by proposing the house's "Never say" IDs into `locks:` if the house has
 no locks yet.
 
 ## `list`
 
-One line per speaker - slug, name, voice rules, authored cells, overrides,
-drafts pending. Read-only; the same numbers as
+`scripts/speaker.mjs --list`: one line per speaker - slug, name, voice
+rules, authored cells, overrides, locks broken, drafts pending - and the
+declared locks. Read-only; the same numbers as
 `/voice-and-tone:status --panel speakers`.
 
 ## `remove`
 
-Retraction: reads every ledger entry tagged with the profile, follows its
-`Produced:` line, reopens exactly those rules, then removes the overlay, the
-profile from `config.yml`, and the speaker's register entries. Every step is
-a proposed diff, approved separately.
+Retraction. `scripts/speaker.mjs --remove <slug> --dry-run` prints the plan:
+the overlay, the register and index entries attributed to the speaker, the
+ledger entries carrying its profile, and every rule they produced. Shown as
+a proposed diff; on approval `--remove <slug>` (no dry run) removes the
+overlay, the profile, its register entries and its index entries, and the
+skill reopens exactly the rules named. Ledger entries are never deleted.
 
 ## Invokes
 

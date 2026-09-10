@@ -10,7 +10,7 @@ import {
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
 import { ingestUrl, snapshotPathFor } from './lib/fetchurl.mjs'
-import { readTextFile, writeTextFile } from './lib/fsx.mjs'
+import { readTextFile, writeTextFile, toPosix, isInside } from './lib/fsx.mjs'
 import { stringifyYaml } from './lib/yaml.mjs'
 import { sha256File } from './lib/hash.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -491,7 +491,7 @@ export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
  * synthetic header line, rather than duplicating its (private)
  * per-item renderer.
  */
-function yamlListItemLines (item) {
+export function yamlListItemLines (item) {
   return stringifyYaml({ __item__: [item] }).split('\n').slice(1, -1)
 }
 
@@ -500,7 +500,7 @@ function yamlListItemLines (item) {
  * next line at column 0, or the position right after the last real content
  * line if the block runs to the end of the file. Blank lines inside or
  * trailing the block never end it by themselves. */
-function endOfYamlBlock (lines, keyIdx) {
+export function endOfYamlBlock (lines, keyIdx) {
   let lastContent = keyIdx
   for (let i = keyIdx + 1; i < lines.length; i++) {
     const line = lines[i]
@@ -580,9 +580,19 @@ export function runAdd (ctx, { target, label = null, profile = null }) {
   const id = nextRegisterId(register)
 
   const owner = profile ? { profile } : {}
-  const entry = isUrl(target)
-    ? { id, kind: 'url', url: String(target), label, retain: 'none', ...owner }
-    : { id, kind: 'local', path: path.resolve(expandHome(target)), label, ...owner }
+  const abs = isUrl(target) ? null : path.resolve(expandHome(target))
+  let entry
+  if (isUrl(target)) {
+    entry = { id, kind: 'url', url: String(target), label, retain: 'none', ...owner }
+  } else if (isInside(ctx.kbRoot, abs) && abs !== path.resolve(ctx.kbRoot)) {
+    // A folder inside the knowledge base - a speaker's own inbox, typically -
+    // is an `inbox` entry with a knowledge-base-relative path. config.yml is
+    // committed; an absolute machine path in it breaks on the next clone.
+    const rel = toPosix(path.relative(ctx.kbRoot, abs)).replace(/\/$/, '')
+    entry = { id, kind: 'inbox', label, path: `${rel}/`, exclude: ['README.md'], ...owner }
+  } else {
+    entry = { id, kind: 'local', path: abs, label, ...owner }
+  }
 
   registerSource(ctx.kbRoot, ctx.config, entry)
   return { register: [...register, entry], entry }

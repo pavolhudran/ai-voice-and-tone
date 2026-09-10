@@ -1086,3 +1086,24 @@ test("a speaker-scoped check never reports another speaker's index entries as mi
     cleanup(dir)
   }
 })
+
+test('runAdd registers a path inside the knowledge base as an inbox with a relative path, never an absolute local one', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': 'profiles:\n  default:\n    name: "Acme"\n  maya:\n    name: "Maya Lind"\n',
+    '.voice-and-tone/profiles/maya/sources/README.md': 'inbox\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const ctx = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'maya', now: '2026-09-10T00:00:00.000Z' }
+    const { entry } = runAdd(ctx, { target: path.join(kbRoot, 'profiles', 'maya', 'sources'), label: null, profile: 'maya' })
+    assert.equal(entry.kind, 'inbox')
+    assert.equal(entry.path, 'profiles/maya/sources/')
+    assert.deepEqual(entry.exclude, ['README.md'])
+    assert.equal(entry.profile, 'maya')
+    assert.ok(!('path' in entry && path.isAbsolute(entry.path)), 'a committed config must not carry a machine path')
+    const outside = runAdd({ ...ctx, config: loadConfig(kbRoot) }, { target: path.join(dir, 'elsewhere'), label: null })
+    assert.equal(outside.entry.kind, 'local', 'a path outside the knowledge base is still a local entry')
+  } finally {
+    cleanup(dir)
+  }
+})

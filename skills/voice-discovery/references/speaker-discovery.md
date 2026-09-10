@@ -9,12 +9,24 @@ the house and never on another overlay.
 
 ## 1. Scaffold and declare
 
-1. Copy `<plugin>/templates/kb/profiles/_template/` to `<KB>/profiles/<slug>/`.
-2. Add the profile to `<KB>/config.yml` under `profiles:` - `name`, and
-   `primary_locale`/`locales` only if they differ from the house. Show the
-   diff; write on approval.
-3. Register each `--from` source under the speaker:
+1. One command does the scaffold, the declaration and the inbox:
+   `node "<plugin>/scripts/speaker.mjs" --root "<project>" --kb "<KB>" --add <slug> --name "<display name>" [--locale <code>]`
+   It copies `<plugin>/templates/kb/profiles/_template/` to
+   `<KB>/profiles/<slug>/`, adds the profile under `profiles:` in
+   `config.yml` with comments intact, and registers
+   `profiles/<slug>/sources/` as the speaker's inbox. Pass `--locale` only
+   when the speaker publishes in a language the house does not lead with.
+   Say what it did; it is deterministic, so there is no diff to approve.
+2. Register each `--from` source under the speaker:
    `node "<plugin>/scripts/sources.mjs" --root "<project>" --kb "<KB>" --add <path|url> --profile <slug>`
+   A path inside the knowledge base registers as an `inbox` entry with a
+   relative path (config.yml is committed, so it never carries a machine
+   path); anything elsewhere on disk is a `local` entry.
+3. A document that describes several speakers at once - one tone-of-voice
+   file with a section per person - is split first: one file per speaker in
+   that speaker's inbox, so each source belongs to exactly one profile. The
+   original may be registered once, under the house or under one speaker,
+   for provenance.
 
 ## 2. Scan, ingest, measure - scoped
 

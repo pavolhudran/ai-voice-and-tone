@@ -152,11 +152,13 @@ the card compiles from.
 
 ## `:speaker remove` - retraction of a whole speaker
 
-1. Read every `<KB>/evidence/ledger.md` entry carrying `**Profile:** <slug>`
-   and every `evidence/sources.json` entry with that `profile`.
-2. Follow their `Produced:` lines and reopen exactly those rules - name them.
-3. Remove `<KB>/profiles/<slug>/`, the profile from `config.yml`, and the
-   speaker's register entries (`sources[].profile`).
-
-Each step is a proposed diff, approved separately. The ledger entries stay:
-evidence is never deleted, only its rules are reopened.
+1. `node "<plugin>/scripts/speaker.mjs" --root "<project>" --kb "<KB>" --remove <slug> --dry-run`
+   prints the plan: the overlay, the register and index entries attributed
+   to the speaker, the ledger entries carrying `**Profile:** <slug>`, and
+   every rule those produced. Show it as the proposed diff.
+2. On approval, run it again without `--dry-run`. It removes the overlay,
+   the profile from `config.yml`, the speaker's register entries and its
+   index entries. Ledger entries stay: evidence is never deleted.
+3. Reopen exactly the rules the plan named - on the house, or on another
+   speaker if a shared rule was promoted from this one - each as its own
+   proposed diff.
