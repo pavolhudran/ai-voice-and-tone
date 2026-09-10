@@ -270,6 +270,12 @@ locks: [V2, L20, L21, L22, M03]   # house rule IDs no speaker may override
 - `/voice-and-tone:speaker list` - one line per speaker: slug, name, voice rules, authored cells, overrides, drafts pending. Read-only.
 - `/voice-and-tone:speaker remove <slug>` - retraction: reopens every rule the speaker's evidence produced, then removes the overlay, the profile, and its register entries, each step a proposed diff.
 
+All three are backed by one script, `scripts/speaker.mjs`: `--add` copies the
+overlay template, declares the profile in `config.yml` with its comments
+intact, and registers the speaker's inbox; `--list` prints the same numbers as
+the status panel; `--remove --dry-run` prints the plan before anything is
+written. The scaffold is deterministic, so every speaker starts the same way.
+
 ### `--profile`
 
 `--profile <slug>` selects a speaker on `:write`, `:rewrite`, `:localize`,
