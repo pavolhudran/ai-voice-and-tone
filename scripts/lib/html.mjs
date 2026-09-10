@@ -876,7 +876,6 @@ tr.is-flagged .track__fill { background: var(--warn); }
 }
 .pill--warn { color: var(--warn); background: var(--warn-bg); }
 .pill--soft { color: var(--ink-faint); }
-.pill--good { color: var(--good); }
 
 .colophon {
   margin-top: clamp(3rem, 6vw, 4.5rem); padding-top: 1.15rem; border-top: 2px solid var(--ink);
@@ -904,8 +903,17 @@ tr.is-flagged .track__fill { background: var(--warn); }
  * flag next to the corpus that moved, a validation error next to the rule it
  * names.
  */
+/**
+ * Styles only a speakers table uses, appended to the sheet only when one is
+ * on the page - so a page with no speakers keeps every byte it had before
+ * speaker profiles existed (test/conformance.test.mjs pins that).
+ */
+const SPEAKER_STYLES = `
+.pill--good { color: var(--good); }`
+
 export function renderHtml (state) {
   const kb = state.kb ?? {}
+  const speakersOnPage = kb.role !== 'speaker' && (state.speakers ?? []).length > 0
   const coverage = state.coverage ?? {}
   const rules = state.rules ?? {}
   const int = state.integrity ?? {}
@@ -940,7 +948,7 @@ export function renderHtml (state) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<style>${STYLES}</style>
+<style>${STYLES}${speakersOnPage ? SPEAKER_STYLES : ''}</style>
 <div class="wrap">
   ${hero(state)}
 
@@ -951,7 +959,7 @@ export function renderHtml (state) {
   ${section('attention', 'What to do next', 'Ranked by leverage: the change that unblocks the most other work sits at the top.', attention(state.gaps))}
 
   ${section('pipeline', 'Pipeline', 'Which steps of discovery this knowledge base has actually been through.', pipeline(state.stage))}
-${kb.role !== 'speaker' && (state.speakers ?? []).length
+${speakersOnPage
     ? `\n  ${section('speakers', 'Speakers', 'Each speaker inherits the house and replaces its voice. Locked house rules apply to all of them.', speakersSection(state))}\n`
     : ''}
   ${section('matrix', 'Tone matrix', 'Ten contexts against eight reader states. An authored cell was written and approved by a person; a computed cell is interpolated from the dial arithmetic and never carries humor.', matrix(coverage))}
