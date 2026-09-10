@@ -39,13 +39,20 @@ cannot tell which applies.
 
 ## Loading, in order
 
-1. `<KB>/CONTEXT.md` - always
-2. `<KB>/tone.md` - only the one cell, or the vector tables if interpolating
-3. `<KB>/channels/<name>.md` - only if it exists
-4. `<KB>/locales/<code>.md` - only if the target is not the primary locale
-5. `<KB>/examples/approved.md` - only when you need a calibration sample
+1. `<KB>/CONTEXT.md` - always; `<KB>/profiles/<slug>/CONTEXT.md` instead when
+   writing as a speaker
+2. `<KB>/tone.md` - only the one cell, or the vector tables if interpolating.
+   For a speaker: the cell from `<KB>/profiles/<slug>/tone.md` (house cells
+   are not inherited), the vector tables from the house with any overlay row
+   on top, and the speaker offset from the two `Default dials` lines
+3. `<KB>/channels/<name>.md` - only if it exists; the overlay's copy first
+4. `<KB>/locales/<code>.md` - only if the target is not the primary locale;
+   the overlay's copy first
+5. `<KB>/examples/approved.md` - only when you need a calibration sample; the
+   speaker's own first, the house's as a fallback
 6. `<KB>/lexicon.md`, `<KB>/mechanics.md` - only when the compiled card's top
-   entries are not enough for the piece at hand
+   entries are not enough for the piece at hand; the overlay's rows override
+   the house's by ID
 
 Never load `evidence/ledger.md` while drafting. It is for explaining a rule, not
 for applying one.
@@ -64,6 +71,7 @@ cell: T-system-error/frustrated
 cell_source: authored
 locale: en
 kb_version: 0.3.1
+lock_override: null
 ---
 
 That file didn't upload - it's over the 25 MB limit. Try a smaller one.
@@ -81,4 +89,7 @@ profile default · cell: system-error/frustrated (authored) · locale: en
 ```
 
 If the cell was interpolated, say so - it tells the user the guide has a gap
-worth filling, and it is the moment they are most likely to fill it.
+worth filling, and it is the moment they are most likely to fill it. For a
+speaker, add `speaker offset applied` on an interpolated cell, and
+`lock_override: <id>` whenever a user instruction forced a locked house rule
+to break - the same value goes into the draft frontmatter.

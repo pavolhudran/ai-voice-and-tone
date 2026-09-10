@@ -39,9 +39,12 @@ and hand off to the command that owns it. The screen already names it.
 
 ```
 node "<plugin>/scripts/status.mjs" --root "<project>" --kb "<KB>"
+node "<plugin>/scripts/status.mjs" --root "<project>" --kb "<KB>" --profile <slug>
 ```
 
-Show the output **verbatim**. Then wait.
+The second form shows one speaker's resolved state; the first, the house,
+with a `speakers` panel once any are declared. Show the output **verbatim**.
+Then wait.
 
 ## Two prohibitions, both absolute
 
@@ -72,8 +75,10 @@ working anywhere a monospace block renders badly.
 node "<plugin>/scripts/status.mjs" --root "<project>" --kb "<KB>" --artifact
 ```
 
-That writes `<KB>/.drafts/status.html` and prints the path. Then publish that
-exact file with the Artifact tool and give the user the link.
+That writes `<KB>/.drafts/status.html` and prints the path - or
+`<KB>/.drafts/status-<slug>.html` under `--profile <slug>`, a separate path so
+each speaker's page keeps its own stable link. Then publish that exact file
+with the Artifact tool and give the user the link.
 
 Two things to hold to:
 
@@ -98,7 +103,7 @@ node "<plugin>/scripts/status.mjs" --root "<project>" --kb "<KB>" --panel <name>
 ```
 
 Panels: `pipeline`, `integrity`, `coverage`, `rules`, `drift`, `sources`,
-`evidence`, `settings`, `missing`, `all`.
+`evidence`, `settings`, `missing`, `speakers`, `all`.
 
 Read `references/panels.md` for what each one means and the question it raises.
 
@@ -125,6 +130,8 @@ that owns it. Do not do the work here.
 | drift past threshold, disputed rules | `/voice-and-tone:audit` |
 | drafts awaiting corroboration | `/voice-and-tone:learn` |
 | locale has no pack | `/voice-and-tone:localize` |
+| speaker has no voice, no baseline, or never-ingested material | `/voice-and-tone:speaker add`, `fingerprint.mjs --set-baseline --profile`, `/voice-and-tone:connect --ingest --profile` |
+| speakers declared, no locks | edit `locks:` in `config.yml`, then `/voice-and-tone:sync` |
 
 ## What this skill must not answer
 

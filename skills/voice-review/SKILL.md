@@ -27,14 +27,20 @@ rather than from taste.
 
 ## Flow
 
-1. Load `<KB>/CONTEXT.md`.
+1. Resolve the speaker, then load the card: `--profile <slug>`, else the
+   draft's frontmatter `profile:`, else the house. Load
+   `<KB>/profiles/<slug>/CONTEXT.md` for a speaker, `<KB>/CONTEXT.md` for the
+   house, and say which in the report's first line - the likeliest mistake
+   is reviewing a speaker against the house and filing their voice as
+   violations.
 2. Determine the context and reader state of the text under review. If it came
    from `.drafts/`, read them from the frontmatter instead of guessing.
 3. Load the resolved cell, the channel playbook, and the locale pack if relevant.
 4. Load `<KB>/lexicon.md` and `<KB>/mechanics.md` in full - review needs the whole
    list, not the compiled top-8.
-5. Find violations. For each, record the rule ID, the confidence, and a `file:line`
-   anchor. Format in `references/finding-format.md`.
+5. Find violations. For each, record the rule ID, its origin - `L03 (house)`,
+   `L31 (maya)`, `M07 (maya, overrides house)`, `L20 (house, locked)` - the
+   confidence, and a `file:line` anchor. Format in `references/finding-format.md`.
 6. Apply the always-on layers from
    `skills/voice-and-tone/references/always-on-layers.md`.
 7. Assign severity per `references/severity.md`.
@@ -46,7 +52,8 @@ rather than from taste.
 `disputed` -> **not reported as a violation at all**
 
 Always **Blocker** regardless of any rule's confidence: accessibility violations,
-and non-inclusive language.
+non-inclusive language, and a locked house rule broken (`locks:` in
+`<KB>/config.yml`).
 
 A `disputed` rule may be *mentioned* as an open question, never as a finding. The
 conflict is information, and review is not where it gets settled - `:audit` is.

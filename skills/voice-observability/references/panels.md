@@ -107,3 +107,19 @@ nothing.
 
 See `gap-catalogue.md` for every detector - and for the five things that look
 like gaps and must never be reported as one.
+
+## `speakers`
+
+House view only, and only once `config.yml` declares a speaker. One row per
+speaker: voice rules, authored cells, overrides, lock violations (`!`, also a
+validation error in `integrity`), drift (`ok`, `FLAG`, or `n/a` with no
+baseline), drafts pending.
+
+Every computed cell on a new speaker is expected, not a gap. Zero overrides
+is the expected starting state. The question it raises: does each speaker
+sound like themselves? That is the critic's read-back, per draft, not a
+number this panel can carry.
+
+Under `--profile <slug>` every other panel shows the resolved speaker: its
+matrix, its rules split by origin, its own fingerprint against its own
+baseline, its register entries, its drafts, and its gaps without a prefix.

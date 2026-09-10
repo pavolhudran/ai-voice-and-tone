@@ -53,6 +53,19 @@ knowledge base - not even to fix something obviously wrong. Especially not then.
 5. Apply the corroboration threshold.
 6. Propose only what cleared it, each with its diffs shown as evidence.
 
+### Where a correction lands
+
+The draft's frontmatter names the profile. A correction to a speaker draft is
+a `correction` entry with `**Profile:** <slug>` and, on corroboration, a rule
+in `<KB>/profiles/<slug>/` - the overlay, never the house. Two more cases:
+
+- The corrected rule is a house rule and the same correction is corroborated
+  across drafts from **two or more speakers**: propose it at house level
+  instead, and say why.
+- The correction contradicts a locked rule (`locks:` in `config.yml`, or a
+  draft carrying `lock_override:`): record the evidence, propose nothing,
+  and name the lock. Changing a lock is an `:audit` decision.
+
 ### Corroboration
 
 A single edit is recorded as evidence and does **not** create a rule. Promotion
@@ -92,6 +105,9 @@ Follow `references/audit-report.md`. Four sections, in this order:
 2. **Drift** - current fingerprint against the baseline captured at init
 3. **Rule health** - dead, overridden, stale, disputed
 4. **Inventory** - scored findings across the scanned corpus
+5. **Speakers** - house audit only, when speakers are declared: one row per
+   speaker with overrides, lock conflicts, drift flag, cells authored, and
+   days since the last draft. `--profile <slug>` audits one speaker instead.
 
 Refresh the numbers first:
 
@@ -104,20 +120,24 @@ node "<plugin>/scripts/validate.mjs" --kb "<KB>"
 Do **not** pass `--set-baseline` here. The baseline is the point of comparison; a
 refreshed baseline shows zero drift by construction and tells you nothing.
 
-End by asking the two questions the report exists to raise:
+End by asking the questions the report exists to raise:
 - For each overridden rule: **enforce it, or retire it?** A rule broken every time
   and kept anyway is not a rule.
 - For each `disputed` entry: **channel split, or drift?**
+- With speakers, for each candidate override: **override, or house rule?**
 
 ---
 
 ## `:sync` - recompile and validate
 
-1. `node "<plugin>/scripts/validate.mjs" --kb "<KB>"` - fix every error first
-2. `node "<plugin>/scripts/compile-context.mjs" --root "<project>" --kb "<KB>"`
+1. `node "<plugin>/scripts/validate.mjs" --kb "<KB>"` - fix every error first.
+   It validates the house and every speaker resolved.
+2. `node "<plugin>/scripts/compile-context.mjs" --root "<project>" --kb "<KB>"`,
+   then once more with `--profile <slug>` for every speaker (or only the one
+   named by `--profile`)
 3. Bump `kb_version` in `<KB>/config.yml`:
-   - **major** - voice characteristics changed
-   - **minor** - cells or rules added
+   - **major** - house voice characteristics or `locks:` changed
+   - **minor** - a speaker added or removed; cells or rules added anywhere
    - **patch** - examples, evidence, wording
 4. Append to `<KB>/CHANGELOG.md`: version, date, what changed, which evidence
    entries drove it
@@ -127,3 +147,16 @@ End by asking the two questions the report exists to raise:
 the next sync - that is the design, not a bug. It is why the file carries a
 generated-file banner. If they want the change kept, it belongs in the source file
 the card compiles from.
+
+---
+
+## `:speaker remove` - retraction of a whole speaker
+
+1. Read every `<KB>/evidence/ledger.md` entry carrying `**Profile:** <slug>`
+   and every `evidence/sources.json` entry with that `profile`.
+2. Follow their `Produced:` lines and reopen exactly those rules - name them.
+3. Remove `<KB>/profiles/<slug>/`, the profile from `config.yml`, and the
+   speaker's register entries (`sources[].profile`).
+
+Each step is a proposed diff, approved separately. The ledger entries stay:
+evidence is never deleted, only its rules are reopened.

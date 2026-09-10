@@ -6,7 +6,7 @@ actionable rather than merely correct.
 ```markdown
 ### Blockers
 
-**`content/pricing.md:14`** - L07 `confirmed`
+**`content/pricing.md:14`** - L07 (house, locked) `confirmed`
 > "Leverage our platform to simplify your workflow."
 
 Two lexicon violations in one sentence: `leverage` -> `use`, `simply` has no
@@ -36,6 +36,8 @@ Reads as announcement language rather than plainspoken. `V2 · Genuine` is only
 - **Quote the offending text.** A finding without the text is a claim.
 - **Name the rule ID and its confidence.** Both. The ID lets the user look it up;
   the confidence tells them how hard to take it.
+- **Name the origin.** `(house)`, `(<slug>)`, `(<slug>, overrides house)`, or
+  `(house, locked)`. A reader must know whose rule was broken.
 - **Cite the evidence IDs** for blockers. If a user is going to be blocked, they
   are entitled to see why the rule exists.
 - **Suggest a fix** for blockers and warnings. Nits may be reported without one.
