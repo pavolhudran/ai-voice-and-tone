@@ -171,6 +171,7 @@ test('the CLI adds, lists, and removes, and prints ASCII only', () => {
     assert.ok(existsSync(path.join(kbRoot, 'profiles', 'maya')))
     assert.match(run(['--remove', 'maya']), /speaker: removed maya/)
     assert.ok(!existsSync(path.join(kbRoot, 'profiles', 'maya')))
+    assert.ok(!existsSync(path.join(kbRoot, 'evidence', 'sources.json')), 'no index entries to drop, so no index is written')
     // eslint-disable-next-line no-control-regex
     assert.ok(!/[^\x00-\x7F]/.test(added + run(['--list'])))
   } finally {

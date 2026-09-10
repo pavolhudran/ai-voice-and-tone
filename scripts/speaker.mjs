@@ -166,8 +166,12 @@ export function runSpeakerRemove (ctx, { slug, dryRun = false }) {
   plan.reopen = [...new Set([...plan.ledgerEntries, ...plan.indexEntries].flatMap((e) => e.produced))]
   if (dryRun) return plan
 
-  index.sources = (index.sources ?? []).filter((s) => s.profile !== slug)
-  saveIndex(ctx.kbRoot, index, ctx.now)
+  // Save the index only when something left it: a rewrite with a fresh
+  // `generated` stamp and no other change is noise in the next diff.
+  if (plan.indexEntries.length) {
+    index.sources = (index.sources ?? []).filter((s) => s.profile !== slug)
+    saveIndex(ctx.kbRoot, index, ctx.now)
+  }
   unregisterProfileSources(ctx.kbRoot, slug)
   undeclareProfile(ctx.kbRoot, slug)
   if (plan.overlay) rmSync(plan.overlay, { recursive: true, force: true })
