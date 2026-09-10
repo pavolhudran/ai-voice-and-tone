@@ -1,0 +1,21 @@
+version: 1
+kb_version: 0.3.0
+profiles:
+  default:
+    name: "Acme"
+    primary_locale: en
+    locales: [en]
+  maya:
+    name: "Maya Lind"
+  jonas:
+    name: "Jonas Berg"
+locks: [V2, L20]
+sources:
+  - id: s01
+    kind: project
+    include: ["content/**/*.md"]
+    exclude: []
+thresholds:
+  corroboration: 2
+  derived_min_samples: 5
+  stale_months: 9

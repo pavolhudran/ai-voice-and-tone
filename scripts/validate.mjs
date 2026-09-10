@@ -1,12 +1,12 @@
 import path from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
-  loadKb, STATES, CONTEXTS, DIALS, CONFIDENCE_LEVELS, EVIDENCE_TYPES, ID_PREFIXES,
+  loadKb, resolveKb, STATES, CONTEXTS, DIALS, CONFIDENCE_LEVELS, EVIDENCE_TYPES, ID_PREFIXES,
   HUMOR_ZERO_STATES, cellId
 } from './lib/kb.mjs'
 import { loadIndex, indexPathFor, staleByExtractor, STATS_REQUIRED } from './lib/sourceindex.mjs'
-import { activeProfile } from './lib/config.mjs'
+import { activeProfile, speakerProfiles, overlayRoot } from './lib/config.mjs'
 import { readTextFile } from './lib/fsx.mjs'
 import { parseCliArgs, resolveRoots, die, printHelp, writeOut } from './lib/cli.mjs'
 
@@ -49,8 +49,11 @@ export function validateKb (kb = {}) {
   const findings = []
   const addFile = (severity, code, message, file, line) =>
     findings.push({ severity, code, message, file, line })
+  // A resolved rule carries `path` ('profiles/<slug>/lexicon.md'); a bare
+  // file name ('tone') still gets its extension appended, as before.
   const add = (severity, code, message, file, line) =>
-    addFile(severity, code, message, `${file}.md`, line)
+    addFile(severity, code, message, /\.md$/.test(file) ? file : `${file}.md`, line)
+  const toneFile = kb.role === 'speaker' ? path.posix.join('profiles', kb.profileName, 'tone.md') : 'tone'
 
   // loadKb reads every absent file as '', so a typo'd --kb, or an :audit run
   // before :init, otherwise validates a directory that does not exist and
@@ -86,7 +89,7 @@ export function validateKb (kb = {}) {
     add('warning', 'W_PROSE_RULE_IN_TABLE_FILE',
       `rule ${rule.id} is written in the prose rule shape, but ${rule.file}.md is a table file - ` +
       'compile-context reads only its tables, so this rule would be missing from CONTEXT.md',
-      rule.file, rule.line)
+      rule.path ?? rule.file, rule.line)
   }
 
   const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]))
@@ -94,12 +97,12 @@ export function validateKb (kb = {}) {
 
   for (const rule of rules) {
     if (ruleIds.has(rule.id)) {
-      add('error', 'E_DUPLICATE_ID', `rule id ${rule.id} is used more than once`, rule.file, rule.line)
+      add('error', 'E_DUPLICATE_ID', `rule id ${rule.id} is used more than once`, rule.path ?? rule.file, rule.line)
     }
     ruleIds.add(rule.id)
 
     if (!ID_PREFIXES[rule.id[0]]) {
-      add('error', 'E_UNKNOWN_PREFIX', `rule id ${rule.id} uses an unknown prefix`, rule.file, rule.line)
+      add('error', 'E_UNKNOWN_PREFIX', `rule id ${rule.id} uses an unknown prefix`, rule.path ?? rule.file, rule.line)
     }
     // A table row with an empty Conf column parses into confidence null. Every
     // downstream check used to be guarded by `rule.confidence &&`, so such a
@@ -109,29 +112,36 @@ export function validateKb (kb = {}) {
     if (!rule.confidence) {
       add('error', 'E_NO_CONFIDENCE',
         `rule ${rule.id} declares no confidence; one of ${CONFIDENCE_LEVELS.join(', ')} is required`,
-        rule.file, rule.line)
+        rule.path ?? rule.file, rule.line)
     } else if (!CONFIDENCE_LEVELS.includes(rule.confidence)) {
       add('error', 'E_UNKNOWN_CONFIDENCE',
-        `rule ${rule.id} has confidence "${rule.confidence}"`, rule.file, rule.line)
+        `rule ${rule.id} has confidence "${rule.confidence}"`, rule.path ?? rule.file, rule.line)
     }
     const ruleEvidence = rule.evidence ?? []
     for (const ref of ruleEvidence) {
       if (!evidenceById.has(ref)) {
         add('error', 'E_BROKEN_EVIDENCE_REF',
-          `rule ${rule.id} cites ${ref}, which is not in the ledger`, rule.file, rule.line)
+          `rule ${rule.id} cites ${ref}, which is not in the ledger`, rule.path ?? rule.file, rule.line)
         continue
       }
       if (!evidenceById.get(ref).produced.includes(rule.id)) {
         add('warning', 'W_ONE_WAY_EVIDENCE',
           `rule ${rule.id} cites ${ref}, but ${ref} does not list ${rule.id} under Produced`,
-          rule.file, rule.line)
+          rule.path ?? rule.file, rule.line)
       }
     }
     if (ruleEvidence.length === 0 && rule.confidence && rule.confidence !== 'assumed') {
       add('warning', 'W_NO_EVIDENCE',
-        `rule ${rule.id} is ${rule.confidence} but cites no evidence`, rule.file, rule.line)
+        `rule ${rule.id} is ${rule.confidence} but cites no evidence`, rule.path ?? rule.file, rule.line)
     }
   }
+
+  // A speaker's resolved rules drop the house's unlocked voice (replaced as
+  // a set), but a ledger entry or an index entry that produced one of those
+  // rules is still correct - the rule exists, on the house. So "does this
+  // rule exist" is asked of the union, while duplicates are still judged on
+  // the resolved set alone.
+  const knownIds = new Set([...ruleIds, ...(kb.house?.rules ?? []).map((r) => r.id)])
 
   for (const entry of evidence) {
     if (!EVIDENCE_TYPES.includes(entry.type)) {
@@ -139,7 +149,7 @@ export function validateKb (kb = {}) {
         `evidence ${entry.id} has type "${entry.type}"`, 'evidence/ledger', entry.line)
     }
     for (const produced of entry.produced) {
-      if (!ruleIds.has(produced)) {
+      if (!knownIds.has(produced)) {
         add('warning', 'W_ORPHAN_EVIDENCE',
           `evidence ${entry.id} claims to have produced ${produced}, which does not exist`,
           'evidence/ledger', entry.line)
@@ -150,56 +160,135 @@ export function validateKb (kb = {}) {
   for (const cell of cells) {
     const dials = cell.dials ?? {}
     if (!CONTEXTS.includes(cell.context)) {
-      add('error', 'E_UNKNOWN_CONTEXT', `cell ${cell.id} names context "${cell.context}"`, 'tone', cell.line)
+      add('error', 'E_UNKNOWN_CONTEXT', `cell ${cell.id} names context "${cell.context}"`, toneFile, cell.line)
     }
     if (!STATES.includes(cell.state)) {
-      add('error', 'E_UNKNOWN_STATE', `cell ${cell.id} names state "${cell.state}"`, 'tone', cell.line)
+      add('error', 'E_UNKNOWN_STATE', `cell ${cell.id} names state "${cell.state}"`, toneFile, cell.line)
     }
     for (const [dial, value] of Object.entries(dials)) {
       if (!DIALS.includes(dial) || !Number.isInteger(value) || value < 0 || value > 4) {
         add('error', 'E_DIAL_RANGE', `cell ${cell.id} has ${dial} = ${value}; dials are integers 0-4`,
-          'tone', cell.line)
+          toneFile, cell.line)
       }
     }
     for (const dial of DIALS) {
       if (!(dial in dials)) {
         add('error', 'E_DIAL_MISSING', `cell ${cell.id} does not declare dial "${dial}"; all six dials are required`,
-          'tone', cell.line)
+          toneFile, cell.line)
       }
     }
     if (HUMOR_ZERO_STATES.includes(cell.state) && Number(dials.humor) > 0) {
       add('error', 'E_HUMOR_GATE',
         `cell ${cell.id} sets humor ${dials.humor}; state "${cell.state}" forces humor 0`,
-        'tone', cell.line)
+        toneFile, cell.line)
     }
   }
 
   const hasVectors = Object.keys(stateVectors).length > 0 || Object.keys(contextOffsets).length > 0
   if (hasVectors) {
     for (const [state, dials] of Object.entries(stateVectors)) {
-      if (!STATES.includes(state)) add('error', 'E_UNKNOWN_STATE', `state vector "${state}" is not a known state`, 'tone', 0)
+      if (!STATES.includes(state)) add('error', 'E_UNKNOWN_STATE', `state vector "${state}" is not a known state`, toneFile, 0)
       for (const [dial, value] of Object.entries(dials)) {
         if (!Number.isInteger(value) || value < 0 || value > 4) {
-          add('error', 'E_VECTOR_RANGE', `state vector ${state}.${dial} = ${value}; must be 0-4`, 'tone', 0)
+          add('error', 'E_VECTOR_RANGE', `state vector ${state}.${dial} = ${value}; must be 0-4`, toneFile, 0)
         }
       }
     }
     for (const [context, dials] of Object.entries(contextOffsets)) {
-      if (!CONTEXTS.includes(context)) add('error', 'E_UNKNOWN_CONTEXT', `context offset "${context}" is not a known context`, 'tone', 0)
+      if (!CONTEXTS.includes(context)) add('error', 'E_UNKNOWN_CONTEXT', `context offset "${context}" is not a known context`, toneFile, 0)
       for (const [dial, value] of Object.entries(dials)) {
         if (!Number.isInteger(value) || value < -4 || value > 4) {
-          add('error', 'E_VECTOR_RANGE', `context offset ${context}.${dial} = ${value}; must be -4 to 4`, 'tone', 0)
+          add('error', 'E_VECTOR_RANGE', `context offset ${context}.${dial} = ${value}; must be -4 to 4`, toneFile, 0)
         }
       }
     }
     for (const state of STATES) {
       if (!stateVectors[state]) {
-        add('warning', 'W_MISSING_VECTOR', `state "${state}" has no vector; interpolation falls back to neutral`, 'tone', 0)
+        add('warning', 'W_MISSING_VECTOR', `state "${state}" has no vector; interpolation falls back to neutral`, toneFile, 0)
       }
     }
     for (const context of CONTEXTS) {
       if (!contextOffsets[context]) {
-        add('warning', 'W_MISSING_VECTOR', `context "${context}" has no offset; interpolation falls back to neutral`, 'tone', 0)
+        add('warning', 'W_MISSING_VECTOR', `context "${context}" has no offset; interpolation falls back to neutral`, toneFile, 0)
+      }
+    }
+  }
+
+  // --- speakers and locks (spec 2026-09-10 §4, §8.2) ----------------------
+  for (const violation of kb.lockViolations ?? []) {
+    addFile('error', 'E_LOCKED_OVERRIDE',
+      `rule ${violation.id} is locked by the house (config.yml locks:) and cannot be overridden; ` +
+      'the house rule stays in force - remove this row, or unlock it in config.yml if the brand team agrees',
+      violation.file, violation.line ?? 0)
+  }
+
+  if (kb.role !== 'speaker') {
+    const houseIds = new Set((kb.house?.rules ?? rules).map((r) => r.id))
+    for (const id of kb.locks ?? []) {
+      if (!houseIds.has(id)) {
+        addFile('error', 'E_UNKNOWN_LOCK', `config.yml locks ${id}, which the house does not define`, 'config.yml', 0)
+      }
+    }
+    if (kb.kbRoot) {
+      const declared = new Set(speakerProfiles(kb.config).map((p) => p.slug))
+      for (const slug of declared) {
+        if (!existsSync(overlayRoot(kb.kbRoot, slug))) {
+          addFile('error', 'E_OVERLAY_DIR_MISMATCH',
+            `profile ${slug} is declared in config.yml but profiles/${slug}/ does not exist - ` +
+            'run /voice-and-tone:speaker add, or remove the profile',
+            'config.yml', 0)
+        }
+      }
+      const profilesDir = path.join(kb.kbRoot, 'profiles')
+      if (existsSync(profilesDir)) {
+        for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
+          if (!entry.isDirectory() || entry.name.startsWith('_') || declared.has(entry.name)) continue
+          addFile('error', 'E_OVERLAY_DIR_MISMATCH',
+            `profiles/${entry.name}/ exists but config.yml declares no profile ${entry.name} - ` +
+            'declare it, or remove the directory',
+            'config.yml', 0)
+        }
+      }
+    }
+  }
+
+  if (kb.role === 'speaker') {
+    const speakerVoice = rules.some((r) => r.origin === 'speaker' && r.id.startsWith('V'))
+    if (!speakerVoice || !kb.speakerOffset) {
+      addFile('warning', 'W_SPEAKER_NO_VOICE',
+        `speaker ${kb.profileName} defines ${speakerVoice ? 'no default dials line' : 'no voice characteristic'}; ` +
+        'it is the house in a costume until /voice-and-tone:speaker add finishes discovery',
+        path.posix.join('profiles', kb.profileName, speakerVoice ? 'tone.md' : 'voice.md'), 0)
+    }
+
+    // The decade rule (plan deviation 5). The first safe id for a speaker
+    // addition is the next multiple of ten above the house's highest id of
+    // the same prefix; below that, the next house rule silently turns the
+    // addition into an override.
+    const houseMax = {}
+    for (const rule of kb.house?.rules ?? []) {
+      const m = /^([LMCAX])(\d+)$/.exec(rule.id)
+      if (m) houseMax[m[1]] = Math.max(houseMax[m[1]] ?? 0, Number(m[2]))
+    }
+    for (const rule of rules) {
+      if (rule.origin !== 'speaker' || rule.overrides) continue
+      const m = /^([LMCAX])(\d+)$/.exec(rule.id)
+      if (!m || houseMax[m[1]] === undefined) continue
+      const safe = (Math.floor(houseMax[m[1]] / 10) + 1) * 10
+      if (Number(m[2]) < safe) {
+        addFile('warning', 'W_ID_RANGE_COLLISION_RISK',
+          `rule ${rule.id} is a speaker addition inside the house's ${m[1]} range (house tops out at ` +
+          `${m[1]}${String(houseMax[m[1]]).padStart(2, '0')}); renumber from ${m[1]}${safe} so a future house rule ` +
+          'cannot silently override it',
+          rule.path ?? `${rule.file}.md`, rule.line)
+      }
+    }
+
+    for (const rule of kb.overrides ?? []) {
+      if ((rule.evidence ?? []).length === 0) {
+        addFile('warning', 'W_OVERRIDE_UNEVIDENCED',
+          `rule ${rule.id} overrides a house rule but cites no evidence; replacing a house rule is a claim that needs one`,
+          rule.path ?? `${rule.file}.md`, rule.line)
       }
     }
   }
@@ -277,7 +366,7 @@ export function validateKb (kb = {}) {
     // it is the index itself lying about what it produced.
     for (const source of sources) {
       for (const producedId of producedOf(source)) {
-        if (!ruleIds.has(producedId)) {
+        if (!knownIds.has(producedId)) {
           addFile('error', 'E_DANGLING_PRODUCED_ID',
             `source ${source.id} claims to have produced ${producedId}, which is not a rule in this knowledge base`,
             indexFile, 0)
@@ -297,7 +386,7 @@ export function validateKb (kb = {}) {
       if (citesSourceEvidence && !producedRuleIds.has(rule.id)) {
         add('error', 'E_SOURCE_NOT_INDEXED',
           `rule ${rule.id} cites source-type evidence, but no entry in ${indexFile} lists ${rule.id} under produced`,
-          rule.file, rule.line)
+          rule.path ?? rule.file, rule.line)
       }
     }
 
@@ -412,6 +501,26 @@ export function validateKb (kb = {}) {
   }
 }
 
+/**
+ * The house, then every declared speaker, each resolved. Findings are
+ * concatenated in that order. `counts` is the house's; every profile's own
+ * counts sit under `profiles` for the per-speaker summary lines.
+ */
+export function validateAll (kbRoot) {
+  const house = resolveKb(kbRoot, 'default')
+  const reports = [{ profile: 'default', ...validateKb(house) }]
+  for (const { slug } of speakerProfiles(house.config)) {
+    reports.push({ profile: slug, ...validateKb(resolveKb(kbRoot, slug)) })
+  }
+  return {
+    errors: reports.reduce((n, r) => n + r.errors, 0),
+    warnings: reports.reduce((n, r) => n + r.warnings, 0),
+    findings: reports.flatMap((r) => r.findings),
+    counts: reports[0].counts,
+    profiles: reports.map((r) => ({ profile: r.profile, errors: r.errors, warnings: r.warnings, counts: r.counts }))
+  }
+}
+
 function main (argv) {
   const { values } = parseCliArgs(argv)
   if (values.help) {
@@ -426,7 +535,7 @@ function main (argv) {
   }
 
   const { kbRoot } = resolveRoots(values)
-  const report = validateKb(loadKb(kbRoot))
+  const report = validateAll(kbRoot)
 
   if (values.json) {
     writeOut(`${JSON.stringify(report, null, 2)}\n`)
@@ -439,6 +548,14 @@ function main (argv) {
       `${report.counts.possibleCells}, ${report.counts.evidence} evidence entries`
     )
     const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`
+    // One line per speaker, only when there are speakers - a house alone
+    // prints exactly what it printed before.
+    for (const p of report.profiles.slice(1)) {
+      lines.push(
+        `validate: speaker ${p.profile}: ${p.counts.rules} rules, ${p.counts.cells} authored cells, ` +
+        `${count(p.errors, 'error')}, ${count(p.warnings, 'warning')}`
+      )
+    }
     lines.push(`validate: ${count(report.errors, 'error')}, ${count(report.warnings, 'warning')}`)
     writeOut(`${lines.join('\n')}\n`)
   }

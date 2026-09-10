@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { loadKb, STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
+import { loadKb, resolveKb, STATES, CONTEXTS } from '../scripts/lib/kb.mjs'
 import { statsFor } from '../scripts/lib/metrics.mjs'
 import { readTextFile } from '../scripts/lib/fsx.mjs'
-import { validateKb } from '../scripts/validate.mjs'
+import { validateKb, validateAll } from '../scripts/validate.mjs'
+import { cpSync, writeFileSync } from 'node:fs'
 
 const codesOf = (report) => report.findings.map((f) => f.code)
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -701,6 +702,9 @@ test('a locale no declared profile mentions is still reported', () => {
       '    primary_locale: cs',
       '    locales: [cs]'
     ].join('\n'),
+    // Since speaker profiles, every non-default profile is a speaker and
+    // must own an overlay directory (E_OVERLAY_DIR_MISMATCH otherwise).
+    'kb/profiles/cs/voice.md': '# Voice\n',
     'kb/evidence/sources.json': sourcesJson([sourceEntry({ locale: 'de' })])
   })
   try {
@@ -901,4 +905,138 @@ test('table rules in a table file, and prose rules elsewhere, are both left alon
   })
 
   assert.ok(!codesOf(report).includes('W_PROSE_RULE_IN_TABLE_FILE'))
+})
+
+// --- speakers and locks (spec 2026-09-10 §8.2) ----------------------------
+
+const FIXTURE = path.join(ROOT, 'test', 'fixtures', 'house-with-speakers')
+
+function fixtureKb () {
+  const dir = makeTmpProject({})
+  cpSync(FIXTURE, path.join(dir, '.voice-and-tone'), { recursive: true })
+  return { dir, kbRoot: path.join(dir, '.voice-and-tone') }
+}
+
+test('the house of the fixture validates clean', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const report = validateKb(resolveKb(kbRoot, 'default'))
+    assert.equal(report.errors, 0, JSON.stringify(report.findings, null, 2))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('E_LOCKED_OVERRIDE names the overlay file and line; the house keeps its rule', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const report = validateKb(resolveKb(kbRoot, 'jonas'))
+    const hit = report.findings.find((f) => f.code === 'E_LOCKED_OVERRIDE')
+    assert.ok(hit)
+    assert.equal(hit.file, path.posix.join('profiles', 'jonas', 'lexicon.md'))
+    assert.equal(hit.line, 3)
+    assert.match(hit.message, /L20/)
+    assert.ok(!report.findings.some((f) => f.code === 'E_DUPLICATE_ID'), 'an override is not a duplicate')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('W_SPEAKER_NO_VOICE fires for an overlay with no V rule and no dials line', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const jonas = validateKb(resolveKb(kbRoot, 'jonas'))
+    assert.ok(jonas.findings.some((f) => f.code === 'W_SPEAKER_NO_VOICE'))
+    const maya = validateKb(resolveKb(kbRoot, 'maya'))
+    assert.ok(!maya.findings.some((f) => f.code === 'W_SPEAKER_NO_VOICE'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('W_ID_RANGE_COLLISION_RISK fires for a speaker addition below the next decade above the house', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const jonas = validateKb(resolveKb(kbRoot, 'jonas'))
+    const hit = jonas.findings.find((f) => f.code === 'W_ID_RANGE_COLLISION_RISK')
+    assert.ok(hit, 'L02 sits below L30, the first safe id when the house tops out at L20')
+    assert.match(hit.message, /L02/)
+    assert.match(hit.message, /L30/)
+    const maya = validateKb(resolveKb(kbRoot, 'maya'))
+    assert.ok(!maya.findings.some((f) => f.code === 'W_ID_RANGE_COLLISION_RISK'), 'L30 is safe')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('W_OVERRIDE_UNEVIDENCED fires for an override citing no evidence, not for one that does', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const clean = validateKb(resolveKb(kbRoot, 'maya'))
+    assert.ok(!clean.findings.some((f) => f.code === 'W_OVERRIDE_UNEVIDENCED'))
+    writeFileSync(path.join(kbRoot, 'profiles', 'maya', 'lexicon.md'), [
+      '| ID | Avoid | Prefer | Why | Conf | Ev |',
+      '|---|---|---|---|---|---|',
+      '| L01 | leverage | lean on | her word | confirmed | |'
+    ].join('\n'))
+    const dirty = validateKb(resolveKb(kbRoot, 'maya'))
+    assert.ok(dirty.findings.some((f) => f.code === 'W_OVERRIDE_UNEVIDENCED'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('E_UNKNOWN_LOCK and E_OVERLAY_DIR_MISMATCH are house-level findings', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'locks: [V9]',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/voice.md': '### V1 · Plain `assumed`\n\n**Means:** x\n',
+    '.voice-and-tone/tone.md': '# Tone\n',
+    '.voice-and-tone/profiles/stray/voice.md': '# Voice\n'
+  })
+  try {
+    const report = validateKb(resolveKb(path.join(dir, '.voice-and-tone'), 'default'))
+    assert.ok(codesOf(report).includes('E_UNKNOWN_LOCK'))
+    const mismatches = report.findings.filter((f) => f.code === 'E_OVERLAY_DIR_MISMATCH')
+    assert.equal(mismatches.length, 2, 'maya declared without a directory, stray directory without a declaration')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('validateAll validates the house and every speaker and sums the counts', () => {
+  const { dir, kbRoot } = fixtureKb()
+  try {
+    const report = validateAll(kbRoot)
+    assert.deepEqual(report.profiles.map((p) => p.profile), ['default', 'jonas', 'maya'])
+    assert.equal(report.errors, 1, 'exactly the lock violation in jonas')
+    assert.ok(report.findings.some((f) => f.code === 'E_LOCKED_OVERRIDE'))
+    assert.ok(!report.findings.some((f) => f.code === 'E_UNKNOWN_LOCK'))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('validateAll on a knowledge base with no speakers is validateKb of the house, finding for finding', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': 'profiles:\n  default:\n    name: "Acme"\n',
+    '.voice-and-tone/voice.md': '### V1 · Plain `assumed`\n\n**Means:** x\n',
+    '.voice-and-tone/tone.md': '# Tone\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const all = validateAll(kbRoot)
+    const one = validateKb(loadKb(kbRoot))
+    assert.deepEqual(all.findings, one.findings)
+    assert.deepEqual(all.counts, one.counts)
+  } finally {
+    cleanup(dir)
+  }
 })
