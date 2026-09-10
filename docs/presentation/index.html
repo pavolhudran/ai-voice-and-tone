@@ -241,7 +241,10 @@ blockquote {
 .speaker-split ul.plain li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--ink); }
 .speaker-steps { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.25rem; }
 .speaker-steps .step { padding: 1.35rem 1.4rem; display: flex; flex-direction: column; }
-.speaker-steps .step .cmd { margin-top: auto; padding-top: .9rem; align-self: flex-start; }
+/* The chips scroll sideways on a narrow card: a small top and a larger bottom
+   padding leave the horizontal scrollbar its own room under the text. */
+.speaker-steps .step .cmd { margin-top: auto; padding: .3rem .7rem .85rem; align-self: stretch; }
+.speaker-steps .step .what { margin-bottom: .9rem; }
 
 /* ---------- matrix ---------- */
 .matrix-layout { display: grid; gap: 1.75rem; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
