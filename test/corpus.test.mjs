@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { writeFileSync, chmodSync } from 'node:fs'
 import path from 'node:path'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
-import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
+import { DEFAULT_CONFIG, loadConfig } from '../scripts/lib/config.mjs'
 import { gatherCorpus, gatherAll } from '../scripts/lib/corpus.mjs'
 import { formatFor } from '../scripts/lib/extract.mjs'
 import { saveIndex } from '../scripts/lib/sourceindex.mjs'
@@ -279,6 +279,51 @@ test('a project-entry container file never counts as unindexed - it is reported 
 
     assert.deepEqual(unindexed, [], 'unindexed is scoped to non-project entries only')
     assert.deepEqual(skipped.map((s) => s.reason), ['container'])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('gatherAll scopes the register to the profile: house files for default, speaker files for a speaker', () => {
+  const dir = makeTmpProject({
+    'content/page.md': '# Page\n\nHouse copy here.\n',
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include: ["content/**/*.md"]',
+      '    exclude: []',
+      '  - id: s02',
+      '    kind: inbox',
+      '    path: "profiles/maya/sources/"',
+      '    profile: maya',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/profiles/maya/sources/post.md': 'Her post.\n',
+    '.voice-and-tone/evidence/sources.json': JSON.stringify({
+      generated: '2026-09-10T00:00:00.000Z',
+      sources: [{
+        id: 'f001', sha256: 'abc', kind: 'file', from: 's02', origin: 'profiles/maya/sources/post.md',
+        format: 'markdown', locale: 'en', tier: 'script', status: 'used', profile: 'maya',
+        stats: { strings: 1, words: 2, sentences: 1 }, produced: []
+      }]
+    })
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const cfg = loadConfig(kbRoot)
+    const house = gatherAll({ projectRoot: dir, kbRoot, config: cfg, profileName: 'default' })
+    assert.deepEqual(house.files.map((f) => f.rel), ['content/page.md'], "the speaker's indexed post is not house corpus")
+    const maya = gatherAll({ projectRoot: dir, kbRoot, config: cfg, profileName: 'maya' })
+    assert.deepEqual(maya.files.map((f) => f.rel), ['profiles/maya/sources/post.md'])
+    assert.equal(maya.unindexed.length, 0)
   } finally {
     cleanup(dir)
   }

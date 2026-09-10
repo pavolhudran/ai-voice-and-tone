@@ -1,16 +1,16 @@
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, saveConfig, activeProfile } from './lib/config.mjs'
+import { loadConfig, saveConfig, activeProfile, isSpeaker } from './lib/config.mjs'
 import { isBinaryFormat } from './lib/extract.mjs'
-import { loadRegister, resolveRegister, nextRegisterId, expandHome } from './lib/register.mjs'
+import { loadRegister, resolveRegister, nextRegisterId, expandHome, entriesForProfile } from './lib/register.mjs'
 import {
   loadIndex, saveIndex, nextEntryId, upsertEntry, supersedeEntry, diffIndex, statsByLocale,
   recordAlias, originsOf
 } from './lib/sourceindex.mjs'
 import { ingestFile, needsModelTier } from './lib/ingest.mjs'
 import { ingestUrl, snapshotPathFor } from './lib/fetchurl.mjs'
-import { readTextFile, writeTextFile } from './lib/fsx.mjs'
+import { readTextFile, writeTextFile, toPosix, isInside } from './lib/fsx.mjs'
 import { stringifyYaml } from './lib/yaml.mjs'
 import { sha256File } from './lib/hash.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -158,12 +158,24 @@ export function reattributeLocales (index, resolved) {
 }
 
 export function runCheck (ctx) {
-  const register = loadRegister(ctx.config)
+  // A speaker context sees only its own entries. The house context sees
+  // EVERY entry, speakers' included: ingestion is attribution-preserving
+  // (each file carries its entry's profile), so one --ingest from the house
+  // covers every speaker, and nobody has to run it once per person.
+  const register = isSpeaker(ctx.config, ctx.profileName)
+    ? entriesForProfile(loadRegister(ctx.config), ctx.profileName, ctx.config)
+    : loadRegister(ctx.config)
   const resolved = resolveRegister(register, ctx)
   restrictProjectFilesToIngestible(resolved)
   const index = loadIndex(ctx.kbRoot)
   const errors = filterVanished(resolved)
-  const diff = diffIndex(index, resolved, hasher())
+  // The diff sees only the entries in scope, or another speaker's material
+  // reads as "missing" from this one. The full index is what gets saved,
+  // untouched - a scoped ingest must never drop anyone else's entries.
+  const scoped = isSpeaker(ctx.config, ctx.profileName)
+    ? { ...index, sources: (index.sources ?? []).filter((s) => s.profile === ctx.profileName) }
+    : index
+  const diff = diffIndex(scoped, resolved, hasher())
 
   // `known` entries carry a `needsModelTier` verdict recorded at ingest time
   // that does not expire just because nothing about the source changed - a
@@ -179,7 +191,7 @@ export function runCheck (ctx) {
     JSON.parse(JSON.stringify({ sources: index.sources ?? [] })), resolved
   )
 
-  const total = index.sources.length
+  const total = scoped.sources.length
   return {
     ...diff,
     relocale,
@@ -203,7 +215,7 @@ export function runCheck (ctx) {
     // statistics that matter survived in the index, so say so plainly rather
     // than warning - a warning here would push people to commit sources just
     // to silence it, which quietly undoes the decision not to.
-    statsIntact: statsByLocale(index).size > 0 || index.sources.length === 0
+    statsIntact: statsByLocale(scoped).size > 0 || scoped.sources.length === 0
   }
 }
 
@@ -218,12 +230,16 @@ export function runCheck (ctx) {
  */
 async function ingestOne (file, ctx, index, errors) {
   try {
-    return await ingestFile(file, {
+    const entry = await ingestFile(file, {
       kbRoot: ctx.kbRoot,
       now: ctx.now,
       id: nextEntryId(index),
       from: file.from
     })
+    // The speaker this file belongs to, or null for the house - stamped
+    // here so gatherAll can scope the index without consulting the register.
+    entry.profile = file.profile ?? null
+    return entry
   } catch (error) {
     errors.push({
       origin: file.origin,
@@ -425,6 +441,7 @@ export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
     }
 
     const { entry: candidate, body } = fetched
+    candidate.profile = entry.profile ?? null
     const existing = index.sources.find((s) => s.kind === 'url' && s.from === entry.id)
 
     if (existing && existing.sha256 === candidate.sha256) {
@@ -474,7 +491,7 @@ export async function runRefresh (ctx, { only = null, timeoutMs } = {}) {
  * synthetic header line, rather than duplicating its (private)
  * per-item renderer.
  */
-function yamlListItemLines (item) {
+export function yamlListItemLines (item) {
   return stringifyYaml({ __item__: [item] }).split('\n').slice(1, -1)
 }
 
@@ -483,7 +500,7 @@ function yamlListItemLines (item) {
  * next line at column 0, or the position right after the last real content
  * line if the block runs to the end of the file. Blank lines inside or
  * trailing the block never end it by themselves. */
-function endOfYamlBlock (lines, keyIdx) {
+export function endOfYamlBlock (lines, keyIdx) {
   let lastContent = keyIdx
   for (let i = keyIdx + 1; i < lines.length; i++) {
     const line = lines[i]
@@ -558,13 +575,24 @@ export function registerSource (kbRoot, config, entry) {
   writeTextFile(file, out.endsWith('\n') ? out : `${out}\n`)
 }
 
-export function runAdd (ctx, { target, label = null }) {
+export function runAdd (ctx, { target, label = null, profile = null }) {
   const register = loadRegister(ctx.config)
   const id = nextRegisterId(register)
 
-  const entry = isUrl(target)
-    ? { id, kind: 'url', url: String(target), label, retain: 'none' }
-    : { id, kind: 'local', path: path.resolve(expandHome(target)), label }
+  const owner = profile ? { profile } : {}
+  const abs = isUrl(target) ? null : path.resolve(expandHome(target))
+  let entry
+  if (isUrl(target)) {
+    entry = { id, kind: 'url', url: String(target), label, retain: 'none', ...owner }
+  } else if (isInside(ctx.kbRoot, abs) && abs !== path.resolve(ctx.kbRoot)) {
+    // A folder inside the knowledge base - a speaker's own inbox, typically -
+    // is an `inbox` entry with a knowledge-base-relative path. config.yml is
+    // committed; an absolute machine path in it breaks on the next clone.
+    const rel = toPosix(path.relative(ctx.kbRoot, abs)).replace(/\/$/, '')
+    entry = { id, kind: 'inbox', label, path: `${rel}/`, exclude: ['README.md'], ...owner }
+  } else {
+    entry = { id, kind: 'local', path: abs, label, ...owner }
+  }
 
   registerSource(ctx.kbRoot, ctx.config, entry)
   return { register: [...register, entry], entry }
@@ -632,7 +660,8 @@ async function main (argv, { fetchImpl } = {}) {
       '  --only <id|url>      scope --refresh to one registered url source',
       '  --root <dir>         project root (default: cwd)',
       '  --kb <dir>           knowledge base dir',
-      '  --profile <name>     config profile (default: default)',
+      '  --profile <name>     config profile (default: default); a speaker slug scopes --check',
+      '                       and --ingest to that speaker, and attributes --add to it',
       '  --now <iso>          fixed timestamp for reproducible output',
       '  --json               machine-readable summary'
     ])
@@ -652,7 +681,11 @@ async function main (argv, { fetchImpl } = {}) {
   const ctx = contextFor(values, { fetchImpl })
 
   if (values.add) {
-    const { entry } = runAdd(ctx, { target: values.add, label: values.label ?? null })
+    const { entry } = runAdd(ctx, {
+      target: values.add,
+      label: values.label ?? null,
+      profile: isSpeaker(ctx.config, ctx.profileName) ? ctx.profileName : null
+    })
     if (values.json) return writeOut(`${JSON.stringify({ added: entry.id, kind: entry.kind })}\n`)
     // --ingest never processes kind: 'url' (runRefresh does, and only
     // runRefresh); naming the wrong next step here would send a url straight

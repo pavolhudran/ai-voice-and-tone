@@ -15,6 +15,8 @@
   undefined acronyms, skipped heading levels, missing or wrong alt text.
 - **Non-inclusive language** - gendered defaults where neutral wording exists,
   ableist idiom, exclusionary metaphor.
+- **A locked house rule broken** - `locks:` in `config.yml` is the brand
+  team's explicit instruction, and a lock outranks the rule's own confidence.
 
 These override the table above in both directions: they block even when no rule
 in the knowledge base mentions them, and they block even when the rule that does

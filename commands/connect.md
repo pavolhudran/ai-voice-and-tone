@@ -1,6 +1,6 @@
 ---
 description: Register brand material, see what has already been analysed, and ingest what is new
-argument-hint: "[<path|url>] [--ingest] [--refresh [--only <id|url>]] [--forget <entry-id>]"
+argument-hint: "[<path|url>] [--ingest] [--refresh [--only <id|url>]] [--forget <entry-id>] [--profile <slug>]"
 ---
 
 # /voice-and-tone:connect
@@ -52,6 +52,14 @@ are recorded as `estimated` - they can support `assumed` rules but never
 `derived` ones.
 
 `.doc`, `.ppt`, and `.xls` are refused: re-save them as the modern format.
+
+## Speakers
+
+`--profile <slug>` with a path or url attributes that source to the speaker
+(persisted on its register entry); with `--ingest` or a bare check it scopes
+the run to that speaker's sources. Without the flag, `--ingest` analyses
+everything, speakers' material included - each file keeps its own
+attribution, so one house-wide ingest covers every speaker.
 
 ## Invokes
 

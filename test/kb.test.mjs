@@ -6,7 +6,8 @@ import {
   STATES, CONTEXTS, DIALS, HUMOR_ZERO_STATES,
   cellId, parseRuleHeading, parseProseRules, parseTables, parseTableRules,
   parseToneCells, parseVectors, parseEvidence,
-  interpolate, applyHumorGates, resolveCell, loadKb
+  interpolate, applyHumorGates, resolveCell, loadKb,
+  defaultDialsOf, speakerOffsetOf, mergeRules, resolveKb
 } from '../scripts/lib/kb.mjs'
 
 test('vocabularies match the spec exactly', () => {
@@ -325,4 +326,274 @@ test('an escaped pipe at the end of a cell does not swallow the row terminator',
   const [row] = parseTables(md)[0].rows
   assert.equal(row.row.Pattern, 'ab|')
   assert.equal(row.row.Ev, 'e02')
+})
+
+// ---------------------------------------------------------------- speakers
+
+const HOUSE = {
+  'kb/config.yml': [
+    'profiles:',
+    '  default:',
+    '    name: "Acme"',
+    '    primary_locale: en',
+    '    locales: [en]',
+    '  maya:',
+    '    name: "Maya Lind"',
+    'locks: [V2, L20]',
+    ''
+  ].join('\n'),
+  'kb/voice.md': [
+    '### V1 · Plainspoken `confirmed` ev: e1',
+    '',
+    '**Means:** Clarity above all.',
+    '**Rules out:** fluff',
+    '',
+    '### V2 · No pressure `confirmed` ev: e1',
+    '',
+    '**Means:** Never manufacture urgency.',
+    '**Rules out:** countdowns'
+  ].join('\n'),
+  'kb/tone.md': [
+    '**Default dials:** warmth 3 · humor 0 · directness 3 · detail 2 · urgency 2 · formality 2',
+    '',
+    '| State | warmth | humor | directness | detail | urgency | formality |',
+    '|---|---|---|---|---|---|---|',
+    '| curious | 3 | 2 | 3 | 3 | 1 | 2 |',
+    '| focused | 2 | 1 | 4 | 2 | 2 | 2 |',
+    '',
+    '| Context | warmth | humor | directness | detail | urgency | formality |',
+    '|---|---|---|---|---|---|---|',
+    '| social | 1 | 2 | 0 | -2 | 0 | -2 |',
+    '',
+    '### T-social/curious `confirmed` ev: e1',
+    '',
+    '**Dials:** warmth 4 · humor 2 · directness 3 · detail 1 · urgency 1 · formality 0'
+  ].join('\n'),
+  'kb/lexicon.md': [
+    '| ID | Avoid | Prefer | Why | Conf | Ev |',
+    '|---|---|---|---|---|---|',
+    '| L01 | leverage | use | jargon | confirmed | e1 |',
+    '| L20 | game changer | (cut) | hype | confirmed | e1 |'
+  ].join('\n'),
+  'kb/mechanics.md': [
+    '| ID | Rule | Pattern | Conf | Ev |',
+    '|---|---|---|---|---|',
+    '| M01 | sentence case | | confirmed | e1 |'
+  ].join('\n'),
+  'kb/evidence/ledger.md': '### e1 — 2026-08-26 — interview\n\n**Produced:** V1, V2, L01, L20, M01, T-social/curious\n'
+}
+
+const OVERLAY = {
+  'kb/profiles/maya/voice.md': [
+    '### V1 · Builder `confirmed` ev: e1',
+    '',
+    '**Means:** Writes from what she built this week.',
+    '**Rules out:** commentary from the sidelines'
+  ].join('\n'),
+  'kb/profiles/maya/tone.md': [
+    '**Default dials:** warmth 2 · humor 0 · directness 4 · detail 3 · urgency 1 · formality 3',
+    '',
+    '| State | warmth | humor | directness | detail | urgency | formality |',
+    '|---|---|---|---|---|---|---|',
+    '| focused | 1 | 0 | 4 | 3 | 2 | 3 |',
+    '',
+    '### T-social/focused `confirmed` ev: e1',
+    '',
+    '**Dials:** warmth 1 · humor 0 · directness 4 · detail 3 · urgency 1 · formality 3'
+  ].join('\n'),
+  'kb/profiles/maya/lexicon.md': [
+    '| ID | Avoid | Prefer | Why | Conf | Ev |',
+    '|---|---|---|---|---|---|',
+    '| L01 | leverage | lean on | her word | confirmed | e1 |',
+    '| L30 | excited to announce | (cut) | hype | confirmed | e1 |'
+  ].join('\n')
+}
+
+test('defaultDialsOf reads the dials line and returns null without one', () => {
+  assert.deepEqual(defaultDialsOf(HOUSE['kb/tone.md']),
+    { warmth: 3, humor: 0, directness: 3, detail: 2, urgency: 2, formality: 2 })
+  assert.equal(defaultDialsOf('# Tone\n'), null)
+})
+
+test('speakerOffsetOf is overlay defaults minus house defaults, per dial, and null without overlay defaults', () => {
+  assert.deepEqual(speakerOffsetOf(HOUSE['kb/tone.md'], OVERLAY['kb/profiles/maya/tone.md']),
+    { warmth: -1, humor: 0, directness: 1, detail: 1, urgency: -1, formality: 1 })
+  assert.equal(speakerOffsetOf(HOUSE['kb/tone.md'], '# Tone\n'), null)
+  assert.deepEqual(speakerOffsetOf('# Tone\n', OVERLAY['kb/profiles/maya/tone.md']),
+    { warmth: 0, humor: 0, directness: 2, detail: 1, urgency: -1, formality: 1 },
+    'a house with no dials line is treated as the neutral 2 on every dial')
+})
+
+test('interpolate applies a speaker offset as a third term, clamps, and still zeroes humor', () => {
+  const state = { warmth: 3, humor: 2, directness: 3, detail: 3, urgency: 1, formality: 2 }
+  const context = { warmth: 1, humor: 2, directness: 0, detail: -2, urgency: 0, formality: -2 }
+  const offset = { warmth: -1, humor: 3, directness: 1, detail: 1, urgency: -1, formality: 1 }
+  assert.deepEqual(interpolate(state, context, offset),
+    { warmth: 3, humor: 0, directness: 4, detail: 2, urgency: 0, formality: 1 })
+  assert.deepEqual(interpolate(state, context), interpolate(state, context, {}),
+    'an absent offset is the identity, so every existing caller is unchanged')
+})
+
+test('resolveCell passes the speaker offset through to interpolation only', () => {
+  const vectors = {
+    states: { curious: { warmth: 3, humor: 2, directness: 3, detail: 3, urgency: 1, formality: 2 } },
+    contexts: { social: { warmth: 1, humor: 2, directness: 0, detail: -2, urgency: 0, formality: -2 } }
+  }
+  const offset = { warmth: -1, humor: 0, directness: 1, detail: 1, urgency: -1, formality: 1 }
+  const computed = resolveCell('social', 'curious', { cells: [], vectors, speakerOffset: offset })
+  assert.equal(computed.source, 'interpolated')
+  assert.equal(computed.dials.warmth, 3)
+  assert.equal(computed.dials.directness, 4)
+  const authored = resolveCell('social', 'curious', {
+    cells: [{ id: 'T-social/curious', context: 'social', state: 'curious', confidence: 'confirmed', dials: { warmth: 4, humor: 2, directness: 3, detail: 1, urgency: 1, formality: 0 } }],
+    vectors,
+    speakerOffset: offset
+  })
+  assert.equal(authored.dials.warmth, 4, 'an authored cell is never shifted')
+})
+
+test('mergeRules: additions add, same-id overrides replace, locked ids are refused', () => {
+  const house = [
+    { id: 'L01', file: 'lexicon', kind: 'table', line: 3 },
+    { id: 'L20', file: 'lexicon', kind: 'table', line: 4 }
+  ]
+  const overlay = [
+    { id: 'L01', file: 'lexicon', kind: 'table', line: 3 },
+    { id: 'L20', file: 'lexicon', kind: 'table', line: 4 },
+    { id: 'L30', file: 'lexicon', kind: 'table', line: 5 }
+  ]
+  const { rules, overrides, lockViolations } = mergeRules(house, overlay, ['L20'])
+  assert.deepEqual(rules.map((r) => [r.id, r.origin, r.locked]),
+    [['L20', 'house', true], ['L01', 'speaker', false], ['L30', 'speaker', false]])
+  assert.equal(rules.find((r) => r.id === 'L01').overrides.line, 3)
+  assert.deepEqual(overrides.map((r) => r.id), ['L01'])
+  assert.deepEqual(lockViolations.map((v) => v.id), ['L20'])
+})
+
+test('resolveKb with no overlay is the house, tagged, with role house', () => {
+  const dir = makeTmpProject(HOUSE)
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'))
+    assert.equal(kb.role, 'house')
+    assert.equal(kb.speaker, null)
+    assert.deepEqual(kb.locks, ['V2', 'L20'])
+    assert.ok(kb.rules.every((r) => r.origin === 'house'))
+    assert.equal(kb.rules.find((r) => r.id === 'V2').locked, true)
+    assert.equal(kb.rules.find((r) => r.id === 'V1').locked, false)
+    assert.equal(kb.rules.find((r) => r.id === 'V1').path, 'voice.md')
+    assert.deepEqual(kb.overrides, [])
+    assert.deepEqual(kb.lockViolations, [])
+    assert.equal(kb.speakerOffset, null)
+    assert.deepEqual(kb.rules.map((r) => r.id), loadKb(path.join(dir, 'kb')).rules.map((r) => r.id), 'same rules, same order as loadKb')
+    const unknown = resolveKb(path.join(dir, 'kb'), 'ghost')
+    assert.equal(unknown.role, 'house', 'an undeclared profile resolves to the house')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('resolveKb merges an overlay: voice replaces as a set, locked voice is appended, others merge by id', () => {
+  const dir = makeTmpProject({ ...HOUSE, ...OVERLAY })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.equal(kb.role, 'speaker')
+    assert.deepEqual(kb.speaker, { slug: 'maya', name: 'Maya Lind' })
+    const voice = kb.rules.filter((r) => r.id.startsWith('V'))
+    assert.deepEqual(voice.map((r) => [r.id, r.name, r.origin, r.locked]),
+      [['V1', 'Builder', 'speaker', false], ['V2', 'No pressure', 'house', true]],
+      "the house's unlocked V1 is gone, its locked V2 follows the speaker's own")
+    const l01 = kb.rules.find((r) => r.id === 'L01')
+    assert.equal(l01.origin, 'speaker')
+    assert.equal(l01.cells.Prefer, 'lean on')
+    assert.equal(l01.overrides.cells.Prefer, 'use')
+    assert.equal(l01.path, path.posix.join('profiles', 'maya', 'lexicon.md'))
+    assert.equal(kb.rules.find((r) => r.id === 'L30').origin, 'speaker')
+    assert.equal(kb.rules.find((r) => r.id === 'M01').origin, 'house', 'inherited untouched')
+    assert.equal(kb.rules.filter((r) => r.id === 'L20').length, 1)
+    assert.equal(kb.rules.find((r) => r.id === 'L20').origin, 'house', 'the locked house row wins')
+    assert.deepEqual(kb.overrides.map((r) => r.id), ['L01'])
+    assert.deepEqual(kb.lockViolations.map((v) => v.id), [])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('resolveKb: cells are the overlay only, vectors merge by row, offset is derived, evidence is the house ledger', () => {
+  const dir = makeTmpProject({ ...HOUSE, ...OVERLAY })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.deepEqual(kb.cells.map((c) => c.id), ['T-social/focused'], 'house authored cells are not inherited')
+    assert.equal(kb.vectors.states.curious.warmth, 3, 'inherited row')
+    assert.equal(kb.vectors.states.focused.warmth, 1, 'overridden row')
+    assert.equal(kb.vectors.contexts.social.detail, -2)
+    assert.deepEqual(kb.speakerOffset, { warmth: -1, humor: 0, directness: 1, detail: 1, urgency: -1, formality: 1 })
+    assert.equal(kb.evidence.length, 1)
+    assert.equal(kb.config.profiles.maya.name, 'Maya Lind', 'config is the house config, not a default read from the overlay dir')
+    assert.equal(kb.present.voice, true, 'presence is the house presence')
+    assert.equal(kb.houseRoot, path.join(dir, 'kb'))
+    assert.equal(kb.overlayRoot, path.join(dir, 'kb', 'profiles', 'maya'))
+    assert.equal(kb.tone, OVERLAY['kb/profiles/maya/tone.md'], "kb.tone is the overlay text, so default dials are the speaker's")
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('resolveKb records a lock violation and keeps the house rule', () => {
+  const dir = makeTmpProject({
+    ...HOUSE,
+    'kb/profiles/maya/lexicon.md': [
+      '| ID | Avoid | Prefer | Why | Conf | Ev |',
+      '|---|---|---|---|---|---|',
+      '| L20 | game changer | fine actually | she likes it | confirmed | e1 |'
+    ].join('\n')
+  })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.deepEqual(kb.lockViolations.map((v) => [v.id, v.file, v.line]),
+      [['L20', path.posix.join('profiles', 'maya', 'lexicon.md'), 3]])
+    assert.equal(kb.rules.find((r) => r.id === 'L20').cells.Prefer, '(cut)')
+    assert.equal(kb.speakerOffset, null, 'no overlay tone.md means no dials line means no offset')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('resolveKb: an overlay with no V rule inherits the whole house voice', () => {
+  const dir = makeTmpProject({ ...HOUSE, 'kb/profiles/maya/lexicon.md': '# Lexicon\n' })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.deepEqual(kb.rules.filter((r) => r.id.startsWith('V')).map((r) => [r.id, r.origin]), [['V1', 'house'], ['V2', 'house']])
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a locked house voice rule is a guardrail, never a refused override: speaker ids are speaker-local for voice', () => {
+  // Voice replaces as a set, so a speaker numbers its own characteristics
+  // from V1 and a collision with a locked house V id is not an override.
+  // Found on a real knowledge base: locking V2 made every speaker's own V2
+  // a lock violation and dropped it from the resolved set.
+  const dir = makeTmpProject({
+    ...HOUSE,
+    'kb/profiles/maya/voice.md': [
+      '### V1 · Builder `confirmed` ev: e1',
+      '',
+      '**Means:** Writes from what she built.',
+      '**Rules out:** commentary',
+      '',
+      '### V2 · Numbers first `confirmed` ev: e1',
+      '',
+      '**Means:** The metric leads.',
+      '**Rules out:** hedging'
+    ].join('\n')
+  })
+  try {
+    const kb = resolveKb(path.join(dir, 'kb'), 'maya')
+    assert.deepEqual(kb.lockViolations, [], 'no violation for a voice id')
+    assert.deepEqual(kb.rules.filter((r) => r.id.startsWith('V')).map((r) => [r.id, r.name, r.origin, r.locked]),
+      [['V1', 'Builder', 'speaker', false], ['V2', 'Numbers first', 'speaker', false], ['V2', 'No pressure', 'house', true]],
+      "the speaker keeps her V2 and the house's locked V2 follows as a guardrail")
+  } finally {
+    cleanup(dir)
+  }
 })

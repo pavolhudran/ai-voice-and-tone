@@ -4,3 +4,7 @@
 # Dropped-in source material. Inputs, not artifacts - never committed.
 # The analysis survives in evidence/ - these files need not.
 sources/
+
+# Each speaker's own inbox, for the same reason. Speaker cards
+# (profiles/*/CONTEXT.md) are artifacts and stay committed.
+profiles/*/sources/

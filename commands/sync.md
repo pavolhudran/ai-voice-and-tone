@@ -1,6 +1,6 @@
 ---
 description: Validate the knowledge base and recompile CONTEXT.md
-argument-hint: "[--bump major|minor|patch]"
+argument-hint: "[--bump major|minor|patch] [--profile <slug>]"
 ---
 
 # /voice-and-tone:sync
@@ -24,6 +24,14 @@ change belongs in the source file the card compiles from.
 
 Exits without recompiling if validation finds errors - a card compiled from a
 broken knowledge base is worse than a stale one.
+
+## Speakers
+
+Without `--profile`, validates and compiles the house and every declared
+speaker (`profiles/<slug>/CONTEXT.md` each). `--profile <slug>` limits the
+recompile to one speaker. Version bumps: **major** when house voice
+characteristics or `locks:` change; **minor** when a speaker is added or
+removed, or cells or rules are added anywhere; **patch** for wording.
 
 ## Invokes
 

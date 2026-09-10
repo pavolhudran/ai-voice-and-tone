@@ -26,11 +26,15 @@ do not ask for it early, and do not try to infer it from what you do have.
 - The draft, pasted into the prompt as plain text - never a file path, and
   never anything from `<KB>/.drafts/`.
 - The paths to `<KB>/CONTEXT.md` and `<KB>/voice.md`, to `Read`.
+- When `<KB>/config.yml` declares more than one profile: the list of speaker
+  names and the path `<KB>/profiles/<slug>/voice.md` for each, alongside the
+  house's `<KB>/voice.md`. Nothing else from any overlay.
 - The ten contexts and the eight reader states, listed below. They are fixed
   constants of the plugin, so you need no knowledge-base file to learn them.
 
 **Second turn** (only after your Task 1 guess is already recorded):
-- The draft's actual cell - context, state, dials.
+- The draft's actual cell - context, state, dials - and, with speakers, the
+  actual speaker and the resolved card `<KB>/profiles/<slug>/CONTEXT.md`.
 - The paths to `<KB>/tone.md`, `<KB>/lexicon.md`, `<KB>/mechanics.md`, and the
   relevant `channels/` and `locales/` files, to `Read`.
 
@@ -82,6 +86,10 @@ Read the draft alone. Then answer, picking from the two lists above:
 
 - Which of the ten contexts does this read as?
 - Which of the eight reader states does it read as written for?
+- When you were handed speaker names: **which speaker wrote this?** Name one,
+  or the house. A wrong guess is a finding - the draft is not distinguishably
+  that speaker, and several speakers who all sound like the house is the
+  failure mode a multi-speaker knowledge base exists to prevent.
 - How confident are you, high or low?
 
 State your guess and end your reply there. Do not compare it to the actual cell,

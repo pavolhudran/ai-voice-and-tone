@@ -1,8 +1,8 @@
 import path from 'node:path'
 import { walk, readTextFile, toPosix } from './fsx.mjs'
 import { extractStrings, extractHeadings, formatFor, isBinaryFormat } from './extract.mjs'
-import { activeProfile, localeOf } from './config.mjs'
-import { loadRegister, resolveRegister } from './register.mjs'
+import { activeProfile, localeOf, isSpeaker } from './config.mjs'
+import { loadRegister, resolveRegister, entriesForProfile } from './register.mjs'
 import { loadIndex, statsByLocale, STATS_REQUIRED, originsOf } from './sourceindex.mjs'
 
 /**
@@ -142,14 +142,20 @@ export function byLocale (corpus) {
  * reader to check `scan.include`, a key this path never even reads.
  */
 export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default', unreadable = [] }) {
-  const register = loadRegister(config)
+  const register = entriesForProfile(loadRegister(config), profileName, config)
   const resolved = resolveRegister(register, { projectRoot, kbRoot, config, profileName })
   const index = loadIndex(kbRoot)
+  // Index entries are scoped the same way the register is: by the profile
+  // stamped on them at ingest. An entry with no profile is house material,
+  // so a knowledge base with no speakers reads every entry, as before.
+  const speaking = isSpeaker(config, profileName)
+  const indexSources = (index.sources ?? []).filter((s) =>
+    (speaking ? s.profile === profileName : (s.profile ?? null) === null))
   // Aliases count as indexed. A byte-identical duplicate folds into one entry
   // (see recordAlias), and without its extra paths here the fold would read as
   // "registered but never ingested" on every scan, forever - a gap no command
   // could close, because the bytes were already analysed.
-  const indexedOrigins = new Set((index.sources ?? []).flatMap(originsOf))
+  const indexedOrigins = new Set(indexSources.flatMap(originsOf))
 
   const files = []
   const skipped = []
@@ -223,7 +229,7 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
   // sources.json written before that fix - or hand-edited - can still hold
   // one, and it must not double the fingerprint forever just because it is
   // sitting there.
-  const indexed = (index.sources ?? []).filter((s) =>
+  const indexed = indexSources.filter((s) =>
     s.stats && STATS_REQUIRED.has(s.status) && !liveOrigins.has(s.origin))
   for (const source of indexed) {
     files.push({
@@ -248,7 +254,7 @@ export function gatherAll ({ projectRoot, kbRoot, config, profileName = 'default
     unindexed,
     indexStats: statsByLocale({
       generated: index.generated,
-      sources: (index.sources ?? []).filter((s) => !liveOrigins.has(s.origin))
+      sources: indexSources.filter((s) => !liveOrigins.has(s.origin))
     }),
     missing: indexed.filter((s) => s.status === 'missing').length,
     estimatedLocales: new Set(indexed.filter((s) => s.fidelity === 'estimated').map((s) => s.locale ?? 'en'))

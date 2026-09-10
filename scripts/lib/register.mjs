@@ -3,7 +3,7 @@ import os from 'node:os'
 import { existsSync, statSync } from 'node:fs'
 import { walk, toPosix, isInside } from './fsx.mjs'
 import { formatFor } from './extract.mjs'
-import { activeProfile, localeOf } from './config.mjs'
+import { activeProfile, localeOf, isSpeaker } from './config.mjs'
 
 /**
  * Where to look for brand material.
@@ -49,6 +49,20 @@ export function nextRegisterId (register) {
     if (n > highest) highest = n
   }
   return `s${String(highest + 1).padStart(2, '0')}`
+}
+
+/**
+ * Spec 2026-09-10 §3: `sources[].profile` is optional, absent means house.
+ * The house corpus is every unattributed entry; a speaker's corpus is
+ * exactly the entries attributed to it. An undeclared profile name is the
+ * house, the same fallback activeProfile takes.
+ */
+export function entriesForProfile (register, profileName, config) {
+  const speaking = isSpeaker(config, profileName)
+  return (register ?? []).filter((entry) => {
+    const owner = entry.profile ?? null
+    return speaking ? owner === profileName : owner === null
+  })
 }
 
 function rootAndGlobs (entry, { projectRoot, kbRoot }) {
@@ -98,7 +112,11 @@ function rootAndGlobs (entry, { projectRoot, kbRoot }) {
 
 export function resolveEntry (entry, ctx) {
   const { config, profileName = 'default' } = ctx
-  const profile = activeProfile(config, profileName)
+  // An entry attributed to a speaker is read with THAT speaker's locales,
+  // whatever context the caller is in: a house-wide --ingest must not file
+  // a German-speaking speaker's posts as English.
+  const owner = entry.profile ?? null
+  const profile = activeProfile(config, owner ?? profileName)
   const primary = profile.primary_locale ?? 'en'
   const locales = profile.locales ?? [primary]
 
@@ -170,7 +188,11 @@ export function resolveEntry (entry, ctx) {
       // has one to read. Before this, every file source's `label` was
       // undefined regardless of what the entry declared - only a `url`
       // source (which never goes through this loop) kept its label.
-      label: entry.label ?? null
+      label: entry.label ?? null,
+      // Which speaker this file belongs to, or null for the house. Stamped
+      // onto the index entry at ingest so the attribution survives the
+      // register entry being edited or removed.
+      profile: owner
     })
   }
 

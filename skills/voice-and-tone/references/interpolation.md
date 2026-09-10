@@ -13,6 +13,20 @@ cell(context, state) = clamp(state_vector[state] + context_offset[context], 0, 4
 Applied to each of the six dials in turn. An authored cell overrides the
 computation completely - it is not blended.
 
+For a speaker (a profile with an overlay under `<KB>/profiles/<slug>/`), one
+more term:
+
+```
+speaker_offset       = overlay default dials - house default dials   (per dial)
+cell(context, state) = clamp(state_vector[state] + context_offset[context] + speaker_offset, 0, 4)
+```
+
+then gates 1 and 2 below, unchanged, in that order. The offset is derived from
+the two `**Default dials:**` lines, never authored, so one line in the overlay
+shifts the whole matrix. An authored speaker cell is never shifted.
+`speakerOffsetOf` and `interpolate` in `scripts/lib/kb.mjs` are the reference
+implementation.
+
 ## The dials
 
 Six, integer 0-4, displayed as words rather than numbers when talking to the user:

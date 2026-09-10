@@ -85,11 +85,29 @@ Inventory (from 214 files, 18,402 words)
 Offer `/voice-and-tone:review <file>` on the worst file, not on all of them. An
 audit that ends in a 300-item list ends in nothing.
 
+## Speakers
+
+House audit only, and only when `config.yml` declares speakers. One row each.
+
+```
+Speakers (3 declared, locks: V2, L20)
+
+  maya       overrides 2   locks broken 0   drift ok     cells 3/80   last draft 4d
+  jonas      overrides 0   locks broken 1   drift n/a    cells 0/80   last draft never
+  helpdesk   overrides 1   locks broken 0   drift FLAG   cells 1/80   last draft 12d
+```
+
+A lock broken is a validation error and belongs to `:sync`; it is listed here
+so the person running the audit sees it beside the speaker it concerns. Each
+override is a candidate for the third closing question.
+
 ## Closing
 
-Two questions, always, and nothing else:
+Two questions, always - three when there are speakers - and nothing else:
 
 1. Which overridden rules do we enforce, and which do we retire?
 2. Which disputed entries are channel splits, and which are drift?
+3. For each speaker override: is it that speaker's own, or a house rule
+   every speaker should carry?
 
-Both write `decision` evidence entries. Both are the point of running the audit.
+All write `decision` evidence entries. All are the point of running the audit.

@@ -1,0 +1,82 @@
++======================================================================+
+| VOICE & TONE : STATE                  Acme | default | kb 0.3.0 | en |
++======================================================================+
+
+ PIPELINE
+   scan  ingst  meas  draft  intvw  canon
+   [##]  [##]   [##]  [##]   [##]   [##]
+   at: canonize
+
+ INTEGRITY
+   validate  0 errors  0 warnings
+   card  current (0d)
+   scan  0d old, 1 of 1 files changed
+         new files not detected - use --refresh
+
+ TONE MATRIX          1 of 80 authored (1%)
+                    del cur foc unc con fru anx dis
+   marketing-page   .   .   .   .   .   .   .   .     0/8
+   product-ui       .   .   .   .   .   .   .   .     0/8
+   system-error     .   .   .   .   .   .   .   .     0/8
+   help-doc         .   .   .   .   .   .   .   .     0/8
+   email            .   .   .   .   .   .   .   .     0/8
+   social           .   #   .   .   .   .   .   .     1/8
+   legal-policy     .   .   .   .   .   .   .   .     0/8
+   notification     .   .   .   .   .   .   .   .     0/8
+   support-reply    .   .   .   .   .   .   .   .     0/8
+   release-notes    .   .   .   .   .   .   .   .     0/8
+                                        ^^^^^^^^^^^
+                                        humor forced to 0
+
+   # authored   . computed
+   a computed cell is never humorous, whatever the dials say
+   ! corpus traffic, no authored cells
+
+ RULES  6 total
+   confirmed  ####################  6   blocks in review
+   derived                          0   warns
+   assumed                          0   nit
+   disputed                         0   never enforced
+
+ DRIFT  threshold 25%
+   en   baseline 2026-09-10
+         mean sentence     2.67 -> 2.67  0%          [                ]
+         median sentence   3 -> 3        0%          [                ]
+         mean word         4.13 -> 4.13  0%          [                ]
+         exclamations      0 -> 0        0%          [                ]
+         questions         0 -> 0        0%          [                ]
+         emoji /1k         0 -> 0        0%          [                ]
+         contractions /1k  0 -> 0        0%          [                ]
+         reading grade     1.68 -> 1.68  0%          [                ]
+         passive           0 -> 0        0%          [                ]
+
+ SOURCES  1 reg | 0 analysed | 0 missing | 0 not ingested
+   freshness not checked (read-only) - run --refresh
+
+ EVIDENCE  1 entries
+   source 0  corpus 0  interview 1  correction 0  decision 0
+   conflicts open   0
+   drafts pending   0
+
+ SETTINGS
+   profile        default  "Acme"
+   locales        en (primary en)
+   thresholds     corroboration 2  samples 5
+                  stale_months 9  drift_pct 25
+   runtime        node detected
+   vendor         pdfjs-dist 4.10.38  officeparser 7.8.0
+   register       1 entries: 1 project
+   kb path        <kb path>
+
+ MISSING  2 gap(s), highest leverage first
+   1 [. ] locale en has no locale pack
+          register and typography fall back to the primary locale
+          -> /voice-and-tone:localize en
+   2 [! ] 1 of 1 scanned file(s) changed since the manifest
+          the corpus numbers on this screen are behind the files on disk
+          -> /voice-and-tone:status --refresh
+
++----------------------------------------------------------------------+
+| 1 coverage  2 drift  3 rules  4 sources  5 evidence                  |
+| 6 settings  7 missing  8 all                                  q done |
++----------------------------------------------------------------------+

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
@@ -263,6 +264,39 @@ test('a locale named __proto__ is counted as a locale, not written onto Object.p
     )
     assert.equal(Object.getPrototypeOf(manifest.byLocale), Object.prototype)
     assert.equal(JSON.parse(JSON.stringify(manifest)).byLocale.__proto__.files, 1)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--profile <speaker> writes the manifest under the overlay, never the house', () => {
+  const dir = makeTmpProject({
+    'content/a.md': '# A\n\nHouse copy.\n',
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include: ["content/**/*.md"]',
+      '    exclude: []',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/profiles/maya/voice.md': '# Voice\n'
+  })
+  try {
+    execFileSync(process.execPath, [SCAN_SCRIPT, '--root', dir, '--profile', 'maya', '--now', '2026-09-10T00:00:00.000Z'])
+    const overlay = path.join(dir, '.voice-and-tone', 'profiles', 'maya', 'evidence', 'manifest.json')
+    assert.ok(existsSync(overlay))
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', 'evidence', 'manifest.json')))
+    const manifest = JSON.parse(readFileSync(overlay, 'utf8'))
+    assert.equal(manifest.profile, 'maya')
+    assert.equal(manifest.totals.files, 0, 'the project entry is house material, so the speaker corpus is empty')
   } finally {
     cleanup(dir)
   }

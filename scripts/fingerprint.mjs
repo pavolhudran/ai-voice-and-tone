@@ -2,7 +2,7 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { readTextFile, writeTextFile, toPosix, displayPath} from './lib/fsx.mjs'
-import { loadConfig, kbRootFor } from './lib/config.mjs'
+import { loadConfig, kbRootFor, artifactRoot } from './lib/config.mjs'
 import { gatherAll } from './lib/corpus.mjs'
 import { statsFor, mergeStats, fingerprintFromStats } from './lib/metrics.mjs'
 import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './lib/cli.mjs'
@@ -79,7 +79,11 @@ function main (argv) {
     generated, source, profileName: values.profile ?? 'default', kbRoot
   })
 
-  const out = values.out ? path.resolve(values.out) : path.join(kbRoot, 'evidence', 'fingerprint.json')
+  // A declared speaker's fingerprint - and its own baseline - live under its
+  // overlay (spec 2026-09-10 §4.5): drift is per speaker.
+  const out = values.out
+    ? path.resolve(values.out)
+    : path.join(artifactRoot(kbRoot, values.profile ?? 'default', config), 'evidence', 'fingerprint.json')
 
   // Preserve an existing baseline unless explicitly re-set.
   if (existsSync(out)) {

@@ -1,6 +1,6 @@
 ---
 description: Show the state of the voice knowledge base - coverage, drift, sources, settings, and what is missing
-argument-hint: "[--panel <name>|all] [--refresh] [--artifact] [--locale <code>] [--width <n>] [--json]"
+argument-hint: "[--panel <name>|all] [--refresh] [--artifact] [--locale <code>] [--width <n>] [--json] [--profile <slug>]"
 ---
 
 # /voice-and-tone:status
@@ -25,6 +25,9 @@ something that silently corrects itself every time you look.
 /voice-and-tone:status --panel evidence
 /voice-and-tone:status --panel settings
 /voice-and-tone:status --panel missing
+/voice-and-tone:status --panel speakers
+/voice-and-tone:status --profile maya
+/voice-and-tone:status --profile maya --artifact
 /voice-and-tone:status --refresh
 /voice-and-tone:status --width 100
 /voice-and-tone:status --artifact
@@ -44,6 +47,7 @@ something that silently corrects itself every time you look.
 | `evidence` | entries by type, open conflicts, drafts waiting on `:learn` |
 | `settings` | profiles, locales, thresholds, runtime, vendored extractor versions, the register |
 | `missing` | every gap, ranked, each with the command that closes it |
+| `speakers` | one row per declared speaker: voice rules, authored cells, overrides, locks broken, drift, drafts (house view only) |
 
 ## `--artifact`
 

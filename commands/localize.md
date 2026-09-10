@@ -1,6 +1,6 @@
 ---
 description: Apply a locale pack's conventions and register to existing copy
-argument-hint: "<text or file path> --locale <code>"
+argument-hint: "<text or file path> --locale <code> [--profile <slug>]"
 ---
 
 # /voice-and-tone:localize
@@ -22,6 +22,10 @@ asks rather than guessing.
 
 If no pack exists for the locale, offers to create one: typography is seeded
 mechanically, brand decisions are interviewed.
+
+## Speakers
+
+`--profile <slug>` applies the speaker's own locale pack where it overrides the house's.
 
 ## Invokes
 

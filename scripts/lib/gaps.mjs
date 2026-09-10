@@ -38,7 +38,34 @@ const TRAFFIC_FLOOR = 500
  *      by scan.
  *   5. The existence of a disputed rule as such. G10 fires because it is
  *      UNRESOLVED, never because conflict is a fault. Conflict is information.
+ *
+ * Three more since speaker profiles (spec 2026-09-10 §9.3), for the same
+ * reasons as 2 and 3 above:
+ *
+ *   6. A speaker whose every cell is computed. Same as the house.
+ *   7. A speaker with zero overrides. Inheriting everything is the expected
+ *      starting state, not a hole.
+ *   8. A speaker whose card has never been compiled (cardStale null). G17
+ *      already owns "this speaker is not finished"; a second gap for the
+ *      missing card would be the same remedy twice.
  */
+
+/**
+ * Run a per-speaker predicate over state.speakers and return one gap per hit,
+ * or null. state.speakers holds every declared speaker in the house view and
+ * only the current one in a speaker view, so the same detector serves both;
+ * the slug prefix is the house view's way of saying whose gap it is.
+ */
+function perSpeaker (state, predicate) {
+  const hits = []
+  for (const s of state.speakers ?? []) {
+    const gap = predicate(s)
+    if (!gap) continue
+    hits.push(state.kb?.role === 'house' ? { ...gap, what: `[${s.slug}] ${gap.what}` } : gap)
+  }
+  return hits.length ? hits : null
+}
+
 export const DETECTORS = [
   {
     id: 'G01',
@@ -260,6 +287,70 @@ export const DETECTORS = [
           fix: null
         }
       : null
+  },
+  // --- speakers (spec 2026-09-10 §9.3) -------------------------------------
+  {
+    id: 'G17',
+    severity: 'blocker',
+    leverage: 4,
+    detect: (state) => perSpeaker(state, (s) => (s.voiceRules === 0 || !s.hasDefaultDials)
+      ? {
+          what: `speaker ${s.slug} has ${s.voiceRules === 0 ? 'no voice characteristic' : 'no default dials line'}`,
+          why: 'until it states a voice, it is the house in a costume',
+          fix: `/voice-and-tone:speaker add ${s.slug}`
+        }
+      : null)
+  },
+  {
+    id: 'G18',
+    severity: 'blocker',
+    leverage: 3,
+    detect: (state) => perSpeaker(state, (s) => !s.driftBaseline
+      ? {
+          what: `speaker ${s.slug} has no drift baseline`,
+          why: 'drift can never be measured for this speaker',
+          fix: `node scripts/fingerprint.mjs --set-baseline --profile ${s.slug}`
+        }
+      : null)
+  },
+  {
+    id: 'G19',
+    severity: 'blocker',
+    leverage: 3,
+    detect: (state) => perSpeaker(state, (s) => s.sourcesNeverIngested > 0
+      ? {
+          what: `speaker ${s.slug}: ${s.sourcesNeverIngested} registered source(s) never ingested`,
+          why: 'their words are in no fingerprint and behind no rule',
+          fix: `/voice-and-tone:connect --ingest --profile ${s.slug}`
+        }
+      : null)
+  },
+  {
+    id: 'G20',
+    severity: 'warning',
+    leverage: 3,
+    detect: (state) => perSpeaker(state, (s) => s.cardStale?.length
+      ? {
+          what: `speaker ${s.slug}: card is behind ${s.cardStale.join(', ')}`,
+          why: 'the speaker card no longer matches the files it compiles from',
+          fix: `/voice-and-tone:sync --profile ${s.slug}`
+        }
+      : null)
+  },
+  {
+    id: 'G21',
+    severity: 'warning',
+    leverage: 3,
+    // House level only, once: a house with speakers and no locks has
+    // guardrails every speaker can override, which is rarely what the brand
+    // team believes they have.
+    detect: (state) => state.kb?.role === 'house' && (state.speakers ?? []).length > 0 && (state.locks?.declared ?? []).length === 0
+      ? {
+          what: `${state.speakers.length} speaker(s) declared and no locks`,
+          why: 'every house guardrail is overridable by every speaker, which is rarely what the brand team believes',
+          fix: 'add locks: [...] to config.yml, then /voice-and-tone:sync'
+        }
+      : null
   }
 ]
 
@@ -268,7 +359,10 @@ export function detectGaps (state) {
   for (const detector of DETECTORS) {
     const hit = detector.detect(state)
     if (!hit) continue
-    found.push({ id: detector.id, severity: detector.severity, leverage: detector.leverage, ...hit })
+    // A per-speaker detector returns one gap per speaker it fired on.
+    for (const gap of Array.isArray(hit) ? hit : [hit]) {
+      found.push({ id: detector.id, severity: detector.severity, leverage: detector.leverage, ...gap })
+    }
     // G01 means there is nothing to observe. Every other detector would then
     // report on an empty state object, producing a wall of noise whose single
     // real remedy is already on screen.

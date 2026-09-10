@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, statSync, readFileSync, existsSync, cpSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
@@ -187,4 +187,62 @@ test('--locale scopes drift and corpus to one locale', () => {
 test('status.mjs never spawns a process', () => {
   const source = readFileSync(STATUS, 'utf8')
   assert.ok(!/child_process|execSync|execFileSync|spawnSync/.test(source))
+})
+
+// --- speakers (spec 2026-09-10 §9) -----------------------------------------
+
+const FIXTURE = path.join(root, 'test', 'fixtures', 'house-with-speakers')
+
+function fixtureProject () {
+  const dir = makeTmpProject({ 'content/a.md': '# A\n\nWe leverage it.\n' })
+  cpSync(FIXTURE, path.join(dir, '.voice-and-tone'), { recursive: true })
+  return dir
+}
+
+test('--profile <speaker> renders that speaker, and --artifact lands on a per-speaker path', () => {
+  const dir = fixtureProject()
+  try {
+    const screen = run(dir, ['--profile', 'maya'])
+    assert.match(screen, /maya \(speaker\)/)
+    run(dir, ['--profile', 'maya', '--artifact'])
+    assert.ok(existsSync(path.join(dir, '.voice-and-tone', '.drafts', 'status-maya.html')))
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', '.drafts', 'status.html')))
+    run(dir, ['--artifact'])
+    assert.ok(existsSync(path.join(dir, '.voice-and-tone', '.drafts', 'status.html')))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--refresh --profile <speaker> writes only under the overlay', () => {
+  const dir = fixtureProject()
+  try {
+    run(dir, ['--profile', 'maya', '--refresh'])
+    assert.ok(existsSync(path.join(dir, '.voice-and-tone', 'profiles', 'maya', 'evidence', 'manifest.json')))
+    assert.ok(existsSync(path.join(dir, '.voice-and-tone', 'profiles', 'maya', 'evidence', 'fingerprint.json')))
+    assert.ok(!existsSync(path.join(dir, '.voice-and-tone', 'evidence', 'manifest.json')))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--json in the house view carries the speakers block and G17 for the speaker with no voice', () => {
+  const dir = fixtureProject()
+  try {
+    const state = JSON.parse(run(dir, ['--json']))
+    assert.equal(state.kb.role, 'house')
+    assert.deepEqual(state.speakers.map((s) => s.slug), ['jonas', 'maya'])
+    assert.ok(state.gaps.some((g) => g.id === 'G17' && g.what.startsWith('[jonas]')))
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('--panel speakers is accepted', () => {
+  const dir = fixtureProject()
+  try {
+    assert.match(run(dir, ['--panel', 'speakers']), /SPEAKERS  2 declared/)
+  } finally {
+    cleanup(dir)
+  }
 })

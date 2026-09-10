@@ -14,8 +14,12 @@ function healthyState (overrides = {}) {
       brand: 'Acme',
       profile: 'default',
       locales: ['en'],
-      primaryLocale: 'en'
+      primaryLocale: 'en',
+      role: 'house',
+      speaker: null
     },
+    locks: { declared: [], violated: [] },
+    speakers: [],
     stage: {
       at: 'canonize',
       reached: { scan: true, ingest: true, measure: true, draft: true, interview: true, canonize: true }
@@ -33,7 +37,12 @@ function healthyState (overrides = {}) {
         context, authored: 8, of: 8, cells: STATES.map(() => 'authored'), traffic: 1000
       }))
     },
-    rules: { total: 4, byConfidence: { confirmed: 2, derived: 2, assumed: 0, disputed: 0 }, byFile: {} },
+    rules: {
+      total: 4,
+      byConfidence: { confirmed: 2, derived: 2, assumed: 0, disputed: 0 },
+      byFile: {},
+      byOrigin: { house: 4, speaker: 0, overrides: 0, locked: 0 }
+    },
     evidence: { total: 4, byType: {}, conflicts: 0, drafts: 0 },
     drift: {
       thresholdPct: 25,
@@ -231,4 +240,83 @@ test('a disputed rule is a gap only because it is unresolved, never because conf
   assert.ok(gap)
   assert.match(gap.why, /unresolved|never enforced|not enforced/i)
   assert.ok(!/error|invalid|wrong/i.test(gap.why), 'a conflict is information, not a fault')
+})
+
+// --- speakers (spec 2026-09-10 §9.3) ---------------------------------------
+
+function speaker (overrides = {}) {
+  return {
+    slug: 'maya', name: 'Maya Lind', voiceRules: 3, hasDefaultDials: true, authoredCells: 2, overrides: 0,
+    lockViolations: 0, corpusWords: 900, fingerprintAgeDays: 1, driftBaseline: true, driftFlagged: false,
+    draftsPending: 0, sourcesNeverIngested: 0, cardStale: [],
+    ...overrides
+  }
+}
+
+const LOCKED = { declared: ['V2'], violated: [] }
+
+test('a healthy house with one healthy speaker and a lock reports nothing', () => {
+  assert.deepEqual(detectGaps(healthyState({ speakers: [speaker()], locks: LOCKED })), [])
+})
+
+test('G17 fires when a speaker has no voice rule or no dials line, prefixed with the slug in the house view', () => {
+  const state = healthyState({ speakers: [speaker({ voiceRules: 0 })], locks: LOCKED })
+  const gap = detectGaps(state).find((g) => g.id === 'G17')
+  assert.ok(gap)
+  assert.equal(gap.severity, 'blocker')
+  assert.match(gap.what, /^\[maya\] /)
+  assert.match(gap.fix, /speaker add maya/)
+  const dials = healthyState({ speakers: [speaker({ hasDefaultDials: false })], locks: LOCKED })
+  assert.ok(detectGaps(dials).some((g) => g.id === 'G17'))
+})
+
+test('G17 carries no prefix in a speaker view', () => {
+  const state = healthyState({
+    kb: { ...healthyState().kb, role: 'speaker', speaker: { slug: 'maya', name: 'Maya Lind' } },
+    speakers: [speaker({ voiceRules: 0 })],
+    locks: LOCKED
+  })
+  const gap = detectGaps(state).find((g) => g.id === 'G17')
+  assert.ok(!gap.what.startsWith('['))
+})
+
+test('G18, G19, G20 fire on a speaker without a baseline, with never-ingested sources, with a stale card', () => {
+  const state = healthyState({
+    speakers: [speaker({ driftBaseline: false, sourcesNeverIngested: 2, cardStale: ['voice.md'] })],
+    locks: LOCKED
+  })
+  const gaps = detectGaps(state)
+  const ids = gaps.map((g) => g.id)
+  for (const id of ['G18', 'G19', 'G20']) assert.ok(ids.includes(id), id)
+  assert.match(gaps.find((g) => g.id === 'G18').fix, /--set-baseline --profile maya/)
+  assert.match(gaps.find((g) => g.id === 'G19').fix, /connect --ingest --profile maya/)
+  assert.match(gaps.find((g) => g.id === 'G20').fix, /sync --profile maya/)
+})
+
+test('a detector that hits several speakers yields one gap per speaker', () => {
+  const state = healthyState({
+    speakers: [speaker({ driftBaseline: false }), speaker({ slug: 'jonas', name: 'Jonas Berg', driftBaseline: false })],
+    locks: LOCKED
+  })
+  const g18 = detectGaps(state).filter((g) => g.id === 'G18')
+  assert.equal(g18.length, 2)
+  assert.deepEqual(g18.map((g) => g.what.slice(0, 7)).sort(), ['[jonas]', '[maya] '])
+})
+
+test('G21 fires once, at house level, when speakers exist and no lock is declared', () => {
+  const state = healthyState({ speakers: [speaker(), speaker({ slug: 'jonas', name: 'Jonas Berg' })] })
+  const gaps = detectGaps(state).filter((g) => g.id === 'G21')
+  assert.equal(gaps.length, 1)
+  assert.equal(gaps[0].severity, 'warning')
+  assert.ok(!detectGaps(healthyState()).some((g) => g.id === 'G21'), 'no speakers, no G21')
+  const speakerView = healthyState({
+    kb: { ...healthyState().kb, role: 'speaker', speaker: { slug: 'maya', name: 'Maya Lind' } },
+    speakers: [speaker()]
+  })
+  assert.ok(!detectGaps(speakerView).some((g) => g.id === 'G21'), 'G21 is a house-level judgement')
+})
+
+test('deliberately not a gap: a speaker with every cell computed, with zero overrides, with a card never compiled', () => {
+  const state = healthyState({ speakers: [speaker({ authoredCells: 0, overrides: 0, cardStale: null })], locks: LOCKED })
+  assert.deepEqual(detectGaps(state).map((g) => g.id), [])
 })

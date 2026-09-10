@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, cpSync, existsSync } from 'node:fs'
+import { readFileSync, cpSync, existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { parseYaml } from '../scripts/lib/yaml.mjs'
-import { loadKb, parseVectors, STATES, CONTEXTS, DIALS } from '../scripts/lib/kb.mjs'
+import { loadKb, resolveKb, parseVectors, STATES, CONTEXTS, DIALS } from '../scripts/lib/kb.mjs'
 import { validateKb } from '../scripts/validate.mjs'
 import { compileContext } from '../scripts/compile-context.mjs'
 
@@ -20,7 +20,12 @@ test('every file the spec section 4.2 layout names is present', () => {
     path.join('evidence', 'fingerprint.json'),
     path.join('examples', 'approved.md'), path.join('examples', 'rejected.md'),
     path.join('examples', 'pairs.md'),
-    path.join('channels', '_template.md'), path.join('locales', '_template.md')
+    path.join('channels', '_template.md'), path.join('locales', '_template.md'),
+    path.join('profiles', '_template', 'voice.md'), path.join('profiles', '_template', 'tone.md'),
+    path.join('profiles', '_template', 'lexicon.md'), path.join('profiles', '_template', 'mechanics.md'),
+    path.join('profiles', '_template', 'audience.md'), path.join('profiles', '_template', 'channels', '_template.md'),
+    path.join('profiles', '_template', 'examples', 'approved.md'), path.join('profiles', '_template', 'examples', 'rejected.md'),
+    path.join('profiles', '_template', 'examples', 'pairs.md'), path.join('profiles', '_template', 'sources', 'README.md')
   ]
   for (const rel of expected) {
     assert.ok(existsSync(path.join(templates, rel)), `templates/kb/${rel} is missing`)
@@ -122,4 +127,33 @@ test('the template inbox entry excludes its own shipped README from the corpus',
   const config = parseYaml(readFileSync(path.join(templates, 'config.yml'), 'utf8'))
   const inbox = config.sources.find((s) => s.kind === 'inbox')
   assert.ok(inbox.exclude?.includes('README.md'), 'the inbox must exclude its own placeholder by default')
+})
+
+test('the overlay template ships no vector tables and no rule, and a copied overlay validates clean as a speaker', () => {
+  const tone = readFileSync(path.join(templates, 'profiles', '_template', 'tone.md'), 'utf8')
+  assert.ok(!tone.includes('| State |'), 'vectors are inherited; a copied table would drift')
+  assert.ok(!tone.includes('| Context |'))
+  const dir = makeTmpProject({})
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    cpSync(templates, kbRoot, { recursive: true })
+    cpSync(path.join(templates, 'profiles', '_template'), path.join(kbRoot, 'profiles', 'maya'), { recursive: true })
+    writeFileSync(path.join(kbRoot, 'config.yml'),
+      readFileSync(path.join(kbRoot, 'config.yml'), 'utf8').replace('profiles:\n', 'profiles:\n  maya:\n    name: "Maya Lind"\n'))
+    const report = validateKb(resolveKb(kbRoot, 'maya'))
+    assert.equal(report.errors, 0, JSON.stringify(report.findings, null, 2))
+    assert.deepEqual(report.findings.map((f) => f.code), ['W_SPEAKER_NO_VOICE'], 'the one expected warning on a fresh overlay')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('the gitignore template ignores every speaker inbox and keeps speaker cards', () => {
+  const ignore = readFileSync(path.join(templates, 'gitignore'), 'utf8')
+  assert.ok(ignore.includes('profiles/*/sources/'))
+  assert.ok(!/^[^#\n]*CONTEXT\.md/m.test(ignore), 'no uncommented line may ignore a card')
+})
+
+test('the config template documents locks', () => {
+  assert.match(readFileSync(path.join(templates, 'config.yml'), 'utf8'), /^# ?locks:/m)
 })

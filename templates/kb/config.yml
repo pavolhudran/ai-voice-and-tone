@@ -8,6 +8,9 @@ profiles:
     name: "Unnamed"
     primary_locale: en
     locales: [en]
+# House rule IDs no speaker may override. Only meaningful once
+# /voice-and-tone:speaker add has created a profile; until then leave it out.
+# locks: [L20, L21]
 # Where brand material comes from - the only place this is configured.
 # There is no separate `scan:` key: the `project` entry below IS the scan,
 # via its own include/exclude globs. `inbox` is the folder you drop files

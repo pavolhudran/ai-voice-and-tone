@@ -9,7 +9,10 @@ Runs the full discovery pipeline: scan the project for copy, measure a corpus
 fingerprint, draft a knowledge base with evidence and confidence on every rule,
 compute a questionnaire from the gaps, interview by preference pairs, canonize.
 
-Creates `.voice-and-tone/` in the project root.
+Creates `.voice-and-tone/` in the project root. Early on it asks whether the
+brand speaks with one voice, with several speakers, or whether to decide
+later - speakers can always be added afterwards with
+`/voice-and-tone:speaker add`.
 
 ## Usage
 

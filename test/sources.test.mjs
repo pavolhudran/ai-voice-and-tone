@@ -1002,3 +1002,108 @@ test('a folded duplicate is re-attributed through its alias', () => {
   assert.equal(reattributeLocales(index, resolved).length, 1)
   assert.equal(index.sources[0].locale, 'cs')
 })
+
+test('runAdd with a profile persists it on the register entry, and ingest stamps it on the index entry', async () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      'sources:',
+      '  - id: s01',
+      '    kind: project',
+      '    include: ["content/**/*.md"]',
+      '    exclude: []',
+      ''
+    ].join('\n'),
+    'material/post.md': 'Her post about the thing she built.\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const ctx = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'maya', now: '2026-09-10T00:00:00.000Z' }
+    const { entry } = runAdd(ctx, { target: path.join(dir, 'material'), label: 'posts', profile: 'maya' })
+    assert.equal(entry.profile, 'maya')
+    const written = loadConfig(kbRoot)
+    assert.equal(written.sources.find((s) => s.id === entry.id).profile, 'maya')
+
+    const after = { ...ctx, config: written }
+    await runIngest(after, {})
+    const index = loadIndex(kbRoot)
+    assert.equal(index.sources.length, 1)
+    assert.equal(index.sources[0].profile, 'maya')
+
+    const houseCheck = runCheck({ ...after, profileName: 'default' })
+    assert.deepEqual(houseCheck.register.map((r) => r.id).sort(), ['s01', entry.id].sort(),
+      'a house check sees every entry, so one ingest covers every speaker')
+    const speakerCheck = runCheck(after)
+    assert.deepEqual(speakerCheck.register.map((r) => r.id), [entry.id], 'a speaker check sees only its own')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test("a speaker-scoped check never reports another speaker's index entries as missing, and ingest never drops them", async () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': [
+      'profiles:',
+      '  default:',
+      '    name: "Acme"',
+      '    primary_locale: en',
+      '    locales: [en]',
+      '  maya:',
+      '    name: "Maya Lind"',
+      '  jonas:',
+      '    name: "Jonas Berg"',
+      'sources:',
+      '  - id: s01',
+      '    kind: inbox',
+      '    path: "profiles/maya/sources/"',
+      '    profile: maya',
+      '  - id: s02',
+      '    kind: inbox',
+      '    path: "profiles/jonas/sources/"',
+      '    profile: jonas',
+      ''
+    ].join('\n'),
+    '.voice-and-tone/profiles/maya/sources/a.md': 'Her post.\n',
+    '.voice-and-tone/profiles/jonas/sources/b.md': 'His post.\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const house = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'default', now: '2026-09-10T00:00:00.000Z' }
+    await runIngest(house, {})
+    assert.equal(loadIndex(kbRoot).sources.length, 2)
+    const maya = runCheck({ ...house, profileName: 'maya' })
+    assert.equal(maya.missing.length, 0, "jonas's entry is outside maya's scope, not missing")
+    assert.equal(maya.known.length, 1)
+    await runIngest({ ...house, profileName: 'maya' }, {})
+    assert.equal(loadIndex(kbRoot).sources.length, 2, 'a scoped ingest must not drop the other speaker from the index')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('runAdd registers a path inside the knowledge base as an inbox with a relative path, never an absolute local one', () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/config.yml': 'profiles:\n  default:\n    name: "Acme"\n  maya:\n    name: "Maya Lind"\n',
+    '.voice-and-tone/profiles/maya/sources/README.md': 'inbox\n'
+  })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const ctx = { projectRoot: dir, kbRoot, config: loadConfig(kbRoot), profileName: 'maya', now: '2026-09-10T00:00:00.000Z' }
+    const { entry } = runAdd(ctx, { target: path.join(kbRoot, 'profiles', 'maya', 'sources'), label: null, profile: 'maya' })
+    assert.equal(entry.kind, 'inbox')
+    assert.equal(entry.path, 'profiles/maya/sources/')
+    assert.deepEqual(entry.exclude, ['README.md'])
+    assert.equal(entry.profile, 'maya')
+    assert.ok(!('path' in entry && path.isAbsolute(entry.path)), 'a committed config must not carry a machine path')
+    const outside = runAdd({ ...ctx, config: loadConfig(kbRoot) }, { target: path.join(dir, 'elsewhere'), label: null })
+    assert.equal(outside.entry.kind, 'local', 'a path outside the knowledge base is still a local entry')
+  } finally {
+    cleanup(dir)
+  }
+})

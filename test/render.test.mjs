@@ -224,9 +224,9 @@ function fakeState (overrides = {}) {
   }
 }
 
-test('the ten panel names are stable and include all', () => {
+test('the eleven panel names are stable, speakers sits before all, and all is last', () => {
   assert.deepEqual(PANELS, [
-    'pipeline', 'integrity', 'coverage', 'rules', 'drift', 'sources', 'evidence', 'settings', 'missing', 'all'
+    'pipeline', 'integrity', 'coverage', 'rules', 'drift', 'sources', 'evidence', 'settings', 'missing', 'speakers', 'all'
   ])
 })
 
@@ -469,4 +469,52 @@ test('panels stay exactly `width` wide whatever the text carries', () => {
       assert.ok(line.length <= 72, `"${label}" produced a ${line.length}-column line: ${line}`)
     }
   }
+})
+
+// --- speakers (spec 2026-09-10 §9.2) ---------------------------------------
+
+const SPEAKERS = [
+  { slug: 'maya', name: 'Maya Lind', voiceRules: 6, hasDefaultDials: true, authoredCells: 3, overrides: 2, lockViolations: 0, corpusWords: 900, fingerprintAgeDays: 1, driftBaseline: true, driftFlagged: false, draftsPending: 1, sourcesNeverIngested: 0, cardStale: [] },
+  { slug: 'jonas', name: 'Jonas Berg', voiceRules: 6, hasDefaultDials: true, authoredCells: 1, overrides: 0, lockViolations: 0, corpusWords: 0, fingerprintAgeDays: null, driftBaseline: false, driftFlagged: false, draftsPending: 0, sourcesNeverIngested: 0, cardStale: null },
+  { slug: 'helpdesk', name: 'Acme Support', voiceRules: 5, hasDefaultDials: true, authoredCells: 0, overrides: 1, lockViolations: 1, corpusWords: 1200, fingerprintAgeDays: 3, driftBaseline: true, driftFlagged: true, draftsPending: 0, sourcesNeverIngested: 0, cardStale: [] }
+]
+
+test('a state with no speakers and no locks renders exactly as before: no speakers panel, no locks line, old menu', () => {
+  const out = render(fakeState())
+  assert.ok(!out.includes('SPEAKERS'))
+  assert.ok(!/^\s+locks\s/m.test(out), 'no locks line in settings ("blocks in review" is a different word)')
+  assert.ok(out.includes('6 settings  7 missing  8 all'))
+  assert.ok(!out.includes('9 speakers'))
+})
+
+test('the speakers panel lists one row per speaker with the spec columns', () => {
+  const out = render({ ...fakeState(), speakers: SPEAKERS, locks: { declared: ['V2'], violated: [] } }, { panel: 'speakers' })
+  assert.match(out, /SPEAKERS  3 declared/)
+  assert.match(out, /slug\s+name\s+voice\s+cells\s+over\s+lock\s+drift\s+drafts/)
+  assert.match(out, /maya\s+Maya Lind\s+6\s+3\s+2\s+-\s+ok\s+1/)
+  assert.match(out, /jonas\s+Jonas Berg\s+6\s+1\s+0\s+-\s+n\/a\s+0/)
+  assert.match(out, /helpdesk\s+Acme Support\s+5\s+0\s+1\s+1!\s+FLAG\s+0/)
+})
+
+test('in the house view with speakers, the menu offers the speakers panel and settings lists the locks', () => {
+  const out = render({ ...fakeState(), speakers: SPEAKERS, locks: { declared: ['V2', 'L20'], violated: [] } })
+  assert.ok(out.includes('SPEAKERS'))
+  assert.match(out, /9 speakers/)
+  assert.match(out, /locks\s+V2, L20/)
+})
+
+test('a speaker view names the speaker in the header and settings and splits rules by origin', () => {
+  const state = {
+    ...fakeState(),
+    kb: { ...fakeState().kb, role: 'speaker', speaker: { slug: 'maya', name: 'Maya Lind' }, profile: 'maya' },
+    speakers: [SPEAKERS[0]],
+    locks: { declared: ['V2'], violated: [] },
+    rules: { ...fakeState().rules, byOrigin: { house: 31, speaker: 12, overrides: 2, locked: 6 } }
+  }
+  const out = render(state)
+  assert.match(out, /\| maya \(speaker\) \|/)
+  assert.match(out, /origin: house 31 \* speaker 12 \* overrides 2 \* locked 6/)
+  assert.match(out, /profile\s+maya\s+"Maya Lind"\s+speaker of Vivido/)
+  assert.ok(!out.includes('SPEAKERS'), 'the speakers panel is house view only')
+  assert.match(out, /speaker offset applied/)
 })

@@ -6,7 +6,7 @@ import { makeTmpProject, cleanup } from './helpers/tmp.mjs'
 import { DEFAULT_CONFIG } from '../scripts/lib/config.mjs'
 import { gatherCorpus } from '../scripts/lib/corpus.mjs'
 import {
-  loadRegister, resolveEntry, resolveRegister, expandHome, nextRegisterId
+  loadRegister, resolveEntry, resolveRegister, expandHome, nextRegisterId, entriesForProfile
 } from '../scripts/lib/register.mjs'
 
 const ctxFor = (dir, config = DEFAULT_CONFIG) => ({
@@ -337,6 +337,43 @@ test('an inbox path that stays inside the knowledge base still resolves, includi
     const resolved = resolveEntry({ id: 's02', kind: 'inbox', path: 'sources/deck' }, ctxFor(dir))
     assert.equal(resolved.files.length, 1)
     assert.equal(resolved.files[0].origin, 'sources/deck/notes.md')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('entriesForProfile: the house sees unattributed entries, a speaker sees only its own', () => {
+  const config = { profiles: { default: { name: 'Acme' }, maya: { name: 'Maya Lind' } } }
+  const register = [
+    { id: 's01', kind: 'project', include: ['content/**/*.md'], exclude: [] },
+    { id: 's02', kind: 'inbox', path: 'sources/' },
+    { id: 's03', kind: 'inbox', path: 'profiles/maya/sources/', profile: 'maya' }
+  ]
+  assert.deepEqual(entriesForProfile(register, 'default', config).map((e) => e.id), ['s01', 's02'])
+  assert.deepEqual(entriesForProfile(register, 'maya', config).map((e) => e.id), ['s03'])
+  assert.deepEqual(entriesForProfile(register, 'ghost', config).map((e) => e.id), ['s01', 's02'], 'an undeclared profile is the house')
+})
+
+test("resolveEntry attributes locale from the entry's own profile and stamps profile on each file", () => {
+  const dir = makeTmpProject({
+    '.voice-and-tone/profiles/maya/sources/post-de.md': 'Hallo.\n',
+    '.voice-and-tone/sources/note.md': 'Hello.\n'
+  })
+  try {
+    const config = {
+      profiles: {
+        default: { name: 'Acme', primary_locale: 'en', locales: ['en'] },
+        maya: { name: 'Maya Lind', primary_locale: 'de', locales: ['de', 'en'] }
+      }
+    }
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    const ctx = { projectRoot: dir, kbRoot, config, profileName: 'default' }
+    const speaker = resolveEntry({ id: 's03', kind: 'inbox', path: 'profiles/maya/sources/', profile: 'maya' }, ctx)
+    assert.equal(speaker.files[0].locale, 'de', "the speaker's own locales decide, even from a house context")
+    assert.equal(speaker.files[0].profile, 'maya')
+    const house = resolveEntry({ id: 's02', kind: 'inbox', path: 'sources/' }, ctx)
+    assert.equal(house.files[0].locale, 'en')
+    assert.equal(house.files[0].profile, null)
   } finally {
     cleanup(dir)
   }

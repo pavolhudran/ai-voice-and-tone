@@ -22,12 +22,17 @@ Voice is constant. Tone flexes with what the reader is feeling.
 
 1. Direct user instruction in the current conversation
 2. Project `CLAUDE.md` / `AGENTS.md`
-3. The knowledge base
-4. Plugin defaults
+3. Locked house rules (`locks:` in `<KB>/config.yml`)
+4. The speaker overlay (`<KB>/profiles/<slug>/`), when writing as a speaker
+5. The knowledge base - the house
+6. Plugin defaults
 
 When the knowledge base conflicts with a user instruction, **the instruction
 wins**, and the conflict is offered to `/voice-and-tone:learn` as potential
-evidence - it may be a one-off, or it may be the KB being wrong.
+evidence - it may be a one-off, or it may be the KB being wrong. A user
+instruction that breaks a locked rule still wins, and the draft records
+`lock_override: <id>` in its frontmatter so `:learn` can raise it as a
+decision.
 
 ## No knowledge base?
 
@@ -54,7 +59,12 @@ Anything over roughly 50 words, or with more than one paragraph, stays here.
 
 Full detail in `references/write-flow.md`.
 
-1. **Load** `<KB>/CONTEXT.md`. Nothing else, yet.
+1. **Resolve the speaker, then load the card.** In order: `--profile <slug>`,
+   then "as <name>" in the request (match against `profiles.<slug>.name` in
+   `<KB>/config.yml`), then a `voice-and-tone: default profile <slug>` line
+   in the project's `CLAUDE.md`, then the house. Load
+   `<KB>/profiles/<slug>/CONTEXT.md` for a speaker, `<KB>/CONTEXT.md` for
+   the house. Nothing else, yet.
 2. **Determine context and reader state.** Infer from what the user is asking for.
    Ask only if genuinely ambiguous - a wrong guess is cheap to correct, a
    needless question is not.
@@ -62,14 +72,18 @@ Full detail in `references/write-flow.md`.
    Otherwise interpolate - see `references/interpolation.md`.
 4. **Load the channel playbook** `<KB>/channels/<name>.md` if one exists, and the
    **locale pack** `<KB>/locales/<code>.md` if the target is not the primary locale.
-5. **Draft** inside the dials.
+5. **Draft** inside the dials. A calibration sample comes from the speaker's
+   `profiles/<slug>/examples/approved.md`, falling back to the house's with a
+   note that it did.
 6. **Self-check** against the voice characteristics and the always-on layers in
    `references/always-on-layers.md`.
 7. **Log the draft** to `<KB>/.drafts/<ISO-timestamp>-<slug>.md` with frontmatter
    recording cell, profile, locale, and kb_version. This is not optional - it is
    what `/voice-and-tone:learn` diffs against later.
 8. **Report** one line: `profile <name> · cell: <context>/<state> · locale: <code>
-   · <authored|interpolated>`.
+   · <authored|interpolated>`, adding `speaker offset applied` on an
+   interpolated speaker cell and `lock_override: <id>` if a user instruction
+   forced a locked rule to break.
 
 ## The humor gates - hard rules
 
@@ -86,7 +100,9 @@ whose payment just failed".
 When you interpolate a cell for real work, offer to promote it: draft the full
 cell in the §6.4 shape - reader is feeling, dials, do, don't, example - and if
 the user approves, write it to `<KB>/tone.md` at `confirmed` with a `decision`
-evidence entry. The matrix fills itself along the paths actually written.
+evidence entry - or to `<KB>/profiles/<slug>/tone.md` when writing as a
+speaker, since house cells are never inherited. The matrix fills itself along
+the paths actually written.
 
 ## Channels
 

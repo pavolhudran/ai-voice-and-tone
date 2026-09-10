@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, lstatSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, lstatSync, existsSync, cpSync } from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -266,5 +266,47 @@ test('only the vendoring tool may use npm or a child process', () => {
       !/child_process|execSync|execFileSync|spawnSync/.test(body),
       `${file} spawns a process; only scripts/vendor.mjs may, and it never runs on a user machine`
     )
+  }
+})
+
+test('a knowledge base with no speakers is byte-identical across the compiler, the validator, and both status renderers', () => {
+  // The invariant every task in the speaker-profiles plan promised
+  // (.superpowers/plans/2026-09-10-speaker-profiles.md, Global Constraints).
+  // The expected outputs were captured from the commit before that plan's
+  // first task and live beside the fixture; regenerate them ONLY from that
+  // commit, never from a later one, or the test would pin whatever the last
+  // change happened to produce.
+  const fixture = path.join(root, 'test', 'fixtures', 'house-only')
+  const expectedDir = path.join(fixture, '_expected')
+  const dir = makeTmpProject({ 'content/a.md': '# A\n\nWe leverage it. One thing worth knowing.\n' })
+  try {
+    const kbRoot = path.join(dir, '.voice-and-tone')
+    cpSync(fixture, kbRoot, { recursive: true, filter: (src) => !src.includes('_expected') })
+    const NOW = '2026-09-10T00:00:00.000Z'
+    const run = (script, args) => execFileSync(
+      process.execPath, [path.join(root, 'scripts', script), '--root', dir, '--now', NOW, ...args], { encoding: 'utf8' }
+    )
+    const expected = (name) => readFileSync(path.join(expectedDir, name), 'utf8')
+    // The screen truncates a long kb path before any substitution could
+    // reach it, so that one line is normalised on both sides.
+    const normalise = (text) => text
+      .split(dir).join('<root>')
+      .replace(/^(\s+kb path\s+).*$/m, '$1<kb path>')
+
+    run('scan.mjs', [])
+    run('fingerprint.mjs', ['--set-baseline'])
+    run('compile-context.mjs', [])
+    assert.equal(readFileSync(path.join(kbRoot, 'CONTEXT.md'), 'utf8'), expected('CONTEXT.md'))
+
+    let validateOut
+    try { validateOut = run('validate.mjs', []) } catch (error) { validateOut = error.stdout }
+    assert.equal(validateOut, expected('validate.txt'))
+
+    assert.equal(normalise(run('status.mjs', [])), normalise(expected('status.txt')))
+
+    run('status.mjs', ['--artifact', '--out', path.join(dir, 'status.html')])
+    assert.equal(normalise(readFileSync(path.join(dir, 'status.html'), 'utf8')), expected('status.html'))
+  } finally {
+    cleanup(dir)
   }
 })

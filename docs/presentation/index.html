@@ -136,7 +136,7 @@ blockquote {
 
 /* ---------- plates: flat colour fields, no outlines ---------- */
 .plate { background: var(--band); border-radius: var(--r-lg); padding: clamp(1.5rem, 3.5vw, 2.4rem); }
-#mechanism .plate, #tone .plate, #kb .plate, #run .plate, #maintenance .plate { background: var(--cream); }
+#mechanism .plate, #tone .plate, #kb .plate, #run .plate, #maintenance .plate, #speakers .plate { background: var(--cream); }
 .plate-label {
   font-family: var(--body); font-size: var(--step--1); font-weight: 700;
   text-transform: uppercase; letter-spacing: .11em; color: var(--ink-soft);
@@ -234,6 +234,20 @@ blockquote {
 .step { background: var(--cream); border: 1px solid var(--edge-soft); border-radius: var(--r-md); padding: 1rem 1.1rem; }
 .step .name { font-weight: 700; font-size: var(--step-0); color: var(--ink); display: block; }
 .step .what { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.45; display: block; margin-top: .35rem; text-wrap: pretty; }
+/* The section's plates are cream like its neighbours'; the one card that
+   frames the whole idea sits on the band, as the page's lead plates do. */
+#speakers .plate.plate-band { background: var(--band); }
+.speaker-split { align-items: start; }
+.speaker-split h3 { font-size: var(--step-0); margin-bottom: .55rem; }
+.speaker-split ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
+.speaker-split ul.plain li { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.5; padding-left: 1.1rem; position: relative; }
+.speaker-split ul.plain li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--ink); }
+.speaker-steps { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.25rem; }
+.speaker-steps .step { padding: 1.35rem 1.4rem; display: flex; flex-direction: column; }
+/* The chips scroll sideways on a narrow card: a small top and a larger bottom
+   padding leave the horizontal scrollbar its own room under the text. */
+.speaker-steps .step .cmd { margin-top: auto; padding: .3rem .7rem .85rem; align-self: stretch; }
+.speaker-steps .step .what { margin-bottom: .9rem; }
 
 /* ---------- matrix ---------- */
 .matrix-layout { display: grid; gap: 1.75rem; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
@@ -285,6 +299,10 @@ table.matrix tbody th { padding-right: .5rem; color: var(--ink-soft); }
 }
 .toggle { display: flex; align-items: center; gap: .55rem; font-size: var(--step--1); font-weight: 500; color: var(--ink-soft); cursor: pointer; }
 .toggle input { accent-color: var(--ink); width: 1.05rem; height: 1.05rem; }
+/* House / Speaker tab strip above the matrix. The speaker tab is optional and
+   adds one row to the arithmetic; the house tab is exactly the plugin today. */
+.mode-tabs { margin-bottom: 1rem; }
+.mode-note { margin-bottom: 1rem; }
 
 /* ---------- gates ---------- */
 .gate-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
@@ -304,6 +322,11 @@ table.list th, table.list td { text-align: left; padding: .6rem .7rem .6rem 0; b
 table.list th { font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .07em; font-size: .82rem; }
 table.list td:first-child { font-family: var(--mono); color: var(--ink); white-space: nowrap; padding-right: 1.2rem; }
 table.list td { color: var(--ink-soft); line-height: 1.5; }
+/* A thin label row inside a list, for an optional group of rows. */
+table.list tr.list-label td {
+  font-family: var(--body); font-size: .8rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--ink-faint); white-space: normal; padding-top: 1rem; border-bottom: 0;
+}
 
 /* ---------- corroboration ---------- */
 .ledger { font-family: var(--mono); font-size: var(--step--1); display: flex; flex-direction: column; gap: .35rem; min-height: 4.2rem; background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r-md); padding: .95rem 1.05rem; }
@@ -329,7 +352,11 @@ table.list td { color: var(--ink-soft); line-height: 1.5; }
 
    The n+8 rule is a guard, not a step: any tile past the eighth holds the
    maximum indent rather than snapping back to zero. That snap is exactly how
-   the previous six-rule version broke the day an eighth step landed. */
+   the previous six-rule version broke the day an eighth step landed.
+
+   An optional tile (.is-optional) is not part of the staircase: it starts a
+   new row at the left edge, after a gap, so the eight required steps keep
+   their geometry and the optional one reads as an addition. */
 .gstep:nth-child(2) { margin-left: 5.714%; }
 .gstep:nth-child(3) { margin-left: 11.429%; }
 .gstep:nth-child(4) { margin-left: 17.143%; }
@@ -337,6 +364,7 @@ table.list td { color: var(--ink-soft); line-height: 1.5; }
 .gstep:nth-child(6) { margin-left: 28.571%; }
 .gstep:nth-child(7) { margin-left: 34.286%; }
 .gstep:nth-child(n+8) { margin-left: 40%; }
+.gstep.is-optional { margin-left: 0; margin-top: 1.4rem; }
 @media (max-width: 68rem) {
   /* Below this the tiles are too narrow to read, so the staircase collapses. */
   .gstep { width: 100%; margin-left: 0 !important; }
@@ -387,6 +415,7 @@ footer p + p { margin-top: .7rem; }
         <a href="#surface">Surface</a>
         <a href="#run">In use</a>
         <a href="#maintenance">Maintenance</a>
+        <a href="#speakers">Speakers</a>
         <a href="#start">Get started</a>
       </nav>
     </div>
@@ -398,11 +427,11 @@ footer p + p { margin-top: .7rem; }
   <h1>A brand voice guide your tooling can prove.</h1>
   <p class="lede">Most style guides are opinions nobody can check. Here, every rule records where it came from and how sure it is.</p>
   <div class="specs">
-    <span class="spec"><b>10</b> commands</span>
+    <span class="spec"><b>11</b> commands</span>
     <span class="spec"><b>6</b> skills</span>
     <span class="spec"><b>1</b> independent critic</span>
-    <span class="spec"><b>7</b> CLI scripts</span>
-    <span class="spec"><b>23</b> shared modules</span>
+    <span class="spec"><b>8</b> CLI scripts</span>
+    <span class="spec"><b>24</b> shared modules</span>
     <span class="spec">Node 18+</span>
     <span class="spec disclaim">Not affiliated with Mailchimp</span>
   </div>
@@ -483,6 +512,7 @@ footer p + p { margin-top: .7rem; }
       <p class="note">Most of that it reads for itself, the same bytes to the same result every time. What it genuinely cannot - a scanned page, a photograph of a slide - it shows to the model instead.</p>
       <p class="note">Either way, it is read once, then thrown away. What stays is what it proved: enough to recompute the whole voice, or subtract any one source later, without ever keeping the file itself.</p>
     </div>
+    <p class="note" style="margin-top:1rem"><b>Optional: a speaker&rsquo;s material.</b> Registered under that speaker, measured on its own, never mixed into the house numbers. See <a href="#speakers">Speakers</a>.</p>
   </div>
 </section>
 
@@ -497,6 +527,11 @@ footer p + p { margin-top: .7rem; }
 
   <div class="plate matrix-layout" style="margin-top:1.6rem">
     <div>
+      <div class="chips mode-tabs" id="speakerTabs" role="group" aria-label="Whose dials">
+        <button class="chip" type="button" data-mode="house" aria-pressed="true">House</button>
+        <button class="chip" type="button" data-mode="speaker" aria-pressed="false">Speaker (optional)</button>
+      </div>
+      <p class="note mode-note" id="speakerNote" hidden>Optional. A speaker states its own default dials once; the difference from the house shifts every computed cell. Authored cells are never shifted.</p>
       <span class="plate-label">Context &times; reader state</span>
       <div class="grid-scroll"><table class="matrix" id="matrix"></table></div>
       <p class="note" style="margin-top:.9rem">Hatched rows: humor forced off, whatever the numbers say.</p>
@@ -575,6 +610,7 @@ footer p + p { margin-top: .7rem; }
     <b>manifest.json</b>   <i>Which files carry copy, and their per-locale totals.</i>
     <b>sources.json</b>    <i>What was analysed and what it proved - so the material above can be safely thrown away.</i>
     <b>conflicts.md</b>    <i>Where two sources genuinely disagree. Both sides kept, neither enforced.</i>
+  <b>profiles/&lt;slug&gt;/</b>  <i>One overlay per speaker. Optional - see <a href="#speakers">Speakers</a>.</i>
   <b>CHANGELOG.md</b>      <i>Appended on every approved change.</i></pre>
   </div>
 
@@ -593,7 +629,7 @@ footer p + p { margin-top: .7rem; }
 <section id="surface" class="wrap">
   <p class="eyebrow">What you actually type</p>
   <div class="stack measure">
-    <h2>Ten commands, six skills that need no command.</h2>
+    <h2>Eleven commands, six skills that need no command.</h2>
     <p>Commands are explicit. Skills trigger themselves. Ask for a button label and the microcopy skill loads uncalled.</p>
   </div>
 
@@ -612,6 +648,8 @@ footer p + p { margin-top: .7rem; }
           <tr><td>:status</td><td>What you have, what it is set to, what is missing. Screen or page.</td></tr>
           <tr><td>:sync</td><td>Validate and recompile the card.</td></tr>
           <tr><td>:localize</td><td>Apply a locale pack.</td></tr>
+          <tr class="list-label"><td colspan="2">Optional: speakers</td></tr>
+          <tr><td>:speaker</td><td>Add, list, or remove a speaker.</td></tr>
         </tbody>
       </table>
     </div>
@@ -715,6 +753,7 @@ footer p + p { margin-top: .7rem; }
       <p class="note">The page is computed, not written: one collector, one state object, <strong>a second renderer</strong>. Run it twice with the clock pinned and the bytes are identical, which is why it cannot drift from the screen it was made from.</p>
     </div>
   </div>
+  <p class="note measure" style="margin-top:1.5rem"><b>Speakers.</b> Under <code>--profile</code> the same status writes a page per speaker - see <a href="#speakers">Speakers</a>.</p>
 </section>
 
 <section id="maintenance" class="wrap">
@@ -752,6 +791,74 @@ footer p + p { margin-top: .7rem; }
   </div>
 </section>
 
+<section id="speakers" class="wrap">
+  <p class="eyebrow">New, and optional</p>
+  <div class="stack measure">
+    <h2>One house, many speakers.</h2>
+    <p>Some brands write in more than one first-person voice: a founder posting under her own name, a support team, a product line, a mascot, an assistant. Each of those can be a <strong>speaker</strong>: it keeps its own voice and inherits everything else from the house.</p>
+    <p class="note">None of this is required. A brand that speaks with one voice never sees it, and a knowledge base with no speakers is unchanged, byte for byte.</p>
+  </div>
+
+  <div class="plate plate-band" style="margin-top:1.6rem">
+    <span class="plate-label">Who keeps what</span>
+    <div class="cols speaker-split">
+      <div>
+        <h3>The house keeps</h3>
+        <ul class="plain">
+          <li>the lexicon, the mechanics, the audiences</li>
+          <li>the channel playbooks and the locale packs</li>
+          <li>the state vectors and context offsets - the psychology</li>
+          <li>and the rules it <b>locks</b></li>
+        </ul>
+      </div>
+      <div>
+        <h3>A speaker keeps</h3>
+        <ul class="plain">
+          <li>its voice characteristics - they replace the house&rsquo;s</li>
+          <li>its default dials - they shift every computed cell</li>
+          <li>the tone cells it authored</li>
+          <li>its own examples and its own material</li>
+        </ul>
+      </div>
+    </div>
+    <div class="gate" style="margin-top:1.4rem">
+      <span class="n">Locks</span>
+      <p><span class="mono">locks:</span> in <span class="mono">config.yml</span> names the house rules no speaker may override - usually the &ldquo;never say&rdquo; list. They print on every speaker card under <strong>House guardrails</strong>, and a speaker that breaks one fails validation. Everything not locked, a speaker may override by rule ID.</p>
+    </div>
+  </div>
+
+  <div class="pipeline speaker-steps" style="margin-top:1.25rem">
+    <div class="step">
+      <span class="name">1 &middot; Add a speaker</span>
+      <span class="what">One command scaffolds the overlay, reads the material you point it at, interviews you on that speaker&rsquo;s own strings, and compiles its card. Init asks early whether there is one voice or several; you can add a speaker any time.</span>
+      <span class="cmd">/voice-and-tone:speaker add maya --name "Maya Lind"</span>
+    </div>
+    <div class="step">
+      <span class="name">2 &middot; Write as the speaker</span>
+      <span class="what"><span class="mono">--profile &lt;slug&gt;</span> works on write, rewrite, localize, review, status, sync, audit and connect. Plain language works too: &ldquo;write this as Maya&rdquo;. One line in <span class="mono">CLAUDE.md</span> sets a default for the whole project.</span>
+      <span class="cmd">/voice-and-tone:write --profile maya a welcome for a new subscriber</span>
+    </div>
+    <div class="step">
+      <span class="name">3 &middot; Keep it honest</span>
+      <span class="what">Status gains a <span class="mono">speakers</span> panel, five new gaps, and a page per speaker. The critic asks one more question in its read-back: <strong>which speaker wrote this?</strong> Several speakers who all sound like the house is the failure this catches. <span class="mono">speaker list</span> and <span class="mono">speaker remove</span> round it off.</span>
+      <span class="cmd">/voice-and-tone:status --profile maya --artifact</span>
+    </div>
+  </div>
+
+  <div class="plate" style="margin-top:1.25rem">
+    <span class="plate-label">What lands on disk</span>
+    <pre class="tree">profiles/&lt;slug&gt;/
+  <b>CONTEXT.md</b>   <i>GENERATED speaker card, with the house guardrails on it.</i>
+  <b>voice.md</b>     <i>Its characteristics. Replaces the house&rsquo;s.</i>
+  <b>tone.md</b>      <i>Its default dials, and the cells it authored.</i>
+  <b>lexicon.md</b>   <i>Additions and overrides, merged by ID. Same for mechanics, audience, channels, locales.</i>
+  <b>examples/</b>    <i>Its own approved, rejected, and before/after pairs.</i>
+  <b>evidence/</b>    <i>Its own fingerprint and baseline - drift is per speaker.</i>
+  <b>sources/</b>     <i>Its own inbox. Never committed, like the house&rsquo;s.</i></pre>
+    <p class="note" style="margin-top:.9rem">Every file is optional; missing means inherited. Two levels, fixed: an overlay sits on the house, never on another overlay, so &ldquo;which rule won&rdquo; is always answerable.</p>
+  </div>
+</section>
+
 <section id="start" class="wrap">
   <p class="eyebrow">Get started</p>
   <div class="stack measure">
@@ -772,7 +879,7 @@ footer p + p { margin-top: .7rem; }
       <span class="num">2</span>
       <div>
         <h3>Point it at a project</h3>
-        <p>Scans, measures, then interviews you on the gaps. Creates <span class="mono">.voice-and-tone/</span> in your project root. In a hurry? <span class="mono">--quick</span> asks three questions.</p>
+        <p>Scans, measures, then interviews you on the gaps. Creates <span class="mono">.voice-and-tone/</span> in your project root. In a hurry? <span class="mono">--quick</span> asks three questions. Init asks whether there is one voice or several; you can also add speakers later.</p>
         <span class="cmd">/voice-and-tone:init</span>
       </div>
     </div>
@@ -823,6 +930,14 @@ footer p + p { margin-top: .7rem; }
         <span class="cmd">/voice-and-tone:audit</span><span class="cmd">/voice-and-tone:sync</span>
       </div>
     </div>
+    <div class="gstep is-optional">
+      <span class="num">9</span>
+      <div>
+        <h3>Add speakers <span class="tag">optional</span></h3>
+        <p>Several voices under one brand? Add each one; it inherits the house and keeps its own voice.</p>
+        <span class="cmd">/voice-and-tone:speaker add &lt;slug&gt;</span>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -839,6 +954,11 @@ footer p + p { margin-top: .7rem; }
   // If those change, this changes. The plugin is the source of truth.
   var DIALS = ['warmth', 'humor', 'directness', 'detail', 'urgency', 'formality'];
   var HUMOR_ZERO = ['frustrated', 'anxious-at-risk', 'disappointed-leaving'];
+  // Speakers (optional): a speaker's default dials minus the house's, one
+  // number per dial. Added before the clamp and the gates; never applied to
+  // an authored cell. This is an example speaker, not a real one.
+  var SPEAKER_OFFSET = [-1, 0, 1, 1, -1, 1];
+  var NO_OFFSET = [0, 0, 0, 0, 0, 0];
 
   var STATES = {
     'delighted':            [4, 3, 2, 1, 1, 1],
@@ -865,9 +985,10 @@ footer p + p { margin-top: .7rem; }
 
   var clamp = function (n) { return Math.max(0, Math.min(4, n)); };
 
-  function resolve(context, state, authored) {
+  function resolve(context, state, authored, offset) {
     var s = STATES[state], c = CONTEXTS[context];
-    var raw = DIALS.map(function (_, i) { return clamp(s[i] + c[i]); });
+    var o = offset || NO_OFFSET;
+    var raw = DIALS.map(function (_, i) { return clamp(s[i] + c[i] + o[i]); });
     var gate = null;
     // Gate 1: a computed cell never carries humor.
     if (!authored && raw[1] > 0) { gate = 1; }
@@ -927,6 +1048,7 @@ footer p + p { margin-top: .7rem; }
   var stateKeys = Object.keys(STATES);
   var table = document.getElementById('matrix');
   var selected = { context: 'product-ui', state: 'confused' };
+  var mode = 'house';  // 'house' is exactly the plugin without speakers.
 
   var thead = document.createElement('thead');
   var hr = document.createElement('tr');
@@ -976,7 +1098,10 @@ footer p + p { margin-top: .7rem; }
 
   function paintCell() {
     var authored = authoredToggle.checked;
-    var r = resolve(selected.context, selected.state, authored);
+    var speaker = mode === 'speaker';
+    // An authored cell is written, not computed, so the offset never touches it.
+    var offset = (speaker && !authored) ? SPEAKER_OFFSET : NO_OFFSET;
+    var r = resolve(selected.context, selected.state, authored, offset);
     var s = STATES[selected.state], c = CONTEXTS[selected.context];
 
     Array.prototype.forEach.call(table.querySelectorAll('.cell'), function (b) {
@@ -996,10 +1121,17 @@ footer p + p { margin-top: .7rem; }
     var rowB = '<div class="sum-row"><span>context offset</span>' + c.map(function (n) {
       return '<span>' + (n > 0 ? '+' + n : n) + '</span>';
     }).join('') + '</div>';
+    var rowS = '';
+    if (speaker) {
+      rowS = '<div class="sum-row"><span>speaker offset</span>' + SPEAKER_OFFSET.map(function (n) {
+        if (authored) { return '<span>-</span>'; }
+        return '<span>' + (n > 0 ? '+' + n : n) + '</span>';
+      }).join('') + '</div>';
+    }
     var rowC = '<div class="sum-row total"><span>after clamp + gates</span>' + r.dials.map(function (n) {
       return '<span>' + n + '</span>';
     }).join('') + '</div>';
-    elSum.innerHTML = head + rowA + rowB + rowC;
+    elSum.innerHTML = head + rowA + rowB + rowS + rowC;
 
     elDials.innerHTML = DIALS.map(function (d, i) {
       var v = r.dials[i];
@@ -1016,7 +1148,7 @@ footer p + p { margin-top: .7rem; }
     if (r.gate === 1) {
       elGate.hidden = false;
       elGate.innerHTML = '<strong>Gate 1.</strong> The arithmetic gives humor ' +
-        clamp(s[1] + c[1]) + ', but this cell is computed, not authored, so humor is 0. ' +
+        clamp(s[1] + c[1] + offset[1]) + ', but this cell is computed, not authored, so humor is 0. ' +
         'Tick the box to see what authoring unlocks.';
     } else if (r.gate === 2) {
       elGate.hidden = false;
@@ -1028,6 +1160,19 @@ footer p + p { margin-top: .7rem; }
   }
 
   authoredToggle.addEventListener('change', paintCell);
+
+  // House / Speaker tabs. House is the default and changes nothing above.
+  var speakerNote = document.getElementById('speakerNote');
+  var modeTabs = Array.prototype.slice.call(document.querySelectorAll('#speakerTabs [data-mode]'));
+  function setMode(next) {
+    mode = next;
+    modeTabs.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.mode === next)); });
+    if (speakerNote) { speakerNote.hidden = next !== 'speaker'; }
+    paintCell();
+  }
+  modeTabs.forEach(function (b) {
+    b.addEventListener('click', function () { setMode(b.dataset.mode); });
+  });
   paintCell();
 
   // Arrow-key navigation across the grid.

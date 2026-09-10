@@ -1,6 +1,6 @@
 ---
 description: Turn off-brand text into on-brand text, showing what changed and why
-argument-hint: "<text or file path> [--context <c>] [--state <s>]"
+argument-hint: "<text or file path> [--context <c>] [--state <s>] [--profile <slug>]"
 ---
 
 # /voice-and-tone:rewrite
@@ -23,6 +23,10 @@ opinion are listed too - those are gaps worth filling.
 
 Both the original and the rewrite are logged to `.voice-and-tone/.drafts/` so a
 later `/voice-and-tone:learn` has the full chain.
+
+## Speakers
+
+`--profile <slug>` rewrites into that speaker's voice instead of the house's.
 
 ## Invokes
 

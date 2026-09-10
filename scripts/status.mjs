@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { writeTextFile, displayPath } from './lib/fsx.mjs'
-import { loadConfig } from './lib/config.mjs'
+import { loadConfig, artifactRoot, isSpeaker } from './lib/config.mjs'
 import { collect, readJson } from './lib/state.mjs'
 import { render, PANELS, clampWidth } from './lib/render.mjs'
 import { renderHtml } from './lib/html.mjs'
@@ -29,10 +29,13 @@ import { parseCliArgs, resolveRoots, nowIso, die, printHelp, writeOut } from './
  */
 
 function refresh ({ projectRoot, kbRoot, config, profileName, now }) {
+  // A declared speaker's artifacts live under its overlay; the house's stay
+  // where they always were.
+  const root = artifactRoot(kbRoot, profileName, config)
   const manifest = buildManifest(projectRoot, config, now, profileName, kbRoot)
-  writeTextFile(path.join(kbRoot, 'evidence', 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  writeTextFile(path.join(root, 'evidence', 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
-  const out = path.join(kbRoot, 'evidence', 'fingerprint.json')
+  const out = path.join(root, 'evidence', 'fingerprint.json')
   const fingerprint = buildFingerprint(projectRoot, config, {
     generated: now, source: 'measured', profileName, kbRoot
   })
@@ -67,11 +70,12 @@ function main (argv) {
       '                    (never sets the baseline, never ingests, never fetches)',
       '  --locale <code>   scope drift and corpus to one locale',
       '  --width <n>       render width, clamped to 60..120 (default 72)',
-      '  --profile <name>  config profile (default: default)',
+      '  --profile <name>  config profile (default: default); a speaker slug shows that speaker',
       '  --now <iso>       fixed timestamp for reproducible output',
       '  --json            print the whole state object as JSON',
       '  --artifact        write the same state as a self-contained HTML page',
-      '                    (default: <kb>/.drafts/status.html; --out overrides)'
+      '                    (default: <kb>/.drafts/status.html, or status-<slug>.html for a',
+      '                    speaker; --out overrides)'
     ])
     return
   }
@@ -113,9 +117,12 @@ function main (argv) {
   // matter. countDrafts() counts only *.md, so this does not inflate the
   // draft count it sits beside either.
   if (values.artifact) {
+    // A speaker page gets its own path, so the Artifact tool - which maps a
+    // path to a URL - keeps the house page and each speaker page on stable,
+    // separate links across republishes.
     const out = values.out
       ? path.resolve(values.out)
-      : path.join(kbRoot, '.drafts', 'status.html')
+      : path.join(kbRoot, '.drafts', isSpeaker(config, profileName) ? `status-${profileName}.html` : 'status.html')
     writeTextFile(out, renderHtml(state))
     writeOut(`status: wrote ${displayPath(projectRoot, out)}\n`)
     return

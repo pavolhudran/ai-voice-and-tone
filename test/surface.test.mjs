@@ -344,13 +344,13 @@ test('learn, audit, and sync commands route to the maintenance skill', () => {
   assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
 })
 
-test('every command file the plugin ships is one of the ten in the spec', () => {
-  // Ten since the observability spec added :status. The list stays explicit
-  // rather than derived: a command file appearing here that no spec named is
-  // exactly what this test exists to catch.
+test('every command file the plugin ships is one of the eleven in the specs', () => {
+  // Eleven since the speaker-profiles spec added :speaker. The list stays
+  // explicit rather than derived: a command file appearing here that no spec
+  // named is exactly what this test exists to catch.
   const expected = [
     'audit.md', 'connect.md', 'init.md', 'learn.md', 'localize.md',
-    'review.md', 'rewrite.md', 'status.md', 'sync.md', 'write.md'
+    'review.md', 'rewrite.md', 'speaker.md', 'status.md', 'sync.md', 'write.md'
   ]
   const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
   assert.deepEqual(actual, expected)
@@ -563,4 +563,90 @@ test('README lists :status among the commands and voice-observability among the 
   const readme = readFileSync(surfaceFile('README.md'), 'utf8')
   assert.ok(readme.includes('/voice-and-tone:status'))
   assert.ok(readme.includes('voice-observability'))
+})
+
+// --- speakers (spec 2026-09-10 §6) -----------------------------------------
+
+test('speaker is a real command with three verbs routing to the right skills', () => {
+  const body = readFileSync(surfaceFile('commands', 'speaker.md'), 'utf8')
+  assert.match(body, /^---\ndescription:/m)
+  for (const verb of ['add', 'list', 'remove']) assert.ok(body.includes(`speaker ${verb}`), verb)
+  assert.match(body, /voice-discovery/)
+  assert.match(body, /voice-maintenance/)
+  assert.match(body, /voice-observability/)
+  assert.match(body, /--from/)
+})
+
+test('every command that drafts, reviews, or reports documents --profile', () => {
+  for (const name of ['write', 'rewrite', 'localize', 'review', 'status', 'sync', 'audit', 'connect']) {
+    const body = readFileSync(surfaceFile('commands', `${name}.md`), 'utf8')
+    assert.ok(body.includes('--profile'), `${name}.md never mentions --profile`)
+  }
+})
+
+test('README lists :speaker among the commands', () => {
+  assert.ok(readFileSync(surfaceFile('README.md'), 'utf8').includes('/voice-and-tone:speaker'))
+})
+
+test('the discovery skill links the speaker path and it names the scripts and flags it runs', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-discovery', 'SKILL.md'))
+  assert.ok(body.includes('speaker-discovery.md'))
+  const ref = readFileSync(surfaceFile('skills', 'voice-discovery', 'references', 'speaker-discovery.md'), 'utf8')
+  assert.match(ref, /<plugin>\/templates\/kb\/profiles\/_template/)
+  assert.match(ref, /--profile <slug>/)
+  assert.match(ref, /--set-baseline/)
+  assert.match(ref, /locks/)
+  assert.match(ref, /Which of these should be house rules/)
+})
+
+test('the applier resolves the speaker before loading a card and reports it', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-and-tone', 'SKILL.md'))
+  assert.match(body, /profiles\/<slug>\/CONTEXT\.md/)
+  assert.match(body, /--profile/)
+  assert.match(body, /lock_override/)
+  const flow = readFileSync(surfaceFile('skills', 'voice-and-tone', 'references', 'write-flow.md'), 'utf8')
+  assert.match(flow, /speaker offset applied/)
+  const interp = readFileSync(surfaceFile('skills', 'voice-and-tone', 'references', 'interpolation.md'), 'utf8')
+  assert.match(interp, /speaker_offset/)
+})
+
+test('review names origin on every finding and makes a broken lock an always-blocker', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-review', 'SKILL.md'))
+  assert.match(body, /\(house\)/)
+  assert.match(body, /locked/)
+  const sev = readFileSync(surfaceFile('skills', 'voice-review', 'references', 'severity.md'), 'utf8')
+  assert.match(sev, /locked/i)
+  const fmt = readFileSync(surfaceFile('skills', 'voice-review', 'references', 'finding-format.md'), 'utf8')
+  assert.match(fmt, /\(house\)|\(speaker\)|overrides house/)
+})
+
+test('maintenance says where a speaker correction lands and audit has a speakers section', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-maintenance', 'SKILL.md'))
+  assert.match(body, /overlay/)
+  assert.match(body, /two or more speakers/)
+  assert.match(body, /Speakers/)
+  assert.match(body, /override, or house rule/)
+  assert.match(body, /every speaker/)
+})
+
+test('observability documents the speakers panel and the per-speaker page', () => {
+  const panels = readFileSync(surfaceFile('skills', 'voice-observability', 'references', 'panels.md'), 'utf8')
+  assert.match(panels, /## `speakers`/)
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-observability', 'SKILL.md'))
+  assert.match(body, /status-<slug>\.html/)
+  assert.match(body, /--profile <slug>/)
+})
+
+test('the critic asks which speaker wrote the draft when there is more than one', () => {
+  const agent = readFileSync(surfaceFile('agents', 'voice-critic.md'), 'utf8')
+  assert.match(agent, /which speaker wrote this/i)
+  assert.match(agent, /profiles\/<slug>\/voice\.md/)
+})
+
+test('discovery asks up front whether there is one voice, several speakers, or later', () => {
+  const { body } = readFrontmatter(surfaceFile('skills', 'voice-discovery', 'SKILL.md'))
+  assert.match(body, /one voice/)
+  assert.match(body, /several speakers/)
+  assert.match(body, /decide later/)
+  assert.match(readFileSync(surfaceFile('commands', 'init.md'), 'utf8'), /one voice/)
 })
