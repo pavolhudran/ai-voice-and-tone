@@ -66,6 +66,8 @@ Creates `.voice-and-tone/` in your project root, then **commit it** - it is
 markdown, so voice changes arrive as pull requests you can read and revert.
 `.drafts/` and `sources/` are gitignored; see
 ["Where your material goes"](#where-your-material-goes) below for why.
+During discovery it asks whether the brand speaks with one voice or several;
+answer later and add speakers any time with `/voice-and-tone:speaker add`.
 
 ```
 /voice-and-tone:status         # what you have, what it is set to, what is missing
@@ -191,18 +193,11 @@ dashboard, no account:
     manifest.json    which files carry copy, and their per-locale totals
     sources.json     every source's hash, statistics, and the rules it produced
     conflicts.md     sources that genuinely disagree
-  profiles/<slug>/   one overlay per speaker: their own voice.md, tone.md, examples,
-                     and additions or overrides to everything else, merged by ID
+  profiles/<slug>/   one overlay per speaker (optional) - see Speakers
   CHANGELOG.md       appended on every approved change
 ```
 
-**Speakers.** A speaker is any first-person voice under the house - a founder,
-a support team, a product line, a mascot, an assistant. Each one is a profile
-in `config.yml` and an overlay under `profiles/<slug>/`: its voice replaces the
-house's, its default dials shift every computed cell, and everything else is
-inherited unless the overlay overrides it by ID. `locks:` in `config.yml`
-names the house rules no speaker may override. A knowledge base with no
-speakers is unchanged, byte for byte.
+Several first-person voices under one brand? See [Speakers](#speakers).
 
 **`CONTEXT.md` is generated and hand edits are discarded by design.** The
 framework this builds on has a documented flaw: its voice page and its own
@@ -212,6 +207,101 @@ hand and drifted. Here it is recompiled by `compile-context.mjs` every time.
 **The evidence ledger points both ways.** Rules cite their evidence; each evidence
 entry lists the rules it produced. Say "ignore the 2024 newsletters" and the
 plugin knows exactly which rules to reopen instead of guessing.
+
+## Speakers
+
+This is new, and optional: one knowledge base can hold a shared **house**
+layer plus one **speaker** overlay per first-person voice that writes under
+the brand.
+
+A speaker is any first-person voice under the house - a founder posting under
+her own name, a support team, a product line, a mascot, an assistant. It owns
+its voice characteristics, default dials, authored cells and examples; it
+inherits the house's lexicon, mechanics, audiences, channels and locales, and
+may override any of them by ID, except the rules the house has locked. Two
+levels, fixed: an overlay always sits on the house, never on another overlay,
+so "which rule won" is always answerable.
+
+Each speaker is a profile in `config.yml` (`default` is the house) and an
+overlay under `profiles/<slug>/`, in the same file names and rule format as
+the house. Every overlay file is optional; a missing file means "inherit":
+
+```
+profiles/<slug>/
+  CONTEXT.md         GENERATED speaker card
+  voice.md           the speaker's characteristics - replaces the house's
+  tone.md            default dials, and the cells this speaker authored
+  lexicon.md         additions and overrides, merged by ID; likewise mechanics,
+                     audience, channels, and locales
+  examples/          the speaker's approved, rejected, and before/after pairs
+  evidence/          the speaker's own fingerprint, baseline, and manifest
+  sources/           the speaker's inbox; gitignored like the house's
+```
+
+**The arithmetic gains one term.** A speaker states its default dials once;
+the difference from the house's default dials is `speaker_offset`, added to
+`state_vector + context_offset` before the clamp and the humor gates, which
+are unchanged:
+
+```
+speaker_offset       = speaker default dials - house default dials      (per dial)
+cell(context, state) = clamp(state_vector[state] + context_offset[context] + speaker_offset, 0, 4)
+```
+
+Authored cells are never shifted, and house-authored cells are not inherited:
+a speaker can only produce humor through a cell a human authored for that
+speaker, which is what keeps gate 1 honest.
+
+### Locks
+
+`locks:` in `config.yml` names the house rules no speaker may override. They
+print on every speaker card under "House guardrails (locked)", a speaker that
+breaks one fails validation, and `validate` checks that every listed ID exists
+in the house:
+
+```yaml
+locks: [V2, L20, L21, L22, M03]   # house rule IDs no speaker may override
+# one list, in one place: a lock is a governance decision owned by the brand team
+```
+
+### The speaker command
+
+- `/voice-and-tone:speaker add <slug> --name "<name>" [--from <path|url> ...] [--locale <code>]` - scaffolds the overlay, registers the material under the speaker, fingerprints it, drafts, interviews on the speaker's own strings, compiles the speaker card.
+- `/voice-and-tone:speaker list` - one line per speaker: slug, name, voice rules, authored cells, overrides, drafts pending. Read-only.
+- `/voice-and-tone:speaker remove <slug>` - retraction: reopens every rule the speaker's evidence produced, then removes the overlay, the profile, and its register entries, each step a proposed diff.
+
+### `--profile`
+
+`--profile <slug>` selects a speaker on `:write`, `:rewrite`, `:localize`,
+`:review`, `:status`, `:sync`, `:audit`, and `:connect`. Natural language
+works too: "write this as Maya" resolves to the profile whose `name` matches.
+`:learn` takes no flag - the draft's frontmatter names the profile, and that
+decides where a proposed rule lands. Review findings print their origin:
+`L03 (house)`, `L31 (maya)`, `M07 (maya, overrides house)`, `L20 (house, locked)`.
+
+A default speaker for a project is one line in its `CLAUDE.md`:
+
+```
+voice-and-tone: default profile <slug>
+```
+
+### Status and the critic
+
+The house view of `:status` gains a `speakers` panel - one line per speaker
+with voice rules, authored cells, overrides, lock violations, drift, and
+drafts pending - and five gap detectors, `G17` to `G21`: a speaker with no
+voice rule or default dials, no drift baseline, registered material never
+ingested, a card older than what it compiles from, and a house with speakers
+but an empty `locks`. `--profile <slug>` shows one speaker's resolved state,
+and `--artifact` under it writes `.drafts/status-<slug>.html`, one stable
+link per speaker.
+
+With two or more speakers the critic's read-back test asks one more question:
+**which speaker wrote this?** A wrong guess is a finding. Several speakers who
+all sound like the house is the failure mode a multi-speaker knowledge base
+exists to prevent.
+
+A knowledge base with no speakers is unchanged, byte for byte.
 
 ## Commands and skills
 
@@ -241,6 +331,9 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | `voice-maintenance` | you edited a draft, or asked how healthy the guide is |
 | `voice-observability` | you ask what state the guide is in, or what is missing |
 
+`--profile <slug>` selects a speaker on the writing, review, and status
+commands - see [Speakers](#speakers).
+
 ### The critic
 
 `agents/voice-critic.md` runs in a **fresh context** with `Read` only. It sees the
@@ -250,7 +343,7 @@ why a choice was made, and cannot be talked into accepting it.
 It also takes the **read-back test**: given the copy with its labels stripped, it
 must name the context and reader state. Guess wrong and the tone missed. No human
 needed. The dispatch is two turns precisely so the guess is made before the answer
-is revealed.
+is revealed. With two or more speakers it also asks which speaker wrote it.
 
 ## The report: a page you can send
 
@@ -292,7 +385,8 @@ terminal cannot scroll back usefully; a page can, and slicing it would hide
 exactly the cross-reading the page is for.
 
 Re-running overwrites the same path, so re-publishing updates the same link
-rather than scattering new ones.
+rather than scattering new ones. Under `--profile <slug>` the page is written
+to `.drafts/status-<slug>.html`, one stable link per speaker.
 
 ## Learning: your edits are evidence
 
