@@ -1,6 +1,6 @@
 {
   "name": "voice-and-tone-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Tests and zero-dependency scripts for the voice-and-tone Claude Code plugin.",
