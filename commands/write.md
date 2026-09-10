@@ -1,6 +1,6 @@
 ---
 description: Draft on-brand copy for a context and a reader state
-argument-hint: "<what to write> [--context <c>] [--state <s>] [--locale <code>]"
+argument-hint: "<what to write> [--context <c>] [--state <s>] [--locale <code>] [--profile <slug>]"
 ---
 
 # /voice-and-tone:write
@@ -34,7 +34,7 @@ Emotional state only. Funnel stage is a context plus a state, not a third axis.
 - `--context <c>` - one of the ten above
 - `--state <s>` - one of the eight above
 - `--locale <code>` - apply a locale pack
-- `--profile <name>` - select a brand in a multi-brand project
+- `--profile <slug>` - write as that speaker; "write this as Maya" resolves the same way
 - `--variants <n>` - produce n alternatives
 
 ## Invokes

@@ -344,13 +344,13 @@ test('learn, audit, and sync commands route to the maintenance skill', () => {
   assert.match(readFileSync(surfaceFile('commands', 'sync.md'), 'utf8'), /compile-context\.mjs|validate\.mjs/)
 })
 
-test('every command file the plugin ships is one of the ten in the spec', () => {
-  // Ten since the observability spec added :status. The list stays explicit
-  // rather than derived: a command file appearing here that no spec named is
-  // exactly what this test exists to catch.
+test('every command file the plugin ships is one of the eleven in the specs', () => {
+  // Eleven since the speaker-profiles spec added :speaker. The list stays
+  // explicit rather than derived: a command file appearing here that no spec
+  // named is exactly what this test exists to catch.
   const expected = [
     'audit.md', 'connect.md', 'init.md', 'learn.md', 'localize.md',
-    'review.md', 'rewrite.md', 'status.md', 'sync.md', 'write.md'
+    'review.md', 'rewrite.md', 'speaker.md', 'status.md', 'sync.md', 'write.md'
   ]
   const actual = readdirSync(surfaceFile('commands')).filter((f) => f.endsWith('.md')).sort()
   assert.deepEqual(actual, expected)
@@ -563,4 +563,27 @@ test('README lists :status among the commands and voice-observability among the 
   const readme = readFileSync(surfaceFile('README.md'), 'utf8')
   assert.ok(readme.includes('/voice-and-tone:status'))
   assert.ok(readme.includes('voice-observability'))
+})
+
+// --- speakers (spec 2026-09-10 §6) -----------------------------------------
+
+test('speaker is a real command with three verbs routing to the right skills', () => {
+  const body = readFileSync(surfaceFile('commands', 'speaker.md'), 'utf8')
+  assert.match(body, /^---\ndescription:/m)
+  for (const verb of ['add', 'list', 'remove']) assert.ok(body.includes(`speaker ${verb}`), verb)
+  assert.match(body, /voice-discovery/)
+  assert.match(body, /voice-maintenance/)
+  assert.match(body, /voice-observability/)
+  assert.match(body, /--from/)
+})
+
+test('every command that drafts, reviews, or reports documents --profile', () => {
+  for (const name of ['write', 'rewrite', 'localize', 'review', 'status', 'sync', 'audit', 'connect']) {
+    const body = readFileSync(surfaceFile('commands', `${name}.md`), 'utf8')
+    assert.ok(body.includes('--profile'), `${name}.md never mentions --profile`)
+  }
+})
+
+test('README lists :speaker among the commands', () => {
+  assert.ok(readFileSync(surfaceFile('README.md'), 'utf8').includes('/voice-and-tone:speaker'))
 })

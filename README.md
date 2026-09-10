@@ -191,8 +191,18 @@ dashboard, no account:
     manifest.json    which files carry copy, and their per-locale totals
     sources.json     every source's hash, statistics, and the rules it produced
     conflicts.md     sources that genuinely disagree
+  profiles/<slug>/   one overlay per speaker: their own voice.md, tone.md, examples,
+                     and additions or overrides to everything else, merged by ID
   CHANGELOG.md       appended on every approved change
 ```
+
+**Speakers.** A speaker is any first-person voice under the house - a founder,
+a support team, a product line, a mascot, an assistant. Each one is a profile
+in `config.yml` and an overlay under `profiles/<slug>/`: its voice replaces the
+house's, its default dials shift every computed cell, and everything else is
+inherited unless the overlay overrides it by ID. `locks:` in `config.yml`
+names the house rules no speaker may override. A knowledge base with no
+speakers is unchanged, byte for byte.
 
 **`CONTEXT.md` is generated and hand edits are discarded by design.** The
 framework this builds on has a documented flaw: its voice page and its own
@@ -220,6 +230,7 @@ Commands are explicit. Skills trigger themselves - ask for a button label and
 | `/voice-and-tone:status` | what you have, what it is set to, and what is missing |
 | `/voice-and-tone:sync` | validate and recompile the card |
 | `/voice-and-tone:localize` | apply a locale pack |
+| `/voice-and-tone:speaker` | add, list, or remove a speaker that inherits the house and replaces its voice |
 
 | Skill | Triggers when |
 |---|---|

@@ -1,6 +1,6 @@
 ---
 description: Review copy against the knowledge base, with severities and file:line anchors
-argument-hint: "<text, file, directory, or --diff> [--critic]"
+argument-hint: "<text, file, directory, or --diff> [--critic] [--profile <slug>]"
 ---
 
 # /voice-and-tone:review
@@ -28,6 +28,15 @@ and reader state? A wrong guess means the tone missed.
 
 Use it whenever this session wrote the copy. Self-review by the author is worth
 less than it feels like.
+
+## Speakers
+
+`--profile <slug>` reviews against that speaker's resolved rules. Every
+finding names the rule's origin - `L03 (house)`, `L31 (maya)`,
+`M07 (maya, overrides house)`, `L20 (house, locked)` - and a locked house
+rule broken is always a Blocker. Without the flag, and without a draft
+frontmatter naming a profile, copy is reviewed against the house, and the
+report's first line says so.
 
 ## Invokes
 
