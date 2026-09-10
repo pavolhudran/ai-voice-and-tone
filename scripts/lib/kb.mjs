@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { readTextFile } from './fsx.mjs'
-import { loadConfig } from './config.mjs'
+import { loadConfig, isSpeaker, overlayRoot as overlayRootFor, activeProfile } from './config.mjs'
 
 export const STATES = [
   'delighted', 'curious', 'focused', 'uncertain',
@@ -218,6 +218,37 @@ export function parseDials (raw) {
   return dials
 }
 
+/**
+ * The `**Default dials:**` line of a tone.md, or null when there is none.
+ * Moved here from compile-context.mjs so the speaker offset (below) and the
+ * card compiler read the same line the same way.
+ */
+export function defaultDialsOf (toneMd) {
+  const line = /^\*\*Default dials:\*\*\s*(.+)$/m.exec(toneMd || '')
+  return line ? parseDials(line[1]) : null
+}
+
+/**
+ * Spec 2026-09-10 §4.3: speaker_offset = overlay default dials - house
+ * default dials, per dial. Derived, never authored: one line in the overlay
+ * shifts the whole matrix. A house with no dials line counts as the neutral
+ * 2 on every dial, matching compile-context's NEUTRAL_DIALS. An overlay
+ * with no dials line yields null - the speaker has not stated a voice yet,
+ * and validate reports W_SPEAKER_NO_VOICE rather than silently using zero.
+ */
+export function speakerOffsetOf (houseToneMd, overlayToneMd) {
+  const overlay = defaultDialsOf(overlayToneMd)
+  if (!overlay) return null
+  // The neutral fallback matches compile-context's NEUTRAL_DIALS: 2 on
+  // every dial except humor, which is 0 - gate 1 zeroes humor on every
+  // computed cell, so a nonzero neutral there would contradict the card.
+  const neutral = (dial) => (dial === 'humor' ? 0 : 2)
+  const house = defaultDialsOf(houseToneMd) ?? {}
+  const out = {}
+  for (const dial of DIALS) out[dial] = Number(overlay[dial] ?? neutral(dial)) - Number(house[dial] ?? neutral(dial))
+  return out
+}
+
 function parseList (raw) {
   if (!raw) return []
   return String(raw).split(LIST_SEPARATOR).map((item) => item.trim()).filter(Boolean)
@@ -300,11 +331,13 @@ export function parseEvidence (md) {
 
 const clamp = (n) => Math.max(0, Math.min(4, n))
 
-/** Spec 6.5 arithmetic, plus gate 1: computed cells never carry humor. */
-export function interpolate (stateVector = {}, contextOffset = {}) {
+/** Spec 6.5 arithmetic plus the speaker term (2026-09-10 §4.3), then gate 1: computed cells never carry humor. */
+export function interpolate (stateVector = {}, contextOffset = {}, speakerOffset = {}) {
   const dials = {}
   for (const dial of DIALS) {
-    dials[dial] = clamp(Number(stateVector[dial] ?? 2) + Number(contextOffset[dial] ?? 0))
+    dials[dial] = clamp(
+      Number(stateVector[dial] ?? 2) + Number(contextOffset[dial] ?? 0) + Number(speakerOffset?.[dial] ?? 0)
+    )
   }
   dials.humor = 0
   return dials
@@ -324,7 +357,7 @@ export function applyHumorGates (dials, state) {
  * parseToneCells, still carries the raw authored value; that is where
  * validate.mjs looks to catch a cell that violates gate 2.)
  */
-export function resolveCell (context, state, { cells = [], vectors = { states: {}, contexts: {} } } = {}) {
+export function resolveCell (context, state, { cells = [], vectors = { states: {}, contexts: {} }, speakerOffset = {} } = {}) {
   const id = cellId(context, state)
   const authored = cells.find((cell) => cell.id === id)
 
@@ -345,7 +378,7 @@ export function resolveCell (context, state, { cells = [], vectors = { states: {
     id,
     context,
     state,
-    dials: applyHumorGates(interpolate(vectors.states[state], vectors.contexts[context]), state),
+    dials: applyHumorGates(interpolate(vectors.states[state], vectors.contexts[context], speakerOffset), state),
     source: 'interpolated',
     confidence: 'interpolated',
     cell: null
@@ -419,5 +452,136 @@ export function loadKb (kbRoot) {
     cells: parseToneCells(files.tone),
     vectors: parseVectors(files.tone),
     evidence: parseEvidence(files.ledger)
+  }
+}
+
+// ------------------------------------------------------------------ speakers
+
+const VOICE = (rule) => rule.id.startsWith('V')
+
+/**
+ * Spec 2026-09-10 §4.2 and §4.4. Voice replaces as a set: if the overlay has
+ * any V rule, the house's unlocked V rules are dropped and its locked ones
+ * are appended after the speaker's. Everything else merges by id: same id
+ * overrides, new id adds, a locked id is refused and recorded.
+ *
+ * Order matters for byte identity downstream: with an empty overlay the
+ * result is the house list in the house's own order, tagged - nothing moves.
+ */
+export function mergeRules (houseRules, overlayRules, locks = []) {
+  const locked = new Set(locks)
+  const tagHouse = (rule) => ({ ...rule, origin: 'house', locked: locked.has(rule.id) })
+  const tagSpeaker = (rule) => ({ ...rule, origin: 'speaker', locked: false })
+
+  const overrides = []
+  const lockViolations = []
+  const overlayById = new Map()
+  for (const rule of overlayRules) if (!overlayById.has(rule.id)) overlayById.set(rule.id, rule)
+  const speakerHasVoice = overlayRules.some(VOICE)
+
+  const rules = []
+  for (const house of houseRules) {
+    const hit = overlayById.get(house.id)
+    if (locked.has(house.id)) {
+      if (hit) lockViolations.push({ id: house.id, file: hit.path ?? `${hit.file}.md`, line: hit.line, houseRule: house })
+      if (VOICE(house) && speakerHasVoice) continue // appended after the speaker's voice, below
+      rules.push(tagHouse(house))
+      continue
+    }
+    if (VOICE(house) && speakerHasVoice) continue
+    if (hit) continue // replaced; the speaker rule is pushed in overlay order below
+    rules.push(tagHouse(house))
+  }
+  for (const rule of overlayRules) {
+    if (locked.has(rule.id)) continue
+    const houseRule = houseRules.find((h) => h.id === rule.id)
+    const tagged = tagSpeaker(rule)
+    if (houseRule && !VOICE(rule)) {
+      tagged.overrides = houseRule
+      overrides.push(tagged)
+    }
+    rules.push(tagged)
+  }
+  if (speakerHasVoice) {
+    for (const house of houseRules) if (VOICE(house) && locked.has(house.id)) rules.push(tagHouse(house))
+  }
+  return { rules, overrides, lockViolations }
+}
+
+/**
+ * The house plus one overlay, merged by the rules in spec 2026-09-10 §4.
+ * This is the one function every consumer reads a knowledge base through;
+ * loadKb() is the per-directory parser underneath it.
+ *
+ * With no overlay - `default`, an undeclared name, or a declared speaker
+ * whose directory does not exist yet - the result is the house with
+ * `origin`, `locked` and `path` on every rule and nothing else changed.
+ */
+export function resolveKb (kbRoot, profileName = 'default') {
+  const house = loadKb(kbRoot)
+  const config = house.config
+  const locks = Array.isArray(config.locks) ? config.locks : []
+  const withPath = (rules, prefix) => rules.map((rule) => ({
+    ...rule, path: prefix ? path.posix.join(prefix, `${rule.file}.md`) : `${rule.file}.md`
+  }))
+
+  const overlayDir = overlayRootFor(kbRoot, profileName)
+  const speaking = isSpeaker(config, profileName) && existsSync(overlayDir)
+
+  if (!speaking) {
+    const { rules } = mergeRules(withPath(house.rules, ''), [], locks)
+    return {
+      ...house,
+      rules,
+      profileName,
+      role: 'house',
+      speaker: null,
+      locks,
+      overrides: [],
+      lockViolations: [],
+      speakerOffset: null,
+      houseRoot: kbRoot,
+      overlayRoot: null,
+      house,
+      overlay: null
+    }
+  }
+
+  const overlay = loadKb(overlayDir)
+  const prefix = path.posix.join('profiles', profileName)
+  const { rules, overrides, lockViolations } = mergeRules(
+    withPath(house.rules, ''), withPath(overlay.rules, prefix), locks
+  )
+  const profile = activeProfile(config, profileName)
+
+  return {
+    ...house,
+    // The overlay owns the tone text: default dials and authored cells are
+    // the speaker's. Vectors merge row by row; cells are NOT inherited (§4.3).
+    tone: overlay.tone,
+    cells: overlay.cells,
+    vectors: {
+      states: { ...house.vectors.states, ...overlay.vectors.states },
+      contexts: { ...house.vectors.contexts, ...overlay.vectors.contexts }
+    },
+    channels: { ...house.channels, ...overlay.channels },
+    locales: { ...house.locales, ...overlay.locales },
+    unparsedHeadings: [
+      ...house.unparsedHeadings,
+      ...overlay.unparsedHeadings.map((h) => ({ ...h, file: path.posix.join(prefix, h.file) }))
+    ],
+    rules,
+    config,
+    profileName,
+    role: 'speaker',
+    speaker: { slug: profileName, name: profile.name },
+    locks,
+    overrides,
+    lockViolations,
+    speakerOffset: speakerOffsetOf(house.tone, overlay.tone),
+    houseRoot: kbRoot,
+    overlayRoot: overlayDir,
+    house,
+    overlay
   }
 }
