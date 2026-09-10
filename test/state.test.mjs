@@ -653,6 +653,8 @@ test('a speaker view resolves that speaker: rules by origin, cells, locks violat
   const state = fixtureState('jonas')
   assert.equal(state.kb.role, 'speaker')
   assert.deepEqual(state.kb.speaker, { slug: 'jonas', name: 'Jonas Berg' })
+  assert.equal(state.kb.brand, 'Acme', 'the brand is the house, whoever is speaking')
+  assert.equal(state.kb.profile, 'jonas')
   assert.deepEqual(state.locks.violated, ['L20'])
   assert.ok(state.integrity.errors >= 1)
   assert.equal(state.rules.byOrigin.speaker, 1, 'L02 only; the L20 row was refused')

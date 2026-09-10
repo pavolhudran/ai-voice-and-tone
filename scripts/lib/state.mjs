@@ -465,7 +465,9 @@ export function collect ({ projectRoot, kbRoot, config, profileName = 'default',
       root: kbRoot,
       exists,
       version: config.kb_version ?? null,
-      brand: profile.name ?? null,
+      // The brand is the house's name whoever is speaking: a speaker view
+      // reads "Acme | maya (speaker)", never "Maya Lind | maya (speaker)".
+      brand: (kb.role === 'speaker' ? activeProfile(config, 'default') : profile).name ?? null,
       profile: profileName,
       locales: profile.locales ?? [profile.primary_locale ?? 'en'],
       primaryLocale: profile.primary_locale ?? 'en',
