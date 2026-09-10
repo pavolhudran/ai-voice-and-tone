@@ -164,15 +164,24 @@ function hero (state) {
         ? 'Nothing authored yet. Every cell below is arithmetic, not a decision anyone made.'
         : `${plural(authored, 'cell')} authored of ${possible}, and ${plural(Number(rules.total) || 0, 'rule')} that can be checked.`
 
+  const speaking = kb.role === 'speaker'
+  const speakers = state.speakers ?? []
   const specs = [
     ['profile', kb.profile ?? 'default'],
     ['locales', (kb.locales ?? []).join(', ') || 'none'],
     ['kb', kb.version ?? '-'],
-    ['card', `${num(state.cardTokens, '0')} tokens`]
+    ['card', `${num(state.cardTokens, '0')} tokens`],
+    // The chip appears only once a speaker exists, so a speaker-free page is
+    // the page it always was.
+    ...(!speaking && speakers.length ? [['speakers', String(speakers.length)]] : [])
   ].map(([k, v]) => `<span class="spec">${escapeHtml(k)} <b>${escapeHtml(v)}</b></span>`).join('\n        ')
 
+  const eyebrow = speaking
+    ? `Voice and tone, speaking as ${escapeHtml(kb.speaker?.name ?? kb.profile ?? '')}`
+    : 'Voice and tone, knowledge base state'
+
   return `<header class="hero">
-      <p class="eyebrow">Voice and tone, knowledge base state</p>
+      <p class="eyebrow">${eyebrow}</p>
       <h1>${escapeHtml(kb.brand ?? 'Unnamed')}</h1>
       <p class="lede">${escapeHtml(headline)}</p>
       <div class="specs">
@@ -306,7 +315,7 @@ function matrix (coverage) {
  * carries that consequence in words, so the ramp reinforces the reading rather
  * than being the only thing that carries it.
  */
-function confidence (rules) {
+function confidence (rules, role = 'house') {
   const by = rules?.byConfidence ?? {}
   const total = Number(rules?.total) || 0
   const rows = Object.keys(CONFIDENCE_CONSEQUENCE).map((level) => {
@@ -318,7 +327,57 @@ function confidence (rules) {
           <span class="conf__use">${escapeHtml(CONFIDENCE_CONSEQUENCE[level])}</span>
         </li>`
   }).join('\n        ')
-  return `<ul class="confs">\n        ${rows}\n      </ul>`
+  if (role !== 'speaker') return `<ul class="confs">\n        ${rows}\n      </ul>`
+  // A speaker's rules are the house's plus its own, minus what it replaced.
+  // Which is which is the reading a speaker page owes its reader.
+  const origin = rules?.byOrigin ?? {}
+  const originRows = [['house', origin.house], ['speaker', origin.speaker], ['overrides', origin.overrides], ['locked', origin.locked]]
+    .map(([k, v]) => `<tr><th scope="row">${escapeHtml(k)}</th><td class="n">${num(v, '0')}</td></tr>`).join('\n          ')
+  return `<ul class="confs">\n        ${rows}\n      </ul>
+      <div class="table__scroll">
+        <table class="data data--head">
+          <caption class="sr-only">Rules by origin</caption>
+          <thead><tr><th scope="col">origin</th><th scope="col">rules</th></tr></thead>
+          <tbody>
+          ${originRows}
+          </tbody>
+        </table>
+      </div>`
+}
+
+// ----------------------------------------------------------------- speakers
+
+/**
+ * House view only: one row per declared speaker, the same columns the ASCII
+ * panel prints. Drift and lock state are carried in words inside a pill, not
+ * in colour alone, for the same reason the matrix marks authored cells with
+ * a shape.
+ */
+function speakersSection (state) {
+  const rows = (state.speakers ?? []).map((s) => {
+    const drift = !s.driftBaseline
+      ? '<span class="pill pill--soft">n/a</span>'
+      : s.driftFlagged ? '<span class="pill pill--warn">FLAG</span>' : '<span class="pill pill--good">ok</span>'
+    return `<tr>
+            <th scope="row">${escapeHtml(s.slug)}</th>
+            <td>${escapeHtml(s.name)}</td>
+            <td class="n">${num(s.voiceRules, '0')}</td>
+            <td class="n">${num(s.authoredCells, '0')}</td>
+            <td class="n">${num(s.overrides, '0')}</td>
+            <td class="n">${s.lockViolations ? `<span class="pill pill--warn">${num(s.lockViolations)}</span>` : '-'}</td>
+            <td>${drift}</td>
+            <td class="n">${num(s.draftsPending, '0')}</td>
+          </tr>`
+  }).join('\n          ')
+  return `<div class="table__scroll">
+        <table class="data data--head">
+          <caption class="sr-only">Speakers declared on this house</caption>
+          <thead><tr><th scope="col">slug</th><th scope="col">name</th><th scope="col">voice</th><th scope="col">cells</th><th scope="col">overrides</th><th scope="col">locks broken</th><th scope="col">drift</th><th scope="col">drafts</th></tr></thead>
+          <tbody>
+          ${rows}
+          </tbody>
+        </table>
+      </div>`
 }
 
 // --------------------------------------------------------------------- drift
@@ -516,7 +575,15 @@ function settings (state) {
           </tbody>
         </table>
       </div>
-      <p class="note">Locale packs: ${packs.length ? escapeHtml(packs.join(', ')) : 'none authored'}. Extractors: ${vendor ? `<ul class="inline">${vendor}</ul>` : 'none'}</p>`
+      <p class="note">Locale packs: ${packs.length ? escapeHtml(packs.join(', ')) : 'none authored'}. Extractors: ${vendor ? `<ul class="inline">${vendor}</ul>` : 'none'}</p>${locksNote(state)}`
+}
+
+/** Present only once locks could govern something: a speaker view, or a house that declares any. */
+function locksNote (state) {
+  const declared = state.locks?.declared ?? []
+  if (state.kb?.role !== 'speaker' && declared.length === 0) return ''
+  const list = declared.length ? declared.map((id) => `<code>${escapeHtml(id)}</code>`).join(' ') : 'none declared'
+  return `\n      <p class="note">Locks: ${list}</p>`
 }
 
 // -------------------------------------------------------------------- styles
@@ -809,6 +876,7 @@ tr.is-flagged .track__fill { background: var(--warn); }
 }
 .pill--warn { color: var(--warn); background: var(--warn-bg); }
 .pill--soft { color: var(--ink-faint); }
+.pill--good { color: var(--good); }
 
 .colophon {
   margin-top: clamp(3rem, 6vw, 4.5rem); padding-top: 1.15rem; border-top: 2px solid var(--ink);
@@ -883,11 +951,13 @@ export function renderHtml (state) {
   ${section('attention', 'What to do next', 'Ranked by leverage: the change that unblocks the most other work sits at the top.', attention(state.gaps))}
 
   ${section('pipeline', 'Pipeline', 'Which steps of discovery this knowledge base has actually been through.', pipeline(state.stage))}
-
+${kb.role !== 'speaker' && (state.speakers ?? []).length
+    ? `\n  ${section('speakers', 'Speakers', 'Each speaker inherits the house and replaces its voice. Locked house rules apply to all of them.', speakersSection(state))}\n`
+    : ''}
   ${section('matrix', 'Tone matrix', 'Ten contexts against eight reader states. An authored cell was written and approved by a person; a computed cell is interpolated from the dial arithmetic and never carries humor.', matrix(coverage))}
 
   <div class="grid">
-    <div class="plate">${section('rules', 'Rules by confidence', 'Confidence is not a rating of the rule. It is what happens when the rule is broken.', confidence(rules))}</div>
+    <div class="plate">${section('rules', 'Rules by confidence', 'Confidence is not a rating of the rule. It is what happens when the rule is broken.', confidence(rules, kb.role))}</div>
     <div class="plate">${section('evidence', 'Evidence', 'Every rule points back to entries here. Nothing is asserted without one.', evidence(state))}</div>
   </div>
 

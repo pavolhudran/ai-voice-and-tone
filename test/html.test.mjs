@@ -12,7 +12,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /** The smallest state object that exercises every section. */
 const STATE = {
   generated: '2026-08-31T00:00:00.000Z',
-  kb: { root: '/tmp/kb', exists: true, version: '0.2.0', brand: 'Northwind', profile: 'default', locales: ['en', 'cs'], primaryLocale: 'en' },
+  kb: { root: '/tmp/kb', exists: true, version: '0.2.0', brand: 'Northwind', profile: 'default', locales: ['en', 'cs'], primaryLocale: 'en', role: 'house', speaker: null },
+  locks: { declared: [], violated: [] },
+  speakers: [],
   stage: { at: 'interview', reached: { scan: true, ingest: false, measure: true, draft: true, interview: true, canonize: false } },
   integrity: {
     errors: 1,
@@ -35,7 +37,7 @@ const STATE = {
       { context: 'system-error', authored: 0, of: 8, cells: Array(8).fill('computed'), traffic: 12 }
     ]
   },
-  rules: { total: 4, byConfidence: { confirmed: 2, derived: 1, assumed: 1, disputed: 0 }, byFile: { voice: 4 } },
+  rules: { total: 4, byConfidence: { confirmed: 2, derived: 1, assumed: 1, disputed: 0 }, byFile: { voice: 4 }, byOrigin: { house: 4, speaker: 0, overrides: 0, locked: 0 } },
   evidence: { total: 3, byType: { source: 1, corpus: 1, interview: 1, correction: 0, decision: 0 }, conflicts: 0, drafts: 0 },
   drift: {
     thresholdPct: 25,
@@ -243,4 +245,50 @@ test('every top-level block takes the same vertical rhythm, plate rows included'
   assert.match(css, /\.section,\s*\.grid\s*\{\s*margin-top:\s*var\(--rhythm\)/)
   assert.match(css, /\.plate \.section,\s*\.plate \.grid\s*\{\s*margin-top:\s*0/,
     'but a section inside a plate is that plate\'s heading, not a new block')
+})
+
+// --- speakers (spec 2026-09-10 §9.4) ---------------------------------------
+
+const SPEAKERS = [
+  { slug: 'maya', name: 'Maya Lind', voiceRules: 6, hasDefaultDials: true, authoredCells: 3, overrides: 2, lockViolations: 0, corpusWords: 900, fingerprintAgeDays: 1, driftBaseline: true, driftFlagged: false, draftsPending: 1, sourcesNeverIngested: 0, cardStale: [] },
+  { slug: 'jonas', name: 'Jonas Berg', voiceRules: 6, hasDefaultDials: true, authoredCells: 1, overrides: 0, lockViolations: 0, corpusWords: 0, fingerprintAgeDays: null, driftBaseline: false, driftFlagged: false, draftsPending: 0, sourcesNeverIngested: 0, cardStale: null },
+  { slug: 'helpdesk', name: 'Acme Support', voiceRules: 5, hasDefaultDials: true, authoredCells: 0, overrides: 1, lockViolations: 1, corpusWords: 1200, fingerprintAgeDays: 3, driftBaseline: true, driftFlagged: true, draftsPending: 0, sourcesNeverIngested: 0, cardStale: [] }
+]
+
+test('with no speakers and no locks the page has no Speakers section, no chip, no locks note', () => {
+  const html = renderHtml(STATE)
+  assert.ok(!html.includes('id="speakers"'))
+  assert.ok(!html.includes('speakers <b>'))
+  assert.ok(!html.includes('Locks:'))
+})
+
+test('the house view with speakers renders the Speakers section, one row each, and the chip', () => {
+  const html = renderHtml({ ...STATE, speakers: SPEAKERS, locks: { declared: ['V2'], violated: [] } })
+  assert.ok(html.includes('id="speakers"'))
+  assert.match(html, /speakers <b>3<\/b>/)
+  assert.match(html, /<th scope="row">maya<\/th>/)
+  assert.match(html, /Maya Lind/)
+  assert.match(html, /class="pill pill--warn"[^>]*>FLAG</)
+  assert.match(html, /n\/a/)
+  assert.match(html, /Locks: <code>V2<\/code>/)
+})
+
+test('a speaker view says who is speaking and splits rules by origin', () => {
+  const html = renderHtml({
+    ...STATE,
+    kb: { ...STATE.kb, role: 'speaker', speaker: { slug: 'maya', name: 'Maya Lind' }, profile: 'maya' },
+    speakers: [SPEAKERS[0]],
+    locks: { declared: ['V2'], violated: [] },
+    rules: { ...STATE.rules, byOrigin: { house: 31, speaker: 12, overrides: 2, locked: 6 } }
+  })
+  assert.match(html, /speaking as Maya Lind/)
+  assert.ok(!html.includes('id="speakers"'), 'house view only')
+  assert.match(html, /<th scope="row">house<\/th><td class="n">31<\/td>/)
+  assert.match(html, /<th scope="row">overrides<\/th><td class="n">2<\/td>/)
+})
+
+test('every speaker name is escaped', () => {
+  const html = renderHtml({ ...STATE, speakers: [{ ...SPEAKERS[0], name: 'A <b>bold</b> & co' }] })
+  assert.ok(html.includes('A &lt;b&gt;bold&lt;/b&gt; &amp; co'))
+  assert.ok(!html.includes('A <b>bold</b>'))
 })
