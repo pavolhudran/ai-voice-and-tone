@@ -18,12 +18,20 @@ every script accepts `--profile`, but a profile only selects locales and scan
 paths. `loadKb()` reads one `voice.md`, one `tone.md`, and one of everything
 else, whatever profile is named.
 
-The requesting client (Finshape) needs about fifteen named LinkedIn
-ambassadors, each with a personal tone of voice, alongside the corporate voice.
-Their three sample persona documents share four house rules restated in
-slightly different words each time, and differ from each other in *voice*, not
-tone: one writes only "we", one writes "I tested this myself", one writes
-British English with a citation format.
+That is enough for a brand that speaks with one voice. It is not enough as
+soon as more than one first-person voice writes under the same brand, which
+is common: founders and executives posting under their own names, a support
+team with its own register, a product line or sub-brand, a mascot, an AI
+assistant with a voice deliberately distinct from the marketing site's.
+
+The request that triggered this spec was a company with about fifteen named
+ambassadors, each with a personal tone-of-voice document, alongside the
+company voice. The sample documents showed the shape any such case shows:
+the same handful of house rules restated in every document in slightly
+different words, and differences between people that are *voice*, not tone -
+one writes only "we", one writes "I tested this myself", one writes a
+different regional variant of the language with its own citation style. The
+design below is for the shape, not for that company.
 
 The feature therefore has to satisfy three things at once:
 
@@ -37,7 +45,7 @@ The feature therefore has to satisfy three things at once:
 | Term | Means |
 |---|---|
 | **house** | The shared layer: every file at `<KB>/` root. Also a speaker in its own right - the brand's own voice. |
-| **speaker** | Anyone who writes in the first person: the brand page or a named person. |
+| **speaker** | Any first-person voice under the house: the brand itself, a named person, a team, a product line, a mascot, an AI assistant. |
 | **overlay** | The directory `<KB>/profiles/<slug>/` holding one speaker's own rules. |
 | **profile** | A `config.yml` entry. `default` is the house. Every other profile is a speaker and owns one overlay. |
 | **locked rule** | A house rule listed under `locks:` in `config.yml`. It applies to every speaker and cannot be overridden. |
@@ -50,10 +58,10 @@ answerable.
 
 ### 1.2 Non-goals
 
-- Topics, content pillars, and regional editorial focus. Those describe what
-  to write about; this plugin governs how. The client's "Content Pillars" and
-  "Regions" tabs stay outside the knowledge base, and the client should hear
-  that before a demo rather than during one.
+- Topics, content pillars, editorial calendars, and regional or market
+  focus. Those describe what to write about; this plugin governs how. An
+  adopter whose own system carries such fields should hear that they stay
+  outside the knowledge base before a demo rather than during one.
 - Inheritance between speakers, or speaker groups.
 - Publishing, scheduling, or anything after the draft exists.
 
@@ -115,22 +123,24 @@ version: 1
 kb_version: 0.3.0
 profiles:
   default:                      # the house
-    name: "Finshape"
+    name: "Acme"
     primary_locale: en
-    locales: [en]
-  ahmed:                        # a speaker; overlay at profiles/ahmed/
-    name: "Ahmed Khidhir"
+    locales: [en, de]
+  maya:                         # a person; overlay at profiles/maya/
+    name: "Maya Lind"
     # primary_locale and locales inherited from default unless set
-  miroslav:
-    name: "Miroslav Hlaváč"
-    locales: [en-GB]            # a speaker may narrow or change locales
+  helpdesk:                     # a team; overlay at profiles/helpdesk/
+    name: "Acme Support"
+  bramble:                      # a product line; overlay at profiles/bramble/
+    name: "Acme Bramble"
+    locales: [en]               # a speaker may narrow or change locales
 locks: [V2, L20, L21, L22, M03]        # house rule IDs no speaker may override
 scan: ...
 sources:
   - id: s01
     kind: local
-    path: profiles/ahmed/sources
-    profile: ahmed              # attributes every file here to the speaker
+    path: profiles/maya/sources
+    profile: maya               # attributes every file here to the speaker
 thresholds: ...
 ```
 
@@ -249,8 +259,8 @@ the one signature change. `resolveCell` passes it through. The
 the arithmetic by hand, gains the third term.
 
 Rejected alternative: require a speaker to re-author all eight state vectors.
-Eight rows of six numbers per speaker, fifteen speakers, and the rows are
-psychology, not personality; they would be copied, then drift.
+Eight rows of six numbers per speaker, times however many speakers, and the
+rows are psychology, not personality; they would be copied, then drift.
 
 ### 4.4 Lexicon, mechanics, audience, channels, locales - merge by ID
 
@@ -282,15 +292,16 @@ because the next house rule would silently turn an addition into an override.
 - `evidence/sources.json` entries gain `profile`. `sources.mjs --ingest`
   writes it from `--profile` or from the register entry's `profile` field.
 - `evidence/fingerprint.json` and `manifest.json` exist per speaker under the
-  overlay, because drift is per speaker: Miroslav drifting from his own
+  overlay, because drift is per speaker: one speaker drifting from their own
   baseline is a different fact from the house drifting from its own.
 - `.drafts/` frontmatter already records `profile`. It gains
   `lock_override` (§4.1) when applicable.
 
 ### 4.6 Locales
 
-A speaker may declare locales the house does not (`en-GB`). The speaker's
-overlay `locales/en-GB.md` is then the pack. Validation check 5 already
+A speaker may declare a locale the house does not - a regional variant, or
+a language only that speaker publishes in. The speaker's overlay
+`locales/<code>.md` is then the pack. Validation check 5 already
 aggregates locales across every declared profile, so a speaker-only locale is
 not flagged.
 
@@ -306,7 +317,7 @@ speaker.
 The speaker card differs from the house card in four places, all within the
 existing token budget (`G16`, 900 tokens):
 
-1. **Header line:** `**Brand:** Finshape · **Speaker:** Ahmed Khidhir (ahmed) · **Locales:** en · ...`
+1. **Header line:** `**Brand:** Acme · **Speaker:** Maya Lind (maya) · **Locales:** en, de · ...`
 2. **Voice:** the speaker's characteristics, then a `## House guardrails
    (locked)` list. A locked rule shows its `Rules out:` line, since that is
    the part a writer needs.
@@ -351,17 +362,17 @@ Invokes: `voice-discovery` (add), `voice-observability` (list),
 
 | Command | Change |
 |---|---|
-| `write`, `rewrite`, `localize` | `--profile <slug>` selects the speaker. Already listed in `write.md` as "select a brand in a multi-brand project"; now implemented. Natural language "write this as Dan" resolves to the profile whose `name` matches. |
-| `review` | `--profile <slug>`. Findings print origin: `L03 (house)`, `L31 (dan)`, `M07 (dan, overrides house)`, `L20 (house, locked)`. |
+| `write`, `rewrite`, `localize` | `--profile <slug>` selects the speaker. Already listed in `write.md` as "select a brand in a multi-brand project"; now implemented. Natural language "write this as Maya" resolves to the profile whose `name` matches. |
+| `review` | `--profile <slug>`. Findings print origin: `L03 (house)`, `L31 (maya)`, `M07 (maya, overrides house)`, `L20 (house, locked)`. |
 | `status` | `--profile <slug>` shows that speaker's resolved state. Without it, the house view gains a `speakers` panel. `--artifact` per speaker writes `.drafts/status-<slug>.html`. See §9. |
 | `sync` | Validates and compiles the house and every speaker. `--profile <slug>` limits to one. |
 | `audit` | `--profile <slug>` audits one speaker. Without it, the house audit gains a fifth section, "Speakers" (§7.3). |
 | `learn` | No flag. The draft's frontmatter names the profile, and that decides where a proposed rule lands (§7.2). |
 | `connect` | `--profile <slug>` on register and ingest, persisted into the register entry. |
-| `init` | Unchanged. Creates the house. Mentions `speaker add` in its closing report when the brand name suggests people write for it. |
+| `init` | Unchanged. Creates the house. Mentions `speaker add` in its closing report when the conversation has named more than one first-person voice. |
 
 A default speaker for a session can be set in the project's `CLAUDE.md`
-(`voice-and-tone: default profile dan`); precedence level 2 already covers
+(`voice-and-tone: default profile maya`); precedence level 2 already covers
 it, so nothing new is needed in the plugin beyond documenting the line.
 
 ### 6.3 No other new commands
@@ -399,10 +410,10 @@ one with these differences:
   writing the same rule independently is corroboration for the house.
 - Canonize compiles the speaker card.
 
-Also: when `init` runs on a house whose name suggests people write for it, or
-when the user mentions ambassadors, executives, or authors, the skill offers
-`speaker add` at the end and proposes the house's "Never say" IDs into
-`locks`.
+Also: when the conversation has named more than one first-person voice -
+founders, executives, ambassadors, authors, a support team, a product line, a
+mascot, an assistant - the skill offers `speaker add` at the end of `init`
+and proposes the house's "Never say" IDs into `locks`.
 
 ### 7.2 `voice-maintenance` - where a correction lands
 
@@ -437,7 +448,7 @@ rules are added anywhere; **patch** for wording and examples.
   back to the house's with a note.
 - Step 6, self-check: locked rules are checked explicitly and named in the
   report line if the user instruction forced a break.
-- Step 8, report line: `profile dan · cell: social/curious (interpolated,
+- Step 8, report line: `profile maya · cell: social/curious (interpolated,
   speaker offset applied) · locale: en`.
 
 `microcopy` changes only in passing the profile through.
@@ -452,8 +463,8 @@ rules are added anywhere; **patch** for wording and examples.
   instruction.
 - Reviewing a speaker's text without `--profile` and without a draft
   frontmatter reviews it against the house, and the report's first line says
-  so, because the most likely mistake is reviewing Dan against Finshape and
-  filing his voice as violations.
+  so, because the most likely mistake is reviewing a speaker against the
+  house and filing their voice as violations.
 
 ### 7.5 `voice-observability`
 
@@ -466,9 +477,9 @@ The read-back test asks the critic to name the context and reader state from
 the bare draft. When the knowledge base has two or more speakers, turn 1 also
 asks: **which speaker wrote this?** The critic is given the list of speaker
 names and each speaker's `voice.md` path, nothing else. A wrong guess is a
-finding: the draft is not distinguishably that person. This is the test the
-client's ambassador programme actually needs - fifteen executives who all
-sound like the house is the failure mode - and it costs one extra line in the
+finding: the draft is not distinguishably that speaker. This is the test a
+multi-speaker knowledge base actually needs - several speakers who all sound
+like the house is the failure mode - and it costs one extra line in the
 first-turn prompt.
 
 Turn 2 hands the critic the resolved speaker card and overlay paths, as it
@@ -509,7 +520,7 @@ hands the house paths today.
 
 Existing checks run unchanged over the house and over each resolved speaker;
 messages on overlay findings name the speaker, so `E_HUMOR_GATE` on
-`profiles/dan/tone.md` reads as Dan's error, not the house's.
+`profiles/maya/tone.md` reads as that speaker's error, not the house's.
 `E_DUPLICATE_ID` is evaluated per directory, not across the merge; an ID that
 appears in both is an override, not a duplicate.
 
@@ -551,18 +562,18 @@ or §9.4 re-derives a number.
 
 ### 9.2 The ASCII dashboard
 
-**Header.** Right-hand side becomes `Finshape | house | kb 0.3.0 | en` for the
-house and `Finshape | ahmed (speaker) | kb 0.3.0 | en` under `--profile`.
+**Header.** Right-hand side becomes `Acme | house | kb 0.3.0 | en,de` for the
+house and `Acme | maya (speaker) | kb 0.3.0 | en,de` under `--profile`.
 
 **New panel `speakers`**, house view only, tenth in the menu:
 
 ```
 +- SPEAKERS  4 declared ---------------------------------------------------+
 |   slug        name              voice  cells  over  lock  drift  drafts   |
-|   ahmed       Ahmed Khidhir       6      3      2     -    ok      1      |
-|   dan         Dan Toderici        6      1      0     -    n/a     0      |
-|   michal      Michal Kalousek     5      0      1     1!   FLAG    0      |
-|   miroslav    Miroslav Hlaváč     6      2      3     -    ok      2      |
+|   maya        Maya Lind           6      3      2     -    ok      1      |
+|   jonas       Jonas Berg          6      1      0     -    n/a     0      |
+|   helpdesk    Acme Support        5      0      1     1!   FLAG    0      |
+|   bramble     Acme Bramble        4      2      3     -    ok      2      |
 +--------------------------------------------------------------------------+
 ```
 
@@ -577,7 +588,7 @@ validation error and appears in `integrity` too.
 - `drift` - the speaker's fingerprint against the speaker's baseline.
 - `sources` - filtered to the speaker's register entries.
 - `evidence` - drafts filtered to the profile.
-- `settings` - `profile` line reads `ahmed  "Ahmed Khidhir"  speaker of Finshape`; a new `locks` line lists the declared IDs.
+- `settings` - `profile` line reads `maya  "Maya Lind"  speaker of Acme`; a new `locks` line lists the declared IDs.
 - `missing` - gaps for this speaker only.
 
 **`missing` in the house view** aggregates speaker gaps with a `[slug]`
@@ -616,8 +627,8 @@ speaker page keep stable, separate links across republishes.
 Changes to `html.mjs`, all reading §9.1:
 
 - **Hero.** House view: unchanged headline, plus a spec chip `speakers 4`.
-  Speaker view: `<h1>` is the brand, the eyebrow reads "speaking as Ahmed
-  Khidhir", and the headline uses the speaker's numbers.
+  Speaker view: `<h1>` is the brand, the eyebrow reads "speaking as Maya
+  Lind", and the headline uses the speaker's numbers.
 - **Attention.** Gap rows carry the `[slug]` prefix in the house view, and a
   speaker page shows only its own.
 - **New section "Speakers"**, house view only, after Pipeline: one row per
@@ -656,20 +667,26 @@ committed like the house card.
 
 ---
 
-## 11. Mapping the client's structure
+## 11. Mapping the inputs adopters bring
 
-| Client tab or field | Lands in |
+The material an adopter arrives with is rarely shaped like this knowledge
+base. These are the shapes seen so far and where each lands. The mapping is
+guidance for the discovery skill, not a schema: any input that states a rule
+about *how* something is written has a home here, and any input that states
+*what* to write about does not.
+
+| Input | Lands in |
 |---|---|
-| Company | the house |
-| FS Profile (corporate LinkedIn page) | the house `voice.md`, if the corporate page is the brand's own voice; otherwise a speaker `finshape-page`. Recommendation: the house. A faceless house with every voice in an overlay adds a directory for no gain. |
-| Ambassador → Personal Tone of Voice | `profiles/<slug>/voice.md` and the default dials line |
-| Language patterns to use / avoid | `profiles/<slug>/lexicon.md` |
-| Post Structure (photo, video, poll, carousel), Formatting Rules, Engagement Strategy | `profiles/<slug>/channels/linkedin.md`, over a house `channels/linkedin.md` |
-| Target Audiences | `profiles/<slug>/audience.md` |
-| Good / Bad Examples | `profiles/<slug>/examples/approved.md`, `rejected.md` |
-| British English, citation format | speaker `locales: [en-GB]` and a mechanics rule in the overlay |
-| The four rules all three documents share | house rules, listed in `locks` |
-| Content Pillars, Regions, Performance Summary | out of scope (§1.2) |
+| A company style guide, brand book, or tone-of-voice document | the house |
+| The brand's own public voice (a company page, the marketing site, an official account) | the house `voice.md`. Recommendation: the house is a speaker. A faceless house with every voice in an overlay adds a directory for no gain. |
+| A personal or team tone-of-voice document | `profiles/<slug>/voice.md` and the default dials line |
+| Phrases to use and to avoid, per speaker | `profiles/<slug>/lexicon.md` |
+| Post or message structure, formatting, and engagement rules for one channel | `profiles/<slug>/channels/<channel>.md`, over a house `channels/<channel>.md` |
+| Audiences a speaker addresses that the house does not | `profiles/<slug>/audience.md` |
+| Good and bad examples, per speaker | `profiles/<slug>/examples/approved.md`, `rejected.md` |
+| A spelling variant, citation style, or typographic habit specific to one speaker | a speaker locale pack, or a mechanics rule in the overlay |
+| Rules that recur across several speakers' documents | house rules, and candidates for `locks` |
+| Topics, pillars, calendars, markets, performance metrics | out of scope (§1.2) |
 
 ---
 
@@ -700,14 +717,14 @@ New or extended tests, one file each where the module is new:
 
 **A. Personas as tone variants in one knowledge base.** A `personas.md` of
 dial shifts and phrase lists, like the A2 and A3 audience shifts. Cheapest;
-touches no loader. Rejected because the client's differences are voice, not
-tone: a dial shift cannot express "we" versus "I", and a review finding could
+touches no loader. Rejected because the differences between speakers are
+voice, not tone: a dial shift cannot express "we" versus "I", and a review finding could
 not say whose rule it cites. Precedents: HubSpot's per-channel tone override,
 Grammarly's per-group tone profile.
 
 **B. Independent sibling knowledge bases.** Each speaker a full `profiles/`
 copy; `--profile` selects a directory; no precedence logic. Rejected because
-the four shared rules would be copied fifteen times and drift, `:learn` could
+every shared rule would be copied once per speaker and drift, `:learn` could
 not propagate a house correction, and there would be no way to ask whether a
 speaker's post is also on-brand for the house. Even the tools that use this
 model (Writer, Jasper, Acrolinx) share the style guide and terms by linking
@@ -724,7 +741,7 @@ rather than merging.
 
 ## 14. Open questions for review
 
-1. **Corporate page as the house, or as a speaker?** §11 recommends the house.
+1. **The brand's own public voice as the house, or as a speaker?** §11 recommends the house.
 2. **Locks in `config.yml`, or a marker in the rule files?** §3 chooses config
    for governance reasons. The cost is that a reader of `lexicon.md` cannot
    see a lock without opening config; the compiled card shows it, which is
@@ -732,7 +749,7 @@ rather than merging.
 3. **Speaker offset arithmetic (§4.3), or re-authored vectors?** Offset is
    chosen. It is the one place this spec adds arithmetic to the interpolator.
 4. **Speaker read-back in the critic (§7.6):** keep, or defer to a second
-   release? It is cheap and it is the test the client needs, so it is in.
+   release? It is cheap and it is the test a multi-speaker setup needs, so it is in.
 5. **`speaker remove` deleting the overlay** versus archiving it under
    `profiles/_retired/`. Deleting is proposed; the ledger keeps the evidence
    either way.
