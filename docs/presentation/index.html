@@ -117,11 +117,13 @@ blockquote {
 .framework-link.is-secondary { background: transparent; color: var(--ink); border-color: var(--edge); }
 .framework-link.is-secondary:hover { background: var(--grey); border-color: var(--ink-soft); }
 @media (max-width: 40rem) {
-  /* Logo, then both buttons on one (scrollable) line, then the nav band: 3 rows, not 4. */
+  /* Logo, then both buttons on one (scrollable) line, then the nav band: 3 rows, not 4.
+     Mobile leads with "View the source"; tablet/desktop keep the Mailchimp link first. */
   .topbar-actions {
     flex: 1 0 100%; flex-wrap: nowrap; justify-content: flex-start;
     overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
+  .framework-link.is-primary { order: -1; }
   .topbar-actions::-webkit-scrollbar { display: none; }
   .framework-link { flex: none; }
 }
