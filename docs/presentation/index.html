@@ -307,8 +307,10 @@ table.matrix tbody th { padding-right: .5rem; color: var(--ink-soft); }
   background: var(--ink); color: var(--paper); border-radius: 999px; padding: .18rem .6rem;
   vertical-align: middle; margin-left: .5rem; white-space: nowrap;
 }
-.sum { font-family: var(--mono); font-size: var(--step--1); font-variant-numeric: tabular-nums; background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r-md); padding: .9rem 1rem; }
-.sum-row { display: grid; grid-template-columns: 9.75rem repeat(6, 1fr); gap: .25rem; align-items: center; }
+/* Six dial columns plus a label wider than most phones - scrolls sideways
+   as one block instead of squeezing illegible or forcing the page wide. */
+.sum { font-family: var(--mono); font-size: var(--step--1); font-variant-numeric: tabular-nums; background: var(--paper); border: 1px solid var(--edge); border-radius: var(--r-md); padding: .9rem 1rem; overflow-x: auto; }
+.sum-row { display: grid; grid-template-columns: 9.75rem repeat(6, minmax(3.4rem, 1fr)); gap: .25rem; align-items: center; width: max-content; min-width: 100%; }
 .sum-row span { text-align: center; color: var(--ink-soft); }
 .sum-row span:first-child { text-align: left; color: var(--ink-faint); }
 .sum-row.total { border-top: 2px solid var(--rule-soft); padding-top: .4rem; margin-top: .25rem; }
