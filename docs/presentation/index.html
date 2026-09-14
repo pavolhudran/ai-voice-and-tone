@@ -8,7 +8,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Voice &amp; Tone">
 <meta property="og:title" content="The Provable Voice Guide">
-<meta property="og:description" content="An open source Claude Code plugin that turns a brand voice guide into something a machine can check. Every rule carries its evidence. Now with one house, many speakers.">
+<meta property="og:description" content="An open source Claude plugin that turns a brand voice guide into something a machine can check. Every rule carries its evidence. Now with one house, many speakers.">
 <meta property="og:url" content="https://ai-voice-and-tone-9125a0.gitlab.io/">
 <meta property="og:image" content="https://ai-voice-and-tone-9125a0.gitlab.io/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -16,7 +16,7 @@
 <meta property="og:image:alt" content="Voice and Tone: a brand voice guide your tooling can prove.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="The Provable Voice Guide">
-<meta name="twitter:description" content="An open source Claude Code plugin that turns a brand voice guide into something a machine can check. Now with one house, many speakers.">
+<meta name="twitter:description" content="An open source Claude plugin that turns a brand voice guide into something a machine can check. Now with one house, many speakers.">
 <meta name="twitter:image" content="https://ai-voice-and-tone-9125a0.gitlab.io/og-image.png">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -116,6 +116,15 @@ blockquote {
 .framework-link.is-primary:hover { background: var(--ink); color: var(--band); }
 .framework-link.is-secondary { background: transparent; color: var(--ink); border-color: var(--edge); }
 .framework-link.is-secondary:hover { background: var(--grey); border-color: var(--ink-soft); }
+@media (max-width: 40rem) {
+  /* Logo, then both buttons on one (scrollable) line, then the nav band: 3 rows, not 4. */
+  .topbar-actions {
+    flex: 1 0 100%; flex-wrap: nowrap; justify-content: flex-start;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .topbar-actions::-webkit-scrollbar { display: none; }
+  .framework-link { flex: none; }
+}
 
 .topbar-nav { background: var(--grey); }
 .navlinks {
@@ -439,9 +448,9 @@ footer p + p { margin-top: .7rem; }
 </div>
 
 <header class="wrap hero" id="top">
-  <p class="eyebrow">A Claude Code plugin, built on <a class="hero-src" href="https://styleguide.mailchimp.com/voice-and-tone/" target="_blank" rel="noopener noreferrer">Mailchimp&rsquo;s Voice &amp; Tone framework</a></p>
-  <h1>A brand voice guide your tooling can prove.</h1>
-  <p class="lede">Most style guides are opinions nobody can check. Here, every rule records where it came from and how sure it is.</p>
+  <p class="eyebrow">A Claude plugin, built on <a class="hero-src" href="https://styleguide.mailchimp.com/voice-and-tone/" target="_blank" rel="noopener noreferrer">Mailchimp&rsquo;s Voice &amp; Tone framework</a></p>
+  <h1>Built for marketing teams who write at scale.</h1>
+  <p class="lede">A brand voice guide your tooling can prove.</p>
   <div class="specs">
     <span class="spec"><b>11</b> commands</span>
     <span class="spec"><b>6</b> skills</span>

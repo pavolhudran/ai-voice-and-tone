@@ -1,6 +1,6 @@
 # Voice & Tone
 
-A Claude Code plugin that builds, maintains, and applies a brand's voice and tone
+A Claude plugin that builds, maintains, and applies a brand's voice and tone
 on any project - an application codebase, a marketing site, a documentation repo,
 or a bare folder of text with no code in it at all.
 
