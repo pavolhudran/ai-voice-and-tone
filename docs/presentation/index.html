@@ -258,7 +258,7 @@ blockquote {
 
 /* ---------- pipeline ---------- */
 .pipeline { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); }
-.step { background: var(--cream); border: 1px solid var(--edge-soft); border-radius: var(--r-md); padding: 1rem 1.1rem; }
+.step { background: var(--cream); border: 1px solid var(--edge-soft); border-radius: var(--r-md); padding: 1rem 1.1rem; min-width: 0; }
 .step .name { font-weight: 700; font-size: var(--step-0); color: var(--ink); display: block; }
 .step .what { font-size: var(--step--1); color: var(--ink-soft); line-height: 1.45; display: block; margin-top: .35rem; text-wrap: pretty; }
 /* The section's plates are cream like its neighbours'; the one card that
@@ -279,6 +279,10 @@ blockquote {
 /* ---------- matrix ---------- */
 .matrix-layout { display: grid; gap: 1.75rem; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
 @media (max-width: 62rem) { .matrix-layout { grid-template-columns: 1fr; } }
+/* Without this, the wide matrix table's intrinsic width bubbles up through
+   its unstyled wrapper div and forces the whole page wider than the
+   viewport - grid items default to min-width:auto (content-based). */
+.matrix-layout > * { min-width: 0; }
 .grid-scroll { overflow-x: auto; }
 table.matrix { border-collapse: separate; border-spacing: 3px; font-family: var(--mono); font-size: var(--step--1); }
 table.matrix th { font-weight: 400; color: var(--ink-faint); text-align: left; padding: .15rem .3rem; white-space: nowrap; }
@@ -367,7 +371,7 @@ table.list tr.list-label td {
 /* ---------- get started ---------- */
 .guide { display: flex; flex-direction: column; gap: .7rem; }
 .gstep {
-  display: grid; grid-template-columns: 2.4rem 1fr; gap: 1.1rem; align-items: start;
+  display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 1.1rem; align-items: start;
   background: var(--cream); border: 1px solid var(--edge-soft);
   border-radius: var(--r-md); padding: 1.05rem 1.25rem;
   width: 60%; margin-left: 0;
@@ -407,7 +411,10 @@ table.list tr.list-label td {
 .cmd {
   display: inline-block; font-family: var(--mono); font-size: .92rem;
   background: var(--paper); border: 1px solid var(--edge); border-radius: 7px;
-  padding: .32rem .7rem; margin-top: .65rem; color: var(--ink); white-space: nowrap;
+  /* Bottom-heavy padding leaves the horizontal scrollbar its own room under
+     the text when a long command overflows a narrow card - it only shows up
+     when the browser actually needs to draw one. */
+  padding: .32rem .7rem .78rem; margin-top: .65rem; color: var(--ink); white-space: nowrap;
   max-width: 100%; overflow-x: auto; vertical-align: middle;
 }
 .cmd + .cmd { margin-left: .4rem; }
