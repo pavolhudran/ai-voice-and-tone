@@ -1,8 +1,21 @@
 {
   "name": "voice-and-tone",
+  "displayName": "Voice & Tone",
   "version": "0.2.0",
   "description": "Build, maintain, and apply a brand's voice and tone on any project. Every rule carries its evidence and a confidence level, so the guide can be proved rather than recited. Built on Mailchimp's Voice and Tone framework.",
   "author": {
-    "name": "Pavol Hudran"
-  }
+    "name": "Pavol Hudran",
+    "url": "https://gitlab.com/pavol.hudran"
+  },
+  "homepage": "https://ai-voice-and-tone-9125a0.gitlab.io/",
+  "repository": "https://gitlab.com/pavol.hudran/ai-voice-and-tone",
+  "license": "MIT AND CC-BY-NC-4.0",
+  "keywords": [
+    "voice-and-tone",
+    "brand-voice",
+    "content-style-guide",
+    "copywriting",
+    "tone-of-voice",
+    "editorial"
+  ]
 }
