@@ -7,7 +7,7 @@ or a bare folder of text with no code in it at all.
 Built on Mailchimp's Voice and Tone framework: **voice is constant, tone flexes
 with the reader's emotional state.**
 
-**[Read the illustrated overview](https://ai-voice-and-tone-9125a0.gitlab.io/)** -
+**[Read the illustrated overview](https://pavolhudran.github.io/ai-voice-and-tone/)** -
 the same material for a non-technical audience, with the tone matrix and the
 corroboration rule as things you can click. This README is the developer's cut:
 file layout, the arithmetic, what is enforced by code, and how to run the tests.
@@ -37,7 +37,7 @@ are recorded in `evidence/conflicts.md` and neither is enforced until you decide
 ## Install
 
 ```
-/plugin marketplace add https://gitlab.com/pavol.hudran/ai-voice-and-tone
+/plugin marketplace add https://github.com/pavolhudran/ai-voice-and-tone
 /plugin install voice-and-tone@ai-voice-and-tone
 ```
 
