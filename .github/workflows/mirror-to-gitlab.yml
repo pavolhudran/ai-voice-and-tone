@@ -1,0 +1,23 @@
+name: mirror-to-gitlab
+
+# GitHub is the canonical repo; GitLab is kept alive as a mirror because
+# existing partner materials link to its Pages URL. This pushes every
+# update to main straight through, using a project access token scoped
+# to this one GitLab project (write_repository only, no group/account
+# access) stored as the GITLAB_MIRROR_TOKEN secret.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          git push "https://oauth2:${GITLAB_MIRROR_TOKEN}@gitlab.com/pavol.hudran/ai-voice-and-tone.git" HEAD:main
+        env:
+          GITLAB_MIRROR_TOKEN: ${{ secrets.GITLAB_MIRROR_TOKEN }}
